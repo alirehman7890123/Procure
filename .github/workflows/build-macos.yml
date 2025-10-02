@@ -17,7 +17,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      
       - name: Generate .icns from PNG
         run: |
           mkdir -p res/icon.iconset
@@ -33,42 +32,19 @@ jobs:
           sips -z 1024 1024 res/logo.png --out res/icon.iconset/icon_512x512@2x.png
           iconutil -c icns res/icon.iconset -o res/logo.icns
 
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller -r requirements.txt
 
+      - name: Build Universal .app
+        run: |
           pyinstaller --windowed --name ProcureApp \
             --target-arch=universal2 \
             --icon res/logo.icns \
             --add-data "styles/*.css:styles" \
             --add-data "res/*.png:res" \
             starting.py
-
-
-
-      - name: Build Apple Silicon (arm64)
-        run: |
-          pyinstaller --windowed --name ProcureApp-arm64 \
-            --target-arch arm64 \
-            --icon res/logo.icns \
-            --add-data "styles/*.css:styles" \
-            --add-data "res/*.png:res" \
-            starting.py
-
-      
-
-      - name: Create Universal Binary
-        run: |
-          mkdir -p dist/ProcureApp-universal.app/Contents/MacOS
-          lipo -create \
-            dist/ProcureApp-arm64.app/Contents/MacOS/ProcureApp-arm64 \
-            dist/ProcureApp-x86_64.app/Contents/MacOS/ProcureApp-x86_64 \
-            -output dist/ProcureApp-universal.app/Contents/MacOS/ProcureApp
-          # Copy remaining contents (Resources, Info.plist, etc) from arm64 build
-          cp -R dist/ProcureApp-arm64.app/Contents/Resources dist/ProcureApp-universal.app/Contents/
-          cp dist/ProcureApp-arm64.app/Contents/Info.plist dist/ProcureApp-universal.app/Contents/
 
       - name: Create DMG
         run: |
@@ -78,7 +54,7 @@ jobs:
             --window-pos 200 120 \
             --window-size 600 400 \
             --icon-size 100 \
-            --icon "dist/ProcureApp-universal.app" 200 190 \
+            --icon "dist/ProcureApp.app" 200 190 \
             --app-drop-link 400 190 \
             "dist/ProcureApp.dmg" \
             "dist/"
@@ -88,5 +64,5 @@ jobs:
         with:
           name: ProcureApp
           path: |
-            dist/ProcureApp-universal.app
+            dist/ProcureApp.app
             dist/ProcureApp.dmg
