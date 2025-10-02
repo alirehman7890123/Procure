@@ -12,12 +12,18 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      # --------------------------
+      # Setup Python
+      # --------------------------
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.12"
 
-      - name: Generate .icns from PNG
+      # --------------------------
+      # Generate .icns from PNG
+      # --------------------------
+      - name: Generate .icns from logo.png
         run: |
           mkdir -p res/icon.iconset
           sips -z 16 16     res/logo.png --out res/icon.iconset/icon_16x16.png
@@ -32,12 +38,18 @@ jobs:
           sips -z 1024 1024 res/logo.png --out res/icon.iconset/icon_512x512@2x.png
           iconutil -c icns res/icon.iconset -o res/logo.icns
 
-      - name: Install dependencies
+      # --------------------------
+      # Install dependencies
+      # --------------------------
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller -r requirements.txt
 
-      - name: Build Universal .app
+      # --------------------------
+      # Build Universal2 Binary
+      # --------------------------
+      - name: Build macOS Universal Binary (.app)
         run: |
           pyinstaller --windowed --name ProcureApp \
             --target-arch=universal2 \
@@ -46,6 +58,9 @@ jobs:
             --add-data "res/*.png:res" \
             starting.py
 
+      # --------------------------
+      # Create DMG
+      # --------------------------
       - name: Create DMG
         run: |
           brew install create-dmg
@@ -59,7 +74,9 @@ jobs:
             "dist/ProcureApp.dmg" \
             "dist/"
 
-
+      # --------------------------
+      # Upload Artifacts
+      # --------------------------
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
