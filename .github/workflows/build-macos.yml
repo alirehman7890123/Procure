@@ -3,7 +3,7 @@ name: Build macOS App
 on:
   workflow_dispatch:
   push:
-    branches: [ master ]   # change if your branch is "main" instead
+    branches: [ main ]   # change if your branch is "main" instead
 
 jobs:
   build:
@@ -27,7 +27,7 @@ jobs:
           pyinstaller --windowed --name ProcureApp \
             --add-data "styles/*.css:styles" \
             --add-data "res/*.png:res" \
-            procure.py
+            starting.py
 
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
