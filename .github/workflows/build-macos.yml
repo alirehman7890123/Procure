@@ -1,9 +1,9 @@
-name: Build macOS App
+name: Build macOS Universal App
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]   # change if your branch is "main" instead
+    branches: [ main ]
 
 jobs:
   build:
@@ -22,13 +22,35 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller -r requirements.txt
 
-      - name: Build macOS .app
+      # Build Apple Silicon (arm64)
+      - name: Build arm64 .app
         run: |
-          pyinstaller --windowed --name ProcureApp \
+          pyinstaller --windowed --name ProcureApp-arm64 \
+            --target-arch arm64 \
             --add-data "styles/*.css:styles" \
             --add-data "res/*.png:res" \
             starting.py
 
+      # Build Intel (x86_64)
+      - name: Build x86_64 .app
+        run: |
+          pyinstaller --windowed --name ProcureApp-x86_64 \
+            --target-arch x86_64 \
+            --add-data "styles/*.css:styles" \
+            --add-data "res/*.png:res" \
+            starting.py
+
+      # Merge both apps into a universal binary
+      - name: Create Universal Binary
+        run: |
+          mkdir -p dist/ProcureApp.app/Contents/MacOS
+          cp -R dist/ProcureApp-arm64.app/Contents/* dist/ProcureApp.app/Contents/
+          lipo -create \
+            dist/ProcureApp-arm64.app/Contents/MacOS/ProcureApp-arm64 \
+            dist/ProcureApp-x86_64.app/Contents/MacOS/ProcureApp-x86_64 \
+            -output dist/ProcureApp.app/Contents/MacOS/ProcureApp
+
+      # Create DMG installer
       - name: Create DMG
         run: |
           brew install create-dmg
@@ -37,12 +59,13 @@ jobs:
             --window-pos 200 120 \
             --window-size 600 400 \
             --icon-size 100 \
+            --icon "dist/ProcureApp.app" 200 190 \
             --app-drop-link 400 190 \
-            "dist/Procure.dmg" \
+            "dist/ProcureApp.dmg" \
             "dist/"
 
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v4
         with:
-          name: ProcureApp-dmg
-          path: dist/Procure.dmg
+          name: ProcureApp
+          path: dist/ProcureApp.dmg
