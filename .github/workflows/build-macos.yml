@@ -29,6 +29,19 @@ jobs:
             --add-data "res/*.png:res" \
             starting.py
 
+      - name: Create DMG
+        run: |
+          brew install create-dmg
+          create-dmg \
+            --volname "Procure Installer" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "dist/Procure.app" 200 190 \
+            --app-drop-link 400 190 \
+            "dist/Procure.dmg" \
+            "dist/"
+
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
         with:
