@@ -25,7 +25,7 @@ jobs:
 
       - name: Build macOS App Bundle
         run: |
-          pyinstaller --windowed procure.py \
+          pyinstaller --windowed starting.py \
             --add-data "styles/*.css:styles" \
             --add-data "res/*.png:res"
 
