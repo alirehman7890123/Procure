@@ -22,6 +22,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller -r requirements.txt
 
+          pyinstaller --windowed --name ProcureApp \
+            --target-arch=universal2 \
+            --icon res/logo.icns \
+            --add-data "styles/*.css:styles" \
+            --add-data "res/*.png:res" \
+            starting.py
+
       - name: Generate .icns from PNG
         run: |
           mkdir -p res/icon.iconset
@@ -46,19 +53,7 @@ jobs:
             --add-data "res/*.png:res" \
             starting.py
 
-      - name: Build Intel (x86_64) via Rosetta
-        run: |
-          arch -x86_64 /usr/bin/python3 -m venv venv_x86
-          source venv_x86/bin/activate
-          pip install --upgrade pip
-          pip install pyinstaller -r requirements.txt
-          pyinstaller --windowed --name ProcureApp-x86_64 \
-            --target-arch x86_64 \
-            --icon res/logo.icns \
-            --add-data "styles/*.css:styles" \
-            --add-data "res/*.png:res" \
-            starting.py
-          mv dist/ProcureApp-x86_64.app dist/ProcureApp-x86_64.app
+      
 
       - name: Create Universal Binary
         run: |
