@@ -8,61 +8,69 @@ on:
 jobs:
   build:
     runs-on: macos-latest
-    strategy:
-      matrix:
-        arch: [arm64, x64]  # ARM and Intel builds
 
     steps:
       - uses: actions/checkout@v3
 
-      # Setup Python for the right architecture
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
-          architecture: ${{ matrix.arch }}
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller -r requirements.txt
 
-      - name: Build .app with PyInstaller
+      - name: Generate .icns icon from logo.png
         run: |
-          pyinstaller --windowed --name ProcureApp-${{ matrix.arch }} \
+          mkdir AppIcon.iconset
+          sips -z 16 16     res/logo.png --out AppIcon.iconset/icon_16x16.png
+          sips -z 32 32     res/logo.png --out AppIcon.iconset/icon_16x16@2x.png
+          sips -z 32 32     res/logo.png --out AppIcon.iconset/icon_32x32.png
+          sips -z 64 64     res/logo.png --out AppIcon.iconset/icon_32x32@2x.png
+          sips -z 128 128   res/logo.png --out AppIcon.iconset/icon_128x128.png
+          sips -z 256 256   res/logo.png --out AppIcon.iconset/icon_128x128@2x.png
+          sips -z 256 256   res/logo.png --out AppIcon.iconset/icon_256x256.png
+          sips -z 512 512   res/logo.png --out AppIcon.iconset/icon_256x256@2x.png
+          sips -z 512 512   res/logo.png --out AppIcon.iconset/icon_512x512.png
+          cp res/logo.png AppIcon.iconset/icon_512x512@2x.png
+          iconutil -c icns AppIcon.iconset -o res/icon.icns
+
+      # Build Apple Silicon (arm64)
+      - name: Build arm64 .app
+        run: |
+          pyinstaller --windowed --name ProcureApp-arm64 \
             --icon res/logo.icns \
             --add-data "styles/*.css:styles" \
             --add-data "res/*.png:res" \
             starting.py
 
-      - name: Prepare for Universal Binary
-        if: ${{ matrix.arch == 'x64' }}
+      # Build Intel (x86_64) via Rosetta
+      - name: Build x86_64 .app
         run: |
-          # arm64 build already exists, move x64 build for lipo
-          mv dist/ProcureApp-x64.app dist/ProcureApp-x86_64.app
+          arch -x86_64 /usr/bin/python3 -m venv venv_x86
+          source venv_x86/bin/activate
+          pip install --upgrade pip
+          pip install pyinstaller -r requirements.txt
+          pyinstaller --windowed --name ProcureApp-x86_64 \
+            --icon res/logo.icns \
+            --add-data "styles/*.css:styles" \
+            --add-data "res/*.png:res" \
+            starting.py
+          mv dist/ProcureApp-x86_64.app dist/ProcureApp-x86_64.app
 
-  universal:
-    runs-on: macos-latest
-    needs: build
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Install lipo
-        run: brew install lipo
-
-      - name: Create Universal Binary
+      # Create Universal Binary
+      - name: Create Universal .app
         run: |
-          # Combine binaries
+          mkdir -p dist/ProcureApp.app/Contents/MacOS
           lipo -create \
-            dist/ProcureApp-arm64.app/Contents/MacOS/ProcureApp-arm64 \
-            dist/ProcureApp-x86_64.app/Contents/MacOS/ProcureApp-x86_64 \
+            dist/ProcureApp-arm64/Contents/MacOS/ProcureApp-arm64 \
+            dist/ProcureApp-x86_64/Contents/MacOS/ProcureApp-x86_64 \
             -output dist/ProcureApp.app/Contents/MacOS/ProcureApp
+          cp -R dist/ProcureApp-arm64/Contents/{Info.plist,Resources} dist/ProcureApp.app/Contents/
           
-          # Copy Resources and Info.plist from ARM build
-          cp -R dist/ProcureApp-arm64.app/Contents/Resources/* dist/ProcureApp.app/Contents/Resources/
-          cp dist/ProcureApp-arm64.app/Contents/Info.plist dist/ProcureApp.app/Contents/
-
+      # Create DMG
       - name: Create DMG
         run: |
           brew install create-dmg
@@ -76,8 +84,9 @@ jobs:
             "dist/ProcureApp.dmg" \
             "dist/"
 
-      - name: Upload DMG Artifact
+      # Upload DMG artifact
+      - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: ProcureApp-DMG
+          name: ProcureApp
           path: dist/ProcureApp.dmg
