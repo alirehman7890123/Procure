@@ -54,10 +54,11 @@ jobs:
             --window-pos 200 120 \
             --window-size 600 400 \
             --icon-size 100 \
-            --icon "dist/ProcureApp.app" 200 190 \
+            --icon "res/logo.icns" 200 190 \
             --app-drop-link 400 190 \
             "dist/ProcureApp.dmg" \
             "dist/"
+
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
