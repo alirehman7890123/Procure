@@ -1,0 +1,44 @@
+name: Build Debian 10 App
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      # --------------------------
+      # Set up Docker with Debian 10
+      # --------------------------
+      - name: Build in Debian 10 container
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/app -w /app debian:10 bash -c "
+            apt-get update &&
+            apt-get install -y python3.11 python3-pip python3.11-venv \
+                               python3-setuptools python3-wheel \
+                               build-essential libglib2.0-0 libx11-6 \
+                               libxext6 libsm6 libxrender1 libfontconfig1 \
+                               wget git &&
+            python3.11 -m pip install --upgrade pip &&
+            pip install pyinstaller -r requirements.txt &&
+            # build executable with icon
+            pyinstaller --onefile --name ProcureApp \
+              --icon res/logo.png \
+              --add-data 'styles/*.css:styles' \
+              --add-data 'res/*.png:res' \
+              starting.py
+          "
+
+      # --------------------------
+      # Upload Artifacts
+      # --------------------------
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProcureApp-Linux
+          path: dist/ProcureApp
