@@ -18,7 +18,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
       # --------------------------
       # Generate .icns from PNG
@@ -47,12 +47,12 @@ jobs:
           pip install pyinstaller -r requirements.txt
 
       # --------------------------
-      # Build Universal2 Binary
+      # Build x86_64 App
       # --------------------------
-      - name: Build macOS Universal Binary (.app)
+      - name: Build x86_64 App
         run: |
           pyinstaller --windowed --name ProcureApp \
-            --target-arch=universal2 \
+            --target-arch x86_64 \
             --icon res/logo.icns \
             --add-data "styles/*.css:styles" \
             --add-data "res/*.png:res" \
