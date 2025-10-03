@@ -44,7 +44,7 @@ jobs:
       # --------------------------
       - name: Build App
         run: |
-          pyinstaller --windowed --name ProcureApp \
+          python -m PyInstaller --windowed --name ProcureApp \
             --icon res/logo.png \
             --add-data "styles/*.css:styles" \
             --add-data "res/*.png:res" \
