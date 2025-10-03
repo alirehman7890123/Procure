@@ -72,7 +72,7 @@ jobs:
             --icon "res/logo.icns" 200 190 \
             --app-drop-link 400 190 \
             "dist/ProcureApp.dmg" \
-            "dist/"
+            "dist/ProcureApp.app"
 
       # --------------------------
       # Upload Artifacts
