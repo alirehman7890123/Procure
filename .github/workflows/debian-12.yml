@@ -20,7 +20,7 @@ jobs:
       - name: Install system dependencies
         run: |
           apt-get update
-          apt-get install -y python3.11 python3.11-venv python3-pip python3-dev build-essential libglib2.0-0 libgl1-mesa-glx libxkbcommon-x11-0 libdbus-1-3 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 libxcb-sync1 libxcb-xinerama0 libxcb-xinput0 libx11-xcb1 patchelf
+          apt-get install -y python3.11 python3.11-venv python3-pip python3-dev build-essential libglib2.0-0 libgl1-mesa-glx libxkbcommon-x11-0 libdbus-1-3 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 libxcb-sync1 libxcb-xinerama0 libxcb-xinput0 libx11-xcb1 patchelf libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxkbcommon-x11-0
 
       - name: Create and activate virtual environment
         run: |
