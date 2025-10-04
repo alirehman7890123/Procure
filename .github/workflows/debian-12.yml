@@ -31,7 +31,7 @@ jobs:
       - name: Install project dependencies
         run: |
           . venv/bin/activate
-          pip install -r requirements.txt
+          pip install -r requirements.txt PyInstaller
 
       - name: Build executable with PyInstaller
         run: |
