@@ -36,7 +36,7 @@ jobs:
       - name: Build executable with PyInstaller
         run: |
           . venv/bin/activate
-          pyinstaller --noconfirm --onefile --windowed --icon=icon.ico main.py
+          pyinstaller --noconfirm --onefile --windowed starting.py
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
