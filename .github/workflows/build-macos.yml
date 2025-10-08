@@ -1,0 +1,86 @@
+name: Build macOS App
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      # --------------------------
+      # Setup Python
+      # --------------------------
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      # --------------------------
+      # Generate .icns from PNG
+      # --------------------------
+      - name: Generate .icns from logo.png
+        run: |
+          mkdir -p res/icon.iconset
+          sips -z 16 16     res/logo.png --out res/icon.iconset/icon_16x16.png
+          sips -z 32 32     res/logo.png --out res/icon.iconset/icon_16x16@2x.png
+          sips -z 32 32     res/logo.png --out res/icon.iconset/icon_32x32.png
+          sips -z 64 64     res/logo.png --out res/icon.iconset/icon_32x32@2x.png
+          sips -z 128 128   res/logo.png --out res/icon.iconset/icon_128x128.png
+          sips -z 256 256   res/logo.png --out res/icon.iconset/icon_128x128@2x.png
+          sips -z 256 256   res/logo.png --out res/icon.iconset/icon_256x256.png
+          sips -z 512 512   res/logo.png --out res/icon.iconset/icon_256x256@2x.png
+          sips -z 512 512   res/logo.png --out res/icon.iconset/icon_512x512.png
+          sips -z 1024 1024 res/logo.png --out res/icon.iconset/icon_512x512@2x.png
+          iconutil -c icns res/icon.iconset -o res/logo.icns
+
+      # --------------------------
+      # Install dependencies
+      # --------------------------
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller -r requirements.txt
+
+      # --------------------------
+      # Build x86_64 App
+      # --------------------------
+      - name: Build x86_64 App
+        run: |
+          pyinstaller --windowed --name ProcureApp \
+            --target-arch x86_64 \
+            --icon res/logo.icns \
+            --add-data "styles/*.css:styles" \
+            --add-data "res/*.png:res" \
+            starting.py
+
+      # --------------------------
+      # Create DMG
+      # --------------------------
+      - name: Create DMG
+        run: |
+          brew install create-dmg
+          create-dmg \
+            --volname ProcureApp \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --app-drop-link 600 185 \
+            dist/ProcureApp.dmg \
+            dist/ProcureApp.app
+
+
+      # --------------------------
+      # Upload Artifacts
+      # --------------------------
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProcureApp
+          path: |
+            dist/ProcureApp.app
+            dist/ProcureApp.dmg

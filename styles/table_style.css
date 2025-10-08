@@ -1,0 +1,56 @@
+QTableWidget {
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    gridline-color: #eee;
+    font-size: 14px;
+    font-family: 'Segoe UI', 'Montserrat';
+    background-color: #fafafa;
+    alternate-background-color: #fdfdfd;
+}
+
+QHeaderView::section {
+    background-color: #47034E;
+    font-family: 'montserrat', 'roboto', 'arial';
+    color: #fff;
+    font-weight: 700;
+    padding: 8px 10px;
+    border: none;
+    border-bottom: 2px solid #ddd;
+}
+
+QTableWidget, QLabel {
+    margin: 0px;
+    padding: 3px;
+}
+
+QTableWidget, QLineEdit {
+    margin: 0px;
+    padding: 3px;
+}
+
+
+QTableWidget::item {
+    padding: 2px 3px;
+    color: #333;
+}
+
+QTableWidget::item:selected {
+    background-color: #ffd7c2;
+}
+
+
+QScrollBar:vertical {
+    border: none;
+    background: #f0f0f0;
+    width: 8px;
+    margin: 0px 0px 0px 0px;
+    border-radius: 4px;
+}
+QScrollBar::handle:vertical {
+    background: #c0c0c0;
+    min-height: 20px;
+    border-radius: 4px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #a0a0a0;
+}
