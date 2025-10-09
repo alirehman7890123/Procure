@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QApplication, QWidget, QCompleter, QDateEdit, QVBoxLayout, QHBoxLayout, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
-from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, Signal
+from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, Signal, QTimer
 
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtGui import QPalette, QColor, QKeyEvent, QKeySequence
@@ -32,6 +32,8 @@ class CreateSalesWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        
+        
         
         
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -1245,7 +1247,88 @@ class CreateSalesWidget(QWidget):
             QMessageBox.information(None, "Success", "Sales Record saved successfully")
         
         
+    def get_product_via_code(self, code):
         
+        # --- Step 1: Validate input ---
+        if not str(code).isdigit():
+            print("Invalid or empty code.")
+            return None
+
+        code = int(code)
+        print(f"Getting product via code: {code}")
+
+        # --- Step 2: Query product info ---
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT id, name, form, strength 
+            FROM product 
+            WHERE code = ? 
+            LIMIT 1
+        """)
+        query.addBindValue(code)
+
+        if not query.exec():
+            print("Product query failed:", query.lastError().text())
+            return None
+
+
+        if not query.next():
+            print("No product found with code:", code)
+            return None
+
+        # --- Step 3: Extract product details ---
+        product_id = int(query.value(0))
+        name = query.value(1)
+        form = query.value(2) or ""
+        strength = query.value(3) or ""
+        label = f"{name} {strength} {form}".strip()
+
+        print(f"Product found: {label} (ID: {product_id})")
+
+        row = self.table.currentRow()
+        combo = self.table.cellWidget(row, 1)
+        if not combo:
+            print("Combo not found at row:", row)
+            return None
+
+        # --- Step 4: Query stock info ---
+        stock_query = QSqlQuery()
+        stock_query.prepare("""
+            SELECT packsize, units, saleprice 
+            FROM stock 
+            WHERE product = ? 
+            LIMIT 1
+        """)
+        stock_query.addBindValue(product_id)
+
+        if not stock_query.exec():
+            print("Stock query failed:", stock_query.lastError().text())
+            return None
+
+        if not stock_query.next():
+            print("Stock record missing for product:", product_id)
+            QMessageBox.warning(self, "Stock Error", f"No stock found for {label}")
+            return None
+
+        # --- Step 5: Extract and fill stock data ---
+        packsize = int(stock_query.value(0))
+        units = int(stock_query.value(1))
+        saleprice = float(stock_query.value(2))
+        unit_sale_price = saleprice / packsize if packsize > 0 else 0.0
+
+        print(f"Stock info: packsize={packsize}, units={units}, saleprice={saleprice}")
+
+        self.table.cellWidget(row, 2).setText(str(units))
+        self.table.cellWidget(row, 4).setText(f"{unit_sale_price:.2f}")
+        
+        
+
+        return product_id, label
+
+    
+    
+    
+    
         
     def load_product_suggestions(self, item, completer):
         
@@ -1257,21 +1340,25 @@ class CreateSalesWidget(QWidget):
         
         if current_text == '':
             return 
-        
-        
+
+
+        if current_text and current_text.isdigit():
+            print("Final barcode detected:", current_text)
+            result = self.get_product_via_code(current_text)
+            
+            if result:
+                product_id, label = result
+                item.clear()
+                item.addItem(label, product_id)
+                
+                print("Setting Current Text")
+                item.lineEdit().setText(label)
+            
+            return  # Exit after handling barcode input
+
+
         
         query = QSqlQuery()
-        
-        if current_text.isdigit():
-            query.prepare("""
-                SELECT id, name, form, strength 
-                FROM product 
-                WHERE code = ? 
-                LIMIT 1
-            """)
-            query.addBindValue(current_text)
-        
-        
         query.prepare("SELECT id, name, form, strength FROM product WHERE name LIKE ? LIMIT 10")
         print("Current Text is: ", current_text)
         query.addBindValue(f"%{current_text}%")
@@ -1296,6 +1383,9 @@ class CreateSalesWidget(QWidget):
                 print("Label is: ", label)
                 products.append(label)
                 item.addItem(label, product_id)
+                
+                
+                
         
         print("Pringint Brought up products")        
         print(products)

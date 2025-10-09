@@ -141,7 +141,7 @@ class MainWindow(QMainWindow):
         header_layout.setContentsMargins(20,10,20,10)
 
         self.header_widget.setLayout(header_layout)
-        self.header_widget.setStyleSheet("""background-color: #47034E; color: #fff; border-bottom: 3px solid #333;""")
+        self.header_widget.setStyleSheet("""color: #333; border-bottom: 3px solid #333;""")
         
         
         ham = QPushButton()
