@@ -179,13 +179,17 @@ class ProductListWidget(QWidget):
                 
                 level = ""
                 
-                if units > reorder:
-                    level = 'normal'
-                else:
-                    level = 'low'
+                
                 if packsize != 0:
                     
                     packs = units // packsize
+                    
+                    if packs > reorder:
+                        level = 'normal'
+                    else:
+                        level = 'low'
+                    
+                    
                     rems = units % packsize
 
                     if packs > 0 and rems > 0:

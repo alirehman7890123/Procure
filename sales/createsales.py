@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QApplication, QWidget, QCompleter, QDateEdit, QVBoxLayout, QHBoxLayout, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
-from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, Signal, QTimer
+from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, Signal, QTimer, QObject
 
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtGui import QPalette, QColor, QKeyEvent, QKeySequence
@@ -33,7 +33,10 @@ class CreateSalesWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         
-        
+        self.scan_timer = QTimer(self)
+        self.scan_timer.setSingleShot(True)
+        self._pending_scan = None
+        self.scan_timer.timeout.connect(lambda: self._run_pending_scan())
         
         
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -390,7 +393,7 @@ class CreateSalesWidget(QWidget):
 
         item = QComboBox()
         item.wheelEvent = lambda event: event.ignore()
-
+        
         item.setPlaceholderText("select product")
         item.setEditable(True)
         self.table.setCellWidget(row, 1, item)
@@ -1274,6 +1277,13 @@ class CreateSalesWidget(QWidget):
 
         if not query.next():
             print("No product found with code:", code)
+            row = self.table.currentRow()
+            combo = self.table.cellWidget(row, 1)
+            print("Clearing the combo box...")
+            combo.clear()
+            
+            combo.lineEdit().setText('')
+            combo
             return None
 
         # --- Step 3: Extract product details ---
@@ -1327,6 +1337,34 @@ class CreateSalesWidget(QWidget):
 
     
     
+    def _run_pending_scan(self):
+        
+        if not self._pending_scan:
+            return
+        
+        code, combo = self._pending_scan
+        self._pending_scan = None
+
+        # call your lookup (make sure it returns (product_id, label) on success)
+        res = self.get_product_via_code(code)
+        
+        if not res:
+            
+            return
+
+        product_id, label = res
+        
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(label, product_id)
+        combo.setCurrentIndex(0)
+        
+        if combo.isEditable():
+            combo.lineEdit().setText(label)
+            
+        combo.blockSignals(False)
+
+
     
     
         
@@ -1342,21 +1380,15 @@ class CreateSalesWidget(QWidget):
             return 
 
 
+            
         if current_text and current_text.isdigit():
-            print("Final barcode detected:", current_text)
-            result = self.get_product_via_code(current_text)
             
-            if result:
-                product_id, label = result
-                item.clear()
-                item.addItem(label, product_id)
-                
-                print("Setting Current Text")
-                item.lineEdit().setText(label)
+            self._pending_scan = (current_text, item)
+            self.scan_timer.start(150) # wait 150 ms before running the scan
             
-            return  # Exit after handling barcode input
-
-
+            return
+            
+            
         
         query = QSqlQuery()
         query.prepare("SELECT id, name, form, strength FROM product WHERE name LIKE ? LIMIT 10")
@@ -2077,4 +2109,6 @@ class MyTable(QTableWidget):
             self.focusNextChild()
         else:
             super().keyPressEvent(event)
-
+            
+    
+   

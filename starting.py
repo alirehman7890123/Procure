@@ -654,7 +654,7 @@ class AuthWindow(QMainWindow):
             CREATE TABLE IF NOT EXISTS product (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
-                code TEXT UNIQUE,
+                code TEXT UNIQUE NULL,
                 category TEXT,
                 brand TEXT,
                 formula TEXT,

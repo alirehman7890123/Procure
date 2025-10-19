@@ -396,6 +396,9 @@ class AddProductWidget(QWidget):
         # --- Get form values ---
         product = product.currentText()
         code = code.text()
+        if code == '':
+            code = None
+            
         category = category.currentText()
         brand = brand.text()
         formula = formula.text()
@@ -673,7 +676,6 @@ _SYNONYMS = {
     "purchaseitem": ["purchaseitem", "purchase item"],
     "batch": ["batch", "batchno", "batch no", "batch number"],
     "expiry": ["expiry", "expiry date", "expiration", "exp"],
-    "status": ["status", "state"]
 }
 
 def _build_header_map(table):
@@ -781,10 +783,10 @@ class ImportDialog(QDialog):
         # fallback positional orders
         # order_with_category (15 cols)
         order_with_cat = ["name","code","category","formula","brand","form","strength",
-                          "packsize","units","reorder","saleprice","purchaseitem","batch","expiry","status"]
+                          "packsize","units","reorder","saleprice","purchaseitem","batch","expiry"]
         # order_without_category (14 cols, category missing)
         order_no_cat = ["name","code","formula","brand","form","strength",
-                        "packsize","units","reorder","saleprice","purchaseitem","batch","expiry","status"]
+                        "packsize","units","reorder","saleprice","purchaseitem","batch","expiry"]
 
         col_count = self.table.columnCount()
         if not hdr_map:
@@ -807,7 +809,7 @@ class ImportDialog(QDialog):
         for r in range(self.table.rowCount()):
             rd = {}
             for fld in ["name","code","category","formula","brand","form","strength",
-                        "packsize","units","reorder","saleprice","purchaseitem","batch","expiry","status"]:
+                        "packsize","units","reorder","saleprice","purchaseitem","batch","expiry"]:
                 if fld in hdr_map:
                     col = hdr_map[fld]
                     item = self.table.item(r, col)
@@ -869,7 +871,6 @@ class ImportDialog(QDialog):
             purchaseitem = to_int_or_none(r.get("purchaseitem"))
             batch_val = r.get("batch") or None
             expiry_iso = _parse_date_iso(r.get("expiry") or "")
-            status_val = r.get("status") or "active"
 
             # 3.a Insert or get product id (ON CONFLICT by code; requires unique constraint on product.code)
             # Use RETURNING id for Postgres; if DB doesn't return it, fallback to SELECT.
@@ -894,7 +895,6 @@ class ImportDialog(QDialog):
             q.bindValue(":formula", formula)
             q.bindValue(":form", form)
             q.bindValue(":strength", strength)
-            q.bindValue(":status", status_val)
 
             if not q.exec():
                 errors.append(f"Product insert failed (code={code}): {q.lastError().text()}")
@@ -942,14 +942,13 @@ class ImportDialog(QDialog):
             if batch_val:
                 q3 = QSqlQuery()
                 q3.prepare("""
-                    INSERT INTO batch (purchaseitem, product, batch, expiry, status)
-                    VALUES (:purchaseitem, :product, :batch, :expiry, :status)
+                    INSERT INTO batch (purchaseitem, product, batch, expiry)
+                    VALUES (:purchaseitem, :product, :batch, :expiry)
                 """)
                 q3.bindValue(":purchaseitem", purchaseitem or None)
                 q3.bindValue(":product", product_id)
                 q3.bindValue(":batch", batch_val)
                 q3.bindValue(":expiry", expiry_iso or None)
-                q3.bindValue(":status", 'valid')
 
                 if not q3.exec():
                     errors.append(f"Batch insert failed for code={code}, batch={batch_val}: {q3.lastError().text()}")

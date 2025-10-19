@@ -635,7 +635,7 @@ class CustomerDetailWidget(QWidget):
                 receiveable_after = str(query.value(8))
                 transaction_id = int(query.value(9))
 
-                creation_date = creation_date.toString("yyyy-MM-dd HH:mm:ss")
+                # creation_date = creation_date.toString("yyyy-MM-dd HH:mm:ss")
 
                 # # Get Supplier
                 # # Get Supplier name from database
