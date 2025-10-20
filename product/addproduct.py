@@ -157,6 +157,7 @@ class AddProductWidget(QWidget):
                 df = pd.read_excel(file_name)
 
             # Show popup with contents
+            df = df.fillna("")
             dialog = ImportDialog(df, self)
             dialog.exec()
 
@@ -670,8 +671,10 @@ _SYNONYMS = {
     "form": ["form", "dosage form"],
     "strength": ["strength", "dose"],
     "packsize": ["packsize", "pack size", "pack"],
+    "packs": ["packs", "pack"],
     "units": ["units", "unit", "quantity"],
     "reorder": ["reorder", "reorder level", "reorderlevel"],
+    "costprice": ["costprice", "cost"],
     "saleprice": ["saleprice", "price", "mrp", "sale price"],
     "purchaseitem": ["purchaseitem", "purchase item"],
     "batch": ["batch", "batchno", "batch no", "batch number"],
@@ -783,21 +786,15 @@ class ImportDialog(QDialog):
         # fallback positional orders
         # order_with_category (15 cols)
         order_with_cat = ["name","code","category","formula","brand","form","strength",
-                          "packsize","units","reorder","saleprice","purchaseitem","batch","expiry"]
-        # order_without_category (14 cols, category missing)
-        order_no_cat = ["name","code","formula","brand","form","strength",
-                        "packsize","units","reorder","saleprice","purchaseitem","batch","expiry"]
-
+                          "packsize","packs","units","reorder","costprice","saleprice","purchaseitem","batch","expiry"]
+        
         col_count = self.table.columnCount()
         if not hdr_map:
             # no useful headers found; choose positional mapping if col count matches
             if col_count == len(order_with_cat):
                 for i, fld in enumerate(order_with_cat):
                     hdr_map.setdefault(fld, i)
-            elif col_count == len(order_no_cat):
-                for i, fld in enumerate(order_no_cat):
-                    hdr_map.setdefault(fld, i)
-                # leave category absent => will be treated as None
+            
             else:
                 # best-effort: map available columns by index to order_no_cat (trim or pad)
                 for i in range(col_count):
@@ -809,7 +806,7 @@ class ImportDialog(QDialog):
         for r in range(self.table.rowCount()):
             rd = {}
             for fld in ["name","code","category","formula","brand","form","strength",
-                        "packsize","units","reorder","saleprice","purchaseitem","batch","expiry"]:
+                        "packsize","packs","units","reorder","costprice", "saleprice","purchaseitem","batch","expiry"]:
                 if fld in hdr_map:
                     col = hdr_map[fld]
                     item = self.table.item(r, col)
@@ -864,13 +861,25 @@ class ImportDialog(QDialog):
                 
 
             packsize = to_int(r.get("packsize") or 0)
+            packs = to_int(r.get("packs") or 0)
             units = to_int(r.get("units") or 0)
+            
+            if packsize is None:
+                packsize = 0
+            if packs is None:
+                packs = 0
+            if units is None:
+                units = 0
+            
+            units = (packsize * packs) + units
             reorder = to_int(r.get("reorder") or 0)
+            costprice = to_float(r.get("costprice") or 0.0)
             saleprice = to_float(r.get("saleprice") or 0.0)
 
             purchaseitem = to_int_or_none(r.get("purchaseitem"))
             batch_val = r.get("batch") or None
-            expiry_iso = _parse_date_iso(r.get("expiry") or "")
+            expiry_iso = r.get("expiry") or ""
+            # expiry_iso = _parse_date_iso(r.get("expiry") or "")
 
             # 3.a Insert or get product id (ON CONFLICT by code; requires unique constraint on product.code)
             # Use RETURNING id for Postgres; if DB doesn't return it, fallback to SELECT.
@@ -901,18 +910,21 @@ class ImportDialog(QDialog):
                 # try to continue to next row
                 continue
             
-            
-            
-            sel = QSqlQuery()
-            sel.prepare("SELECT id FROM product WHERE code = :code LIMIT 1")
-            sel.bindValue(":code", code)
-            
-            
-            if sel.exec() and sel.next():
-                product_id = sel.value(0)
             else:
-                errors.append(f"Could not determine product id for code={code}")
-                continue
+                
+                print("Product inserted/exists for code=", code)
+                product_id = q.lastInsertId()
+            
+            # sel = QSqlQuery()
+            # sel.prepare("SELECT id FROM product WHERE code = :code LIMIT 1")
+            # sel.bindValue(":code", code)
+            
+            
+            # if sel.exec() and sel.next():
+            #     product_id = sel.value(0)
+            # else:
+            #     errors.append(f"Could not determine product id for code={code}")
+            #     continue
 
 
             # 3.b Insert stock
@@ -928,6 +940,7 @@ class ImportDialog(QDialog):
                 INSERT INTO stock (product, packsize, units, reorder, saleprice)
                 VALUES (:product, :packsize, :units, :reorder, :saleprice)
             """)
+            
             q2.bindValue(":product", product_id)
             q2.bindValue(":packsize", packsize if packsize is not None else 0)
             q2.bindValue(":units", units if units is not None else 0)
@@ -937,6 +950,27 @@ class ImportDialog(QDialog):
 
             if not q2.exec():
                 errors.append(f"Stock insert failed for code={code}: {q2.lastError().text()}")
+
+
+
+            print("Total Cost is: ", costprice)
+            # --- Insert into stockcost ---
+            stockcost_query = QSqlQuery()
+            stockcost_query.prepare("""
+                INSERT INTO stockcost (product, qty, totalcost, stocktype)
+                VALUES (?, ?, ?, ?)
+            """)
+            
+            # units = int(packsize) * int(packs)
+            # units = str(units)
+            stockcost_query.addBindValue(product_id)
+            stockcost_query.addBindValue(units)   
+            stockcost_query.addBindValue(costprice)
+            stockcost_query.addBindValue('onhand')
+
+            if not stockcost_query.exec():
+                errors.append(f"Batch insert failed for code={code} {stockcost_query.lastError().text()}")
+                
 
             # 3.c Insert batch (if batch provided)
             if batch_val:
