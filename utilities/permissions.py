@@ -73,7 +73,7 @@ class Permissions:
                     "sales.delete": {"admin"},
 
                     # Sales Returns
-                    "salesreturn.view": {"admin", "manager"},
+                    "salesreturn.view": {"admin", "manager", "regular"},
                     "salesreturn.create": {"admin", "manager", "regular"},
                     "salesreturn.update": {"admin", "manager"},
                     "salesreturn.delete": {"admin"},

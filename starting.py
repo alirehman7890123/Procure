@@ -770,6 +770,8 @@ class AuthWindow(QMainWindow):
                 qty INTEGER NOT NULL,
                 totalcost DECIMAL(10,2) NOT NULL,
                 stocktype TEXT(50),
+                stock_adjusted BOOLEAN DEFAULT FALSE,
+                cost_adjusted BOOLEAN DEFAULT FALSE,
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (product) REFERENCES product(id) ON DELETE RESTRICT
             );

@@ -13,15 +13,16 @@ class BaseReportsWidget(BasePage):
 
         self.stacked_layout = QStackedLayout()
 
-        # Add expense Widget
         self.main_reports_page = MainReportsPage()
         self.stacked_layout.addWidget(self.main_reports_page)
+        
+        
         self.setLayout(self.stacked_layout)
 
 
-    
-    
-    
-    
-    
+    @Permissions.require_permission('reports.view')
+    def set_reports_widget(self):
+        print("Setting reports widget")
+        self.stacked_layout.setCurrentWidget(self.main_reports_page)
+
     

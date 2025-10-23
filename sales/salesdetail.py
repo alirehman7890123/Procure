@@ -2,6 +2,12 @@ from PySide6.QtWidgets import QWidget, QSizePolicy, QPushButton, QLabel, QHBoxLa
 from PySide6.QtCore import QFile, Qt, QDate, QDateTime
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 
+import os
+import sys
+import platform
+from PySide6.QtGui import QPdfWriter, QPainter, QPageSize, QFont, QTextOption, QPen, QColor
+from PySide6.QtCore import Qt, QRectF
+
 from utilities.stylus import load_stylesheets
 
 
@@ -138,7 +144,12 @@ class SalesDetailWidget(QWidget):
 
             self.layout.addLayout(row)
             
+            
         
+        print_button = QPushButton("Print Invoice", objectName="TopRightButton")
+        print_button.clicked.connect(lambda: self.export_pdf('salesinvoice.pdf'))
+            
+        self.layout.addWidget(print_button)
             
         self.layout.addStretch()
             
@@ -234,6 +245,8 @@ class SalesDetailWidget(QWidget):
 
 
     def load_items_into_table(self, sale_id):
+        
+        self.invoice_id = sale_id
         print("Loading items into table")
 
         query = QSqlQuery()
@@ -288,6 +301,336 @@ class SalesDetailWidget(QWidget):
                 row += 1
         else:
             print("Query failed:", query.lastError().text())
+            
+        
+        
+        
+
+
+
+    
+    def export_pdf(self, filename="salesinvoice.pdf"):
+        
+        
+        sales_id = self.invoice_id
+        print("Exporting PDF")
+        
+        print("Sales id is: ", sales_id)
+        
+        # Loading Sales data 
+        
+        salesquery = QSqlQuery()
+        salesquery.prepare("SELECT customer,salesman,creation_date,subtotal,discamount,taxamount,totalaftertax,roundoff,total FROM sales WHERE id = ?")
+        salesquery.addBindValue(sales_id)
+        
+        if salesquery.exec() and salesquery.next():
+            
+            customerid = salesquery.value(0)
+            
+            print("Customer is ...... ", customerid)
+            
+            if customerid is None or customerid == '':
+                customerid = 0
+            
+            if customerid != 0:
+                
+                customerid = int(customerid)
+                customerquery = QSqlQuery()
+                customerquery.prepare("SELECT name FROM customer WHERE id = ?")
+                customerquery.addBindValue(customerid)
+                
+                if customerquery.exec() and customerquery.next():
+                    customer = customerquery.value(0)
+                else:
+                    print("Customer not found for ID:", customerid)
+                
+            else:
+                customer = 'Walk-in Customer'
+                
+            
+            salesmanid = int(salesquery.value(1))
+            invoicedate = salesquery.value(2)
+
+            subtotal = float(salesquery.value(3))
+            salesdiscount = float(salesquery.value(4))
+            salestax = float(salesquery.value(5))
+            totalaftertax = float(salesquery.value(6))
+            roundoff = float(salesquery.value(7))
+            finaltotal = float(salesquery.value(8))
+
+
+            if isinstance(invoicedate, QDate):  # or QDateTime
+                invoicedate = invoicedate.toString("dd-MM-yyyy")  # or "yyyy-MM-dd"
+            else:
+                invoicedate = str(invoicedate)
+                
+            print("Invoice Date is: ", invoicedate)
+            salesmanquery = QSqlQuery()
+            salesmanquery.prepare("SELECT firstname, lastname FROM auth WHERE id = ?")
+            salesmanquery.addBindValue(salesmanid)
+
+            if salesmanquery.exec() and salesmanquery.next():
+                firstname = salesmanquery.value(0)
+                lastname = salesmanquery.value(1)
+                
+                salesman = f"{firstname} {lastname}"
+            else:
+                print("Salesman not found for ID:", salesmanid)
+                
+        else:
+            print("Sales Error..., ", salesquery.lastError().text())
+        
+        # Loading Sales Items data
+        
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT product, qty, unitrate, discount, discountamount, total
+            FROM salesitem 
+            WHERE sales = ?
+        """)
+        query.addBindValue(sales_id)
+        
+        items = []
+        
+        if query.exec():
+            
+            print("Query has been executed successfully")
+            
+            while query.next():
+                
+                product_id = int(query.value(0))
+                qty = query.value(1)
+                rate = query.value(2)
+                discount = query.value(3)
+                discount_amount = query.value(4)
+                price = rate - discount_amount
+                total = query.value(5)
+                
+                print("Rate is: ", rate)
+                print("Discount is; ", discount)
+                print("Discount Amount is: ", discount_amount)
+                print("Price is: ", price)
+                
+                
+
+                # Get product name
+                product_name = ""
+                query2 = QSqlQuery()
+                query2.prepare("SELECT name, strength, form FROM product WHERE id = ?")
+                query2.addBindValue(product_id)
+
+                if query2.exec() and query2.next():
+                    product_name = query2.value(0)
+                    strength = query2.value(1)
+                    form = query2.value(2)
+                    if strength:
+                        product_name += f" {strength}"
+                    if form:
+                        product_name += f" {form}"
+                else:
+                    print("Product not found for ID:", product_id)
+                    
+                items.append((product_name, qty, rate, discount, price, total))
+                print(items)
+
+
+
+        else:
+            print("Query failed:", query.lastError().text())
+
+        
+    
+        pdf = QPdfWriter(filename)
+        pdf.setPageSize(QPageSize(QPageSize.A4))
+        pdf.setResolution(300)
+
+        
+
+        painter = QPainter(pdf)
+        painter.setFont(QFont("Arial", 12))
+        painter.setPen(Qt.black)
+        
+        
+        
+        x = 100
+        y = 200
+
+        business_font = QFont("Arial", 16, QFont.Bold)
+        painter.setFont(business_font)
+
+        business_name = "Muzammil Medical & General Store"
+        painter.drawText(x, y, business_name)
+
+        y += 80
+        
+        address_font = QFont("Arial", 12)
+        painter.setFont(address_font)
+        
+        address = "123 Health St, Wellness City"
+        painter.drawText(x, y, address)
+        
+        y += 70
+        contact = "Phone: (123) 456-7890"
+        painter.drawText(x, y, contact)
+        
+        
+        invoice_font = QFont("Arial", 36, QFont.Bold)
+        painter.setFont(invoice_font)
+
+        invoice_title = "Invoice"
+        painter.drawText(1700, 230, invoice_title)
+        
+        invoice_no_font = QFont("Arial", 12)
+        painter.setFont(invoice_no_font)
+        
+        rect = QRectF(1700, 250, 500, 100)
+        
+        option = QTextOption()
+        option.setAlignment(Qt.AlignRight)
+
+        painter.drawText(rect, f"# {sales_id}", option)
+        
+        
+        invoice_date_font = QFont("Arial", 12)
+        painter.setFont(invoice_date_font)
+
+        rect = QRectF(1700, 320, 500, 100)
+        
+        option = QTextOption()
+        option.setAlignment(Qt.AlignRight)
+
+        painter.drawText(rect, invoicedate, option)
+
+        y += 150
+        
+        customer_font = QFont("Arial", 12, QFont.Bold)
+        painter.setFont(customer_font)
+        painter.drawText(x, y, f"To: {customer}")
+        
+        y += 80
+        
+        pen = QPen(QColor("black"))
+        pen.setWidth(5)  # line thickness
+        painter.setPen(pen)
+        painter.drawLine(x, y, pdf.width() - 200, y)
+        
+        y += 70
+        header_font = QFont("Arial", 11, QFont.Bold)
+        painter.setFont(header_font)
+
+        item_name = "Item"
+        painter.drawText(x + 20, y, item_name)
+        
+        item_name = "qty"
+        painter.drawText(x + 900, y, item_name)
+        
+        item_name = "rate"
+        painter.drawText(x + 1100, y, item_name)
+        
+        item_name = "discount"
+        painter.drawText(x + 1400, y, item_name)
+        
+        item_name = "Price"
+        painter.drawText(x + 1650, y, item_name)
+        
+        item_name = "Total"
+        painter.drawText(x + 1900, y, item_name)
+
+        
+        y += 40
+        
+        pen = QPen(QColor("black"))
+        pen.setWidth(5)  # line thickness
+        painter.setPen(pen)
+        painter.drawLine(x, y, pdf.width() - 200, y)
+
+        y += 100
+        
+        items_font = QFont("Arial", 11)
+        painter.setFont(items_font)
+        
+        # Sample items
+        # items = [
+        #         ("Panadol tab 250mg", 2, 10.00, "2%", 9.80, 18.16), 
+        #         ("Amoxil Cap 500mg", 1, 20.00, "0%", 20.00, 20.00), 
+        #         ("Floxacin Drops 10ml", 5, 5.00, "5%", 4.75, 23.75),
+        #         ("Clementrin Syrup 160ml", 3, 15.00, "10%", 13.50, 40.50),
+        #         ("Tibe Cream 75gm", 4, 12.00, "5%", 11.40, 45.60)
+        #     ]
+        
+        print("Drawing Items into Table")
+        
+        for item, qty, rate, discount, net_price, item_total in items:
+
+            painter.drawText(x + 20, y, item)
+            painter.drawText(x + 900, y, str(qty))
+            painter.drawText(x + 1100, y, f"{rate:.2f}")
+            painter.drawText(x + 1400, y, f"{discount:.1f} %")
+            painter.drawText(x + 1650, y, f"{net_price:.2f}")
+            painter.drawText(x + 1900, y, f"{item_total:.2f}")
+            
+            y += 80
+
+        y += 40
+        
+        pen = QPen(QColor("black"))
+        pen.setWidth(5)  # line thickness
+        painter.setPen(pen)
+        painter.drawLine(x, y, pdf.width() - 200, y)
+        
+        y += 60
+        
+        rect = QRectF(1500, y, 400, 100)
+        
+        option = QTextOption()
+        option.setAlignment(Qt.AlignRight)
+
+        painter.drawText(rect, "Sub Total", option)
+        
+        total_font = QFont("Arial", 12, QFont.Bold)
+        painter.setFont(total_font)
+        rect = QRectF(1950, y, 200, 100)
+        
+        option = QTextOption()
+        option.setAlignment(Qt.AlignRight)
+
+        painter.drawText(rect, f"{subtotal}", option)
+        
+        
+        y += 100
+        painter.drawText(x + 1600, y, f"Discount: ")
+        painter.drawText(x + 1900, y, f"{salesdiscount}")
+        
+        y += 80
+        painter.drawText(x + 1600, y, f"Sales Tax: ")
+        painter.drawText(x + 1900, y, f"{salestax:.2f}")
+        
+        y += 80
+        pen = QPen(QColor("black"))
+        pen.setWidth(5)  # line thickness
+        painter.setPen(pen)
+        painter.drawLine(x + 1500, y, pdf.width() - 200, y) 
+        
+        y += 80
+        total_font = QFont("Arial", 14, QFont.Bold)
+        painter.setFont(total_font)
+        painter.drawText(x + 1500, y, f"Total Amount: ")
+        painter.drawText(x + 1950, y, f"{finaltotal:.2f}")
+
+        painter.end()
+        
+        self.print_pdf(filename)
+        
+        
+    
+
+    def print_pdf(self, filename):
+        
+        system = platform.system()
+        if system in ("Linux", "Darwin"):
+            os.system(f"lp '{filename}'")
+        elif system == "Windows":
+            os.startfile(filename, "print")
 
                 
             

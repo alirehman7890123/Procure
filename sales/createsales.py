@@ -1,8 +1,11 @@
 from PySide6.QtWidgets import QApplication, QWidget, QCompleter, QDateEdit, QVBoxLayout, QHBoxLayout, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
-from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, Signal, QTimer, QObject
+from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, Signal, QTimer, QObject, QRectF
+import os
+import sys
+import platform
 
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
-from PySide6.QtGui import QPalette, QColor, QKeyEvent, QKeySequence
+from PySide6.QtGui import QPalette, QColor, QKeyEvent, QPdfWriter, QKeySequence, QPainter, QPageSize, QFont, QTextOption, QPen, QColor
 from functools import partial
 import math
 from utilities.stylus import load_stylesheets
@@ -438,6 +441,7 @@ class CreateSalesWidget(QWidget):
         discount.setText("0.00")
         
         discount_amount = KeyUpLineEdit()
+        discount_amount.setReadOnly(True)
         discount_amount.setPlaceholderText("flat")
         discount_amount.setText("0.00")
         
@@ -491,13 +495,11 @@ class CreateSalesWidget(QWidget):
             rate = float(rate_text) if rate_text else 0
             percentage_discount = float(percentage_discount) if percentage_discount else 0
             
-            amount = qty * rate
-            
-            print("Amount is: ", amount)
-            discount_amount =  amount * (percentage_discount / 100)
+            discount_amount =  rate * (percentage_discount / 100)
             self.table.cellWidget(row, 6).setText(f"{discount_amount:.2f}")
+            price = rate - discount_amount
             
-            total = amount - discount_amount
+            total = qty * price
             self.table.cellWidget(row, 7).setText(f"{total:.2f}")
             
             self.update_total_amount()
@@ -523,16 +525,17 @@ class CreateSalesWidget(QWidget):
             rate = float(rate_text) if rate_text else 0
             flat_discount = float(flat_discount) if flat_discount else 0
 
-            amount = qty * rate
-
-            if amount > 0:
-                percentage = ( flat_discount / amount ) * 100
+            if flat_discount > 0:
+                percentage = ( flat_discount / rate ) * 100
             else:
                 percentage = 0.0
                 
             self.table.cellWidget(row, 5).setText(f"{percentage:.2f}")
             
-            total = amount - flat_discount
+            price = rate - flat_discount
+            
+            total = price * qty
+            
             self.table.cellWidget(row, 7).setText(f"{total:.2f}")
 
             self.update_total_amount()
@@ -935,7 +938,11 @@ class CreateSalesWidget(QWidget):
 
                 
                 ### PRINT RECEIPT ###
-                self.thermal_receipt_printer(sales_id)
+                
+                pdf_file = self.export_pdf('salesinvoice.pdf', sales_id)
+                self.print_pdf(pdf_file)
+                
+                # self.thermal_receipt_printer(sales_id)
             
                     
                 return sales_id
@@ -1552,18 +1559,26 @@ class CreateSalesWidget(QWidget):
             
             
             rate_text = self.table.cellWidget(row, 4).text()
+            discount_edit = self.table.cellWidget(row, 5).text()
+            discount_amount_edit = self.table.cellWidget(row, 6).text()
             
-            discount_edit = self.table.cellWidget(row,6).text()
+            print("Discount is: ", discount_edit)
 
             qty = float(qty_text) if qty_text else 0
             rate = float(rate_text) if rate_text else 0
-            
             discount = float(discount_edit) if discount_edit else 0
+            discount_amount = float(discount_amount_edit) if discount_amount_edit else 0
             
-            amount = qty * rate
+            print("Rate is: ", rate, " Discount is: ", discount)
             
-            print("Amount is: ", amount)
-            total = amount - discount
+            price = rate - discount_amount
+            
+            print("Final price is: ", price)
+            
+            total = qty * price
+            
+            print("Amount is: ", total)
+            
              
             total = float(f"{total:.2f}")
 
@@ -2083,6 +2098,259 @@ class CreateSalesWidget(QWidget):
             self.add_row()
 
 
+
+    def export_pdf(self, filename="salesinvoice.pdf", sales_id=None):
+        
+        print("Exporting PDF")
+        
+        print("Sales id is: ", sales_id)
+        
+        
+        
+        
+        
+        
+        
+        
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT product, qty, unitrate, discount, discountamount, total
+            FROM salesitem 
+            WHERE sales = ?
+        """)
+        query.addBindValue(sales_id)
+        
+        items = []
+        
+        if query.exec():
+            
+            print("Query has been executed successfully")
+            
+            while query.next():
+                
+                product_id = int(query.value(0))
+                qty = str(query.value(1))
+                rate = str(query.value(2))
+                discount = str(query.value(3))
+                discount_amount = str(query.value(4))
+                price = float(rate) - float(discount_amount)
+                total = str(query.value(5))
+
+                # Get product name
+                product_name = ""
+                query2 = QSqlQuery()
+                query2.prepare("SELECT name FROM product WHERE id = ?")
+                query2.addBindValue(product_id)
+
+                if query2.exec() and query2.next():
+                    product_name = query2.value(0)
+                    
+                items.append((product_name, qty, rate, discount, price, total))
+                print(items)
+
+
+
+        else:
+            print("Query failed:", query.lastError().text())
+
+        
+    
+        pdf = QPdfWriter(filename)
+        pdf.setPageSize(QPageSize(QPageSize.A4))
+        pdf.setResolution(300)
+
+        
+
+        painter = QPainter(pdf)
+        painter.setFont(QFont("Arial", 12))
+        painter.setPen(Qt.black)
+        
+        
+        
+        x = 100
+        y = 200
+
+        business_font = QFont("Arial", 16, QFont.Bold)
+        painter.setFont(business_font)
+
+        business_name = "Muzammil Medical & General Store"
+        painter.drawText(x, y, business_name)
+
+        y += 80
+        
+        address_font = QFont("Arial", 12)
+        painter.setFont(address_font)
+        
+        address = "123 Health St, Wellness City"
+        painter.drawText(x, y, address)
+        
+        y += 70
+        contact = "Phone: (123) 456-7890"
+        painter.drawText(x, y, contact)
+        
+        
+        invoice_font = QFont("Arial", 36, QFont.Bold)
+        painter.setFont(invoice_font)
+
+        invoice_title = "Invoice"
+        painter.drawText(1700, 230, invoice_title)
+        
+        invoice_no_font = QFont("Arial", 12)
+        painter.setFont(invoice_no_font)
+        
+        rect = QRectF(1700, 250, 500, 100)
+        
+        option = QTextOption()
+        option.setAlignment(Qt.AlignRight)
+
+        invoice_no = "# 12345"
+        painter.drawText(rect, invoice_no, option)
+        
+        
+        invoice_date_font = QFont("Arial", 12)
+        painter.setFont(invoice_date_font)
+
+        rect = QRectF(1700, 320, 500, 100)
+        
+        option = QTextOption()
+        option.setAlignment(Qt.AlignRight)
+
+        invoice_no = "21 October, 2025"
+        painter.drawText(rect, invoice_no, option)
+
+        y += 150
+        
+        customer_font = QFont("Arial", 12, QFont.Bold)
+        painter.setFont(customer_font)
+        info = " Asad Clinic & Pharmacy"
+        customer = f"To : {info}"
+        painter.drawText(x, y, customer)
+        
+        y += 80
+        
+        pen = QPen(QColor("black"))
+        pen.setWidth(5)  # line thickness
+        painter.setPen(pen)
+        painter.drawLine(x, y, pdf.width() - 200, y)
+        
+        y += 70
+        header_font = QFont("Arial", 11, QFont.Bold)
+        painter.setFont(header_font)
+
+        item_name = "Item"
+        painter.drawText(x + 20, y, item_name)
+        
+        item_name = "qty"
+        painter.drawText(x + 900, y, item_name)
+        
+        item_name = "rate"
+        painter.drawText(x + 1100, y, item_name)
+        
+        item_name = "discount"
+        painter.drawText(x + 1400, y, item_name)
+        
+        item_name = "Price"
+        painter.drawText(x + 1650, y, item_name)
+        
+        item_name = "Total"
+        painter.drawText(x + 1900, y, item_name)
+
+        
+        y += 40
+        
+        pen = QPen(QColor("black"))
+        pen.setWidth(5)  # line thickness
+        painter.setPen(pen)
+        painter.drawLine(x, y, pdf.width() - 200, y)
+
+        y += 100
+        
+        items_font = QFont("Arial", 11)
+        painter.setFont(items_font)
+        
+        # Sample items
+        # items = [
+        #         ("Panadol tab 250mg", 2, 10.00, "2%", 9.80, 18.16), 
+        #         ("Amoxil Cap 500mg", 1, 20.00, "0%", 20.00, 20.00), 
+        #         ("Floxacin Drops 10ml", 5, 5.00, "5%", 4.75, 23.75),
+        #         ("Clementrin Syrup 160ml", 3, 15.00, "10%", 13.50, 40.50),
+        #         ("Tibe Cream 75gm", 4, 12.00, "5%", 11.40, 45.60)
+        #     ]
+        total = 0
+        
+        print("Drawing Items into Table")
+        
+        for item, qty, price, discount, net_price, item_total in items:
+
+            painter.drawText(x + 20, y, item)
+            painter.drawText(x + 900, y, str(qty))
+            painter.drawText(x + 1100, y, f"{price:.2f}")
+            painter.drawText(x + 1400, y, f"{discount:.2f} %")
+            painter.drawText(x + 1650, y, f"{net_price:.2f}")
+            painter.drawText(x + 1900, y, f"{item_total:.2f}")
+            
+            total += item_total
+            y += 80
+
+        y += 40
+        
+        pen = QPen(QColor("black"))
+        pen.setWidth(5)  # line thickness
+        painter.setPen(pen)
+        painter.drawLine(x, y, pdf.width() - 200, y)
+        
+        y += 60
+        
+        rect = QRectF(1500, y, 400, 100)
+        
+        option = QTextOption()
+        option.setAlignment(Qt.AlignRight)
+
+        painter.drawText(rect, "Sub Total", option)
+        
+        total_font = QFont("Arial", 12, QFont.Bold)
+        painter.setFont(total_font)
+        rect = QRectF(1950, y, 200, 100)
+        
+        option = QTextOption()
+        option.setAlignment(Qt.AlignRight)
+
+        painter.drawText(rect, f"{total}", option)
+        
+        
+        
+        y += 100
+        painter.drawText(x + 1600, y, f"Discount: ")
+        painter.drawText(x + 1900, y, f"0.00")
+        
+        y += 80
+
+        painter.drawText(x + 1600, y, f"Sales Tax: ")
+        painter.drawText(x + 1900, y, f"0.00")
+        
+        y += 80
+        pen = QPen(QColor("black"))
+        pen.setWidth(5)  # line thickness
+        painter.setPen(pen)
+        painter.drawLine(x + 1500, y, pdf.width() - 200, y) 
+        
+        y += 80
+        total_font = QFont("Arial", 14, QFont.Bold)
+        painter.setFont(total_font)
+        painter.drawText(x + 1500, y, f"Total Amount: ")
+        painter.drawText(x + 1950, y, f"{total:.2f}")
+
+        painter.end()
+        return filename
+    
+
+    def print_pdf(self, filename):
+        
+        system = platform.system()
+        if system in ("Linux", "Darwin"):
+            os.system(f"lp '{filename}'")
+        elif system == "Windows":
+            os.startfile(filename, "print")
 
     
 class MyTable(QTableWidget):

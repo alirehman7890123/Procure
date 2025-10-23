@@ -968,6 +968,8 @@ class AddPurchaseWidget(QWidget):
                         continue
 
                     product_id = product_widget.currentData()
+                    
+                    
                     item_exist = True
                     
                     try:
@@ -1227,25 +1229,27 @@ class AddPurchaseWidget(QWidget):
             
             tax = float(tax_edit) if tax_edit else 0
             
-            amount = qty * rate
-            
-            
             if discount :
-                discount = amount * discount / 100
+                discount = rate * discount / 100
                 self.table.cellWidget(row, 8).setText(str(discount))
                 
                 
             flat_discount = self.table.cellWidget(row,8).text()
             flat_discount = float(flat_discount) if flat_discount else 0
             
-            taxable_amount = amount - flat_discount
+            price = rate - flat_discount
             
-            tax_amount = taxable_amount * tax / 100
+            tax_amount = price * tax / 100
+            
             self.table.cellWidget(row, 10).setText(str(tax_amount))
-            amount = taxable_amount + tax_amount
-            amount = float(f"{amount:.2f}")
+            
+            price = price + tax_amount
+            
+            price = float(f"{price:.2f}")
+            
+            total = qty * price
 
-            self.table.cellWidget(row, 11).setText(str(amount))
+            self.table.cellWidget(row, 11).setText(str(total))
             print("Updating Final Amount")
             self.update_total_amount()
             

@@ -15,6 +15,9 @@ class MainReportsPage(QWidget):
     def __init__(self, parent=None):
 
         super().__init__(parent)
+        
+        
+        print("Showing Reports")
 
         layout = QGridLayout()
         layout.setContentsMargins(0,0,0,0)
@@ -128,7 +131,11 @@ class MainReportsPage(QWidget):
     def showEvent(self, event):
         
         super().showEvent(event)
-        print("Widget shown — refreshing data")
+        print("Showing Reports page")
+        
+        self.get_hourly_sales_data()
+        self.get_monthly_sales_data()
+
 
 
 
@@ -138,38 +145,36 @@ class MainReportsPage(QWidget):
         from zoneinfo import ZoneInfo
         from datetime import datetime
 
-        local_tz = datetime.now().astimezone().tzinfo
-        print("Local timezone:", local_tz)
-        tz_name = str(local_tz)
-    
+        
+        local_offset = datetime.now().astimezone().utcoffset()
+        offset_hours = int(local_offset.total_seconds() // 3600)
+        offset_str = f"{offset_hours:+d} hours"  # e.g. '+5 hours' or '-4 hours'
 
-        hourly_sales = {i: 0 for i in range(24)}
+        print("Local offset:", offset_str)
+
+        # Get today's date
         today = datetime.now().strftime('%Y-%m-%d')
 
+        # Initialize hourly sales dictionary
+        hourly_sales = {i: 0 for i in range(24)}
+
         query = QSqlQuery()
-        # query.prepare("""
-        #     SELECT to_char(creation_date, 'HH24') as hour,
-        #         COALESCE(SUM(total), 0) as total_sales
-        #     FROM sales
-        #     WHERE date(creation_date) = CAST(:today AS DATE)
-        #     GROUP BY to_char(creation_date, 'HH24')
-        # """)
         
         query.prepare("""
             SELECT 
-                to_char(creation_date AT TIME ZONE 'UTC' AT TIME ZONE :tz, 'HH24') AS hour,
+                strftime('%H', datetime(creation_date, :offset)) AS hour,
                 COALESCE(SUM(total), 0) AS total_sales
             FROM sales
             WHERE 
-                date(creation_date AT TIME ZONE 'UTC' AT TIME ZONE :tz) = CAST(:today AS DATE)
+                date(datetime(creation_date, :offset)) = date(:today)
             GROUP BY hour
             ORDER BY hour
         """)
-        
-        query.bindValue(":tz", tz_name)
+
+        query.bindValue(":offset", offset_str)
         query.bindValue(":today", today)
 
-        print("Today =", today)
+        print("Today = ", today)
 
         if query.exec():
             while query.next():

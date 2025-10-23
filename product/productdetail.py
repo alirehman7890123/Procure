@@ -70,9 +70,9 @@ class ProductDetailWidget(QWidget):
         self.form = QLabel() ; self.formedit = QLineEdit()
         self.strength = QLabel() ; self.strengthedit = QLineEdit()
 
-        self.packsize = QLabel()
-        self.packs = QLabel()
-        self.units = QLabel()
+        self.packsize = QLabel(); self.packsizeedit = QLineEdit()
+        self.packs = QLabel(); self.packsedit = QLineEdit()
+        self.units = QLabel(); self.unitsedit = QLineEdit()
         self.reorder_level = QLabel() ; self.reorder_level_edit = QLineEdit()
         self.sale_price = QLabel() ; self.sale_price_edit = QLineEdit()
         
@@ -84,9 +84,9 @@ class ProductDetailWidget(QWidget):
             (self.formula, self.formulaedit),
             (self.form, self.formedit),
             (self.strength, self.strengthedit),
-            (self.packsize, None),
-            (self.packs, None),
-            (self.units, None),
+            (self.packsize, self.packsizeedit),
+            (self.packs, self.packsedit),
+            (self.units, self.unitsedit),
             (self.reorder_level, self.reorder_level_edit),
             (self.sale_price, self.sale_price_edit),
             
@@ -424,6 +424,9 @@ class ProductDetailWidget(QWidget):
 
             # Safe type casting
             try:
+                packsize = int(self.packsizeedit.text()) if self.packsizeedit.text().strip() else 0
+                packs = int(self.packsedit.text()) if self.packsedit.text().strip() else 0
+                units = int(self.unitsedit.text()) if self.unitsedit.text().strip() else 0
                 reorder = int(self.reorder_level_edit.text()) if self.reorder_level_edit.text().strip() else 0
                 sale = float(self.sale_price_edit.text()) if self.sale_price_edit.text().strip() else 0.0
             except ValueError:
@@ -437,6 +440,9 @@ class ProductDetailWidget(QWidget):
                 WHERE id = ?
             """)
 
+            if code == '':
+                code = None
+            
             product_query.addBindValue(product)
             product_query.addBindValue(code)
             product_query.addBindValue(category)
@@ -453,14 +459,19 @@ class ProductDetailWidget(QWidget):
                 raise Exception("No product rows were updated. Invalid product_id?")
 
             print(f"[OK] Product updated. Rows affected: {product_query.numRowsAffected()}")
+            
+            units = packsize * packs
 
             # --- Update stock table ---
             stock_query = QSqlQuery()
             stock_query.prepare("""
                 UPDATE stock
-                SET reorder = ?, saleprice = ?
+                SET packsize = ?, units = ?, reorder = ?, saleprice = ?
                 WHERE product = ?
             """)
+            
+            stock_query.addBindValue(packsize)
+            stock_query.addBindValue(units)
             stock_query.addBindValue(reorder)
             stock_query.addBindValue(sale)
             stock_query.addBindValue(self.product_id)

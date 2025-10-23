@@ -585,8 +585,8 @@ class MainWindow(QMainWindow):
         layout.setCurrentWidget(widget)
     
         
-    @permission.require_permission('reports.view')   
     def set_reports(self, widget, layout):
+        print("Setting Reports apge by clikcing")
         layout.setCurrentWidget(widget)
     
     
