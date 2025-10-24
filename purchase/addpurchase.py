@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QWidget, QCompleter, QVBoxLayout, QHBoxLayout, QFrame,  QStyledItemDelegate, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
-from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, QTimer, Signal
+from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, QTimer, Signal, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtGui import QPalette, QColor, QKeyEvent
 from functools import partial
@@ -475,6 +475,7 @@ class AddPurchaseWidget(QWidget):
         self.final_amountdata.setText(f"{finaltotal:.2f}")
         
 
+
     def calculate_payment(self):
         
         finalamount = self.final_amountdata.text()
@@ -488,9 +489,24 @@ class AddPurchaseWidget(QWidget):
         
         self.writeoffcheck()
          
+    
+         
+    def eventFilter(self, obj, event):
+        if isinstance(obj, QComboBox) and event.type() == QEvent.FocusOut:
+            
+            index = self.table.indexAt(obj.pos())
+            row = index.row()
+            col = index.column()
+            print(f"ComboBox at row {row}, col {col} lost focus: {obj.currentText()}")
+            
+            obj.addItem('Paracetamol', 23)            
+            
+        
+        return super().eventFilter(obj, event)
 
        
-        
+    
+    
     def add_row(self):
         
         row = self.table.rowCount()
@@ -512,6 +528,8 @@ class AddPurchaseWidget(QWidget):
         
         product.setEditable(True)
         product.wheelEvent = lambda event: event.ignore()
+        
+        product.installEventFilter(self)
         
         
         
@@ -1188,6 +1206,9 @@ class AddPurchaseWidget(QWidget):
         print("Selected text is: ",text, data)
         data = int(data)
         
+        
+        print("Data is: ", data)
+        
         query = QSqlQuery()
         query.prepare("""
             SELECT * FROM product
@@ -1411,7 +1432,14 @@ class AddPurchaseWidget(QWidget):
             return False
 
 
-
+    def add_new_product_dialog(self):
+        
+        dialog = ImportDialog(self)
+        if dialog.exec() == QDialog.Accepted:
+            print("Import Dialog Accepted")
+            
+        else:
+            print("Import Dialog Cancelled")
 
 
 
@@ -1437,6 +1465,140 @@ class MyTable(QTableWidget):
 
         
         
+      
+            
+import math
+from PySide6.QtWidgets import QDialog, QDialogButtonBox
+
+class ImportDialog(QDialog):
+    
+    # ... your __init__ / UI methods ...
+    def __init__(self, parent=None):
+        
+        super().__init__(parent)
+        self.setWindowTitle("Import Stock Data")
+        self.resize(600, 400)
+
+        layout = QVBoxLayout()
+        
+        self.insert_subheading("PRODUCT INFORMATION")
+        
+        self.populate_product_fields()
+        self.populate_medicine_fields()
+       
+
+        self.setLayout(layout)
+        
+        # Buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)   # Save → dialog.accept()
+        button_box.rejected.connect(self.reject)   # Cancel → dialog.reject()
+        layout.addWidget(button_box)
+    
+    
+
+    def insert_subheading(self, title):
+        
+        # === Sub Header Row ===
+        subheader_layout = QHBoxLayout()
+        subheading = QLabel(title, objectName="SubHeading")
+        
+        subheader_layout.addWidget(subheading)
+        self.layout.addLayout(subheader_layout)
+        
+        self.layout.addSpacing(10)
+        
+        
+    
+    def populate_product_fields(self):
+        
+        labels = ["Product Name", "Code/Barcode", "Category", "Brand"]
+        
+        self.name_input = QComboBox()
+        self.name_input.setEditable(True)
+        self.code_input = QLineEdit()
+        self.category_input = QComboBox()
+        self.category_input.addItems(["Medicine", "General Item", "Other"])
+        self.brand_input = QLineEdit()
+        
+        fields = [self.name_input, self.code_input, self.category_input, self.brand_input]
+        
+        self.insert_labels_and_fields(labels, fields)
+        
+        
+    def populate_medicine_fields(self):
+        
+        # === Sub Header Row ===
+        self.medicine_layout = QHBoxLayout()
+        self.medicine_subheading = QLabel("MEDICINE & BATCH  INFORMATION", objectName="SubHeading")
+        
+        self.medicine_layout.addWidget(self.medicine_subheading)
+        self.layout.addLayout(self.medicine_layout)
+        
+        self.layout.addSpacing(10)
+        
+        self.medicine_subheading.hide()
+        
+        self.formula_input = QLineEdit()
+        self.form_input = QLineEdit()
+        self.strength_input = QLineEdit()
+        self.expiry_input = QDateEdit()
+        self.expiry_input.setCalendarPopup(True)
+        self.batch_input = QLineEdit()
+        self.expiry_input.setDate(QDate.currentDate())
+
+        self.medicine_fields = [
+            ("Formula:", self.formula_input),
+            ("Form (Tablet/Syrup):", self.form_input),
+            ("Strength:", self.strength_input),
+            ("Batch No:", self.batch_input),
+            ("Expiry Date:", self.expiry_input)
+            
+        ]
+        
+        
+        
+        # Keep track of full row containers for show/hide
+        self.medicine_rows = []
+
+        for label, field in self.medicine_fields:
+            # --- row container ---
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+
+            # indicator
+            indicator = QFrame()
+            indicator.setFixedWidth(4)
+            indicator.setStyleSheet("background-color: #ccc; border: none;")
+
+            lbl = QLabel(label)
+            lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            lbl.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+            lbl.setFixedWidth(250)
+            field.setStyleSheet("margin-left: 18px;")
+
+            field.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+            row_layout.addWidget(indicator)
+            row_layout.addWidget(lbl, 1)
+            row_layout.addWidget(field, 8)
+
+            # Add whole row widget into main layout
+            self.layout.addWidget(row_widget)
+            self.layout.setSpacing(15)
+
+            # Map indicator for highlighting
+            self.indicators[field] = indicator
+            field.installEventFilter(self)
+
+            # Initially hide medicine rows
+            self.medicine_rows.append(row_widget)
+            
+        
+            self.layout.addSpacing(20)
+            
+    
 
     
 

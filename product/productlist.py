@@ -287,11 +287,9 @@ class ProductListWidget(QWidget):
         
         dialog = ImportDialog()
         
-        stock_table = dialog.stocktable
-        print("Stock table in dialog:", stock_table)
-        
-        
-        
+        self.stock_table = dialog.stocktable
+        print("Stock table in dialog:", self.stock_table)
+
         # get product list and populate table
         product_query = QSqlQuery()
         product_query.exec("""
@@ -322,7 +320,7 @@ class ProductListWidget(QWidget):
             
             while product_query.next():
                 
-                stock_table.insertRow(row)
+                self.stock_table.insertRow(row)
                 
                 product_id = product_query.value(0)
                 
@@ -357,10 +355,10 @@ class ProductListWidget(QWidget):
                 brand_item = QTableWidgetItem(brand)
                 formula_item = QTableWidgetItem(formula)
                 
-                stock_table.setItem(row, 0, id_item)
-                stock_table.setItem(row, 1, name_item)
-                stock_table.setItem(row, 2, brand_item)
-                stock_table.setItem(row, 3, formula_item)
+                self.stock_table.setItem(row, 0, id_item)
+                self.stock_table.setItem(row, 1, name_item)
+                self.stock_table.setItem(row, 2, brand_item)
+                self.stock_table.setItem(row, 3, formula_item)
                 
                 if stockadjusted == 1 :
                     
@@ -371,15 +369,17 @@ class ProductListWidget(QWidget):
                     
                         packs = QTableWidgetItem(packs)
                         units = QTableWidgetItem(units)
-                        stock_table.setItem(row, 4, packs)
-                        stock_table.setItem(row, 5, units)
+                        packs.setFlags(packs.flags() & ~Qt.ItemIsEditable)
+                        units.setFlags(units.flags() & ~Qt.ItemIsEditable)
+                        self.stock_table.setItem(row, 4, packs)
+                        self.stock_table.setItem(row, 5, units)
                     
                 else:
                     
                     packs_edit = QLineEdit()
                     units_edit = QLineEdit()
-                    stock_table.setCellWidget(row, 4, packs_edit)
-                    stock_table.setCellWidget(row, 5, units_edit)
+                    self.stock_table.setCellWidget(row, 4, packs_edit)
+                    self.stock_table.setCellWidget(row, 5, units_edit)
                 
                 
                 totalcost_edit = QLineEdit()
@@ -412,13 +412,15 @@ class ProductListWidget(QWidget):
                         packs_edit,
                         units_edit,
                         totalcost_edit,
-                        False
+                        False,
+                        self.stock_table
                     ))
 
                 else:
                     # Static (already adjusted) cells
-                    packs_item = stock_table.item(row, 4)
-                    units_item = stock_table.item(row, 5)
+                    packs_item = self.stock_table.item(row, 4)
+                    units_item = self.stock_table.item(row, 5)
+                    
                     packs_text = packs_item.text() if packs_item else ""
                     units_text = units_item.text() if units_item else ""
 
@@ -428,14 +430,15 @@ class ProductListWidget(QWidget):
                         packs_text,
                         units_text,
                         totalcost_edit,
-                        True
+                        True,
+                        self.stock_table
                     ))
 
 
 
 
-                stock_table.setCellWidget(row, 6, totalcost_edit)
-                stock_table.setCellWidget(row, 7, save_button)
+                self.stock_table.setCellWidget(row, 6, totalcost_edit)
+                self.stock_table.setCellWidget(row, 7, save_button)
                 
                 row += 1
         
@@ -450,9 +453,9 @@ class ProductListWidget(QWidget):
         
 
 
-    def save_stock_adjustment(self, product_id, packs_src, units_src, totalcost_src, already_adjusted):
+    def save_stock_adjustment(self, product_id, packs_src, units_src, totalcost_src, already_adjusted, table):
         
-        
+
         # Fetch packsize, current units from stock table
         stock_query = QSqlQuery()
         stock_query.prepare("SELECT packsize, units FROM stock WHERE product = :product_id")
@@ -543,8 +546,31 @@ class ProductListWidget(QWidget):
         # Execute
         if update_query.exec():
             print(f"Stock adjustment saved successfully for Product ID {product_id}.")
+            
+            # Hide the row after saving
+            row = table.currentRow()
+            table.setRowHidden(row, True)
+            
+            
+            # index = self.table.indexAt(event.pos())
+            # if index.isValid():
+            #     row = index.row()
+            #     self.table.setRowHidden(row, True)
+            
+            # self.stock_table.cellClicked.connect(lambda: self.hide_row_on_click(row=self.stock_table.currentRow()))
+
         else:
             print("Error saving stock adjustment:", update_query.lastError().text())
+            
+            
+    
+    def hide_row_on_click(self, row):
+
+        print("Stock table in dialog: for hidden row", self.stock_table)
+        self.stock_table.setRowHidden(row, True)
+
+
+
 
 
 
@@ -656,6 +682,16 @@ class ImportDialog(QDialog):
 
         layout = QVBoxLayout()
         
+        # Search Field
+        self.search_layout = QHBoxLayout()
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search Product...")
+        self.search_edit.textChanged.connect(self.search_rows)
+        self.search_layout.addWidget(self.search_edit)
+        layout.addLayout(self.search_layout)
+        layout.addSpacing(10)
+        
+        
         self.row_height = 40
 
         self.stocktable = MyTable(column_ratios=[0.05, 0.20, 0.15, 0.20, 0.10, 0.10, 0.10, 0.10])
@@ -742,4 +778,13 @@ class ImportDialog(QDialog):
     
     
 
+    def search_rows(self, text):
 
+        for row in range(self.stocktable.rowCount()):
+            match = False
+            for col in range(self.stocktable.columnCount() - 1):
+                item = self.stocktable.item(row, col)
+                if item and text.lower() in item.text().lower():
+                    match = True
+                    break
+            self.stocktable.setRowHidden(row, not match)
