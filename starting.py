@@ -666,8 +666,22 @@ class AuthWindow(QMainWindow):
         """):
             QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
             return False
+        
+        
 
         print("Table 'product' created successfully.")
+        # Create indexes for faster search
+        indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_product_name   ON product(name)",
+            "CREATE INDEX IF NOT EXISTS idx_product_code   ON product(code)",
+            "CREATE INDEX IF NOT EXISTS idx_product_brand  ON product(brand)"
+        ]
+
+        for index_query in indexes:
+            if not query.exec(index_query):
+                QMessageBox.critical(None, "Error", f"Index creation failed: {query.lastError().text()}")
+
+        print("Indexes created successfully (name, code, brand).")
 
         
 

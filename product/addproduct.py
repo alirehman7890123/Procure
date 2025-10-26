@@ -676,7 +676,7 @@ _SYNONYMS = {
     "reorder": ["reorder", "reorder level", "reorderlevel"],
     "costprice": ["costprice", "cost"],
     "saleprice": ["saleprice", "price", "mrp", "sale price"],
-    "purchaseitem": ["purchaseitem", "purchase item"],
+    "purchaseitem": ["purchaseitem", "purchase item", "PurchaseItem"],
     "batch": ["batch", "batchno", "batch no", "batch number"],
     "expiry": ["expiry", "expiry date", "expiration", "exp"],
 }

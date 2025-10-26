@@ -491,20 +491,49 @@ class AddPurchaseWidget(QWidget):
          
     
          
-    def eventFilter(self, obj, event):
-        if isinstance(obj, QComboBox) and event.type() == QEvent.FocusOut:
-            
-            index = self.table.indexAt(obj.pos())
-            row = index.row()
-            col = index.column()
-            print(f"ComboBox at row {row}, col {col} lost focus: {obj.currentText()}")
-            
-            obj.addItem('Paracetamol', 23)            
-            
+    # def eventFilter(self, obj, event):
         
-        return super().eventFilter(obj, event)
+    #     if isinstance(obj, QComboBox) and event.type() == QEvent.FocusOut:
+            
+    #         obj._focus_handled = False
+    #         print("Current Data is: ", obj.currentData())
+            
+    #         index = self.table.indexAt(obj.pos())
+    #         row = index.row()
+    #         col = index.column()
+    #         print(f"ComboBox at row {row}, col {col} lost focus: {obj.currentText()}")
+            
+    #     else:
+            
+    #         return super().eventFilter(obj, event)
+                
+
 
        
+    def handle_editing_finished(self, combo):
+        
+        print("Handling Editing Finished")
+        
+        product = combo
+        index = self.table.indexAt(product.pos())
+        row = index.row()
+        col = index.column()
+        data = product.currentData()
+        text = product.currentText()
+        
+        print(f"Current data is {data} and text is {text} at row {row}, col {col}")
+        
+        if data is None:
+            self.new_product = product.currentText()
+            
+            if self.new_product.strip() != "":
+                self.add_new_product_dialog(new_product=self.new_product)
+        
+
+        
+        
+    
+    
     
     
     def add_row(self):
@@ -518,7 +547,7 @@ class AddPurchaseWidget(QWidget):
         counter = QLabel(str(row + 1))
         counter.setAlignment(Qt.AlignCenter)
 
-        
+
         dummy_item1 = QTableWidgetItem()
         dummy_item1.setFlags(Qt.NoItemFlags)
         self.table.setItem(row, 1, dummy_item1)
@@ -529,7 +558,7 @@ class AddPurchaseWidget(QWidget):
         product.setEditable(True)
         product.wheelEvent = lambda event: event.ignore()
         
-        product.installEventFilter(self)
+        # product.installEventFilter(self)
         
         
         
@@ -555,7 +584,7 @@ class AddPurchaseWidget(QWidget):
 
 
         product.lineEdit().textEdited.connect(lambda: self.load_product_suggestions(product, completer))
-
+        product.lineEdit().editingFinished.connect(lambda c=product: self.handle_editing_finished(c))
         
         batch = QLineEdit()
         batch.setPlaceholderText("Batch")
@@ -1141,6 +1170,7 @@ class AddPurchaseWidget(QWidget):
         print("Current Text is: ", current_text)
         
         if current_text == '':
+            item.setCurrentIndex(-1)
             return 
         
         query = QSqlQuery()
@@ -1432,10 +1462,73 @@ class AddPurchaseWidget(QWidget):
             return False
 
 
-    def add_new_product_dialog(self):
+    def add_new_product_dialog(self, new_product=None):
         
         dialog = ImportDialog(self)
+        
+        dialog.name_input.setText(new_product)
+        
         if dialog.exec() == QDialog.Accepted:
+            
+            print("New Product is: ", new_product)
+            
+            code = dialog.code_input.text()
+            category = dialog.category_input.currentText()
+            brand = dialog.brand_input.text()
+            
+            formula = dialog.formula_input.text()
+            form = dialog.form_input.text()
+            strength = dialog.strength_input.text()
+            
+            packsize = dialog.packsize.text()
+            saleprice = dialog.saleprice.text()
+            
+            # Insert Data into Database
+            
+            query = QSqlQuery()
+            query.prepare("""
+                INSERT INTO product (name, code, category, brand, formula, form, strength)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """)
+            
+            query.addBindValue(new_product)
+            query.addBindValue(code)
+            query.addBindValue(category)
+            query.addBindValue(brand)
+            query.addBindValue(formula)
+            query.addBindValue(form)
+            query.addBindValue(strength)    
+            
+            if not query.exec():
+                
+                QMessageBox.critical(None, "Error", query.lastError().text())
+                print("Error inserting product:", query.lastError().text())
+                
+            else:
+                
+                QMessageBox.information(None, "Success", "Product added successfully")
+                product_id = query.lastInsertId()
+                print("New Product ID is: ", product_id)
+                
+                # Create Empty Stock Record
+                stock_query = QSqlQuery()
+                stock_query.prepare("""
+                    INSERT INTO stock (product, packsize, units, reorder, saleprice)
+                    VALUES (?, ?, ?, ?, ?)
+                """)
+                
+                stock_query.addBindValue(product_id)
+                stock_query.addBindValue(packsize)  # initial packsize
+                stock_query.addBindValue(0)  # default units
+                stock_query.addBindValue(0)  # default reorder
+                stock_query.addBindValue(saleprice)  # initial saleprice
+
+                if not stock_query.exec():
+                    print("Error inserting stock:", stock_query.lastError().text())
+                else:
+                    print("Stock record created successfully for new product")
+                
+
             print("Import Dialog Accepted")
             
         else:
@@ -1444,6 +1537,7 @@ class AddPurchaseWidget(QWidget):
 
 
 class MyTable(QTableWidget):
+    
     def __init__(self, rows=0, cols=0, column_ratios=None, parent=None):
         super().__init__(rows, cols, parent)
         self.column_ratios = column_ratios or []
@@ -1468,7 +1562,7 @@ class MyTable(QTableWidget):
       
             
 import math
-from PySide6.QtWidgets import QDialog, QDialogButtonBox
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QDateEdit
 
 class ImportDialog(QDialog):
     
@@ -1476,24 +1570,25 @@ class ImportDialog(QDialog):
     def __init__(self, parent=None):
         
         super().__init__(parent)
-        self.setWindowTitle("Import Stock Data")
+        self.setWindowTitle("Add New Product")
         self.resize(600, 400)
 
-        layout = QVBoxLayout()
-        
-        self.insert_subheading("PRODUCT INFORMATION")
+        self.layout = QVBoxLayout()
+        self.layout.setContentsMargins(40, 40, 40, 40)
+        self.indicators = {}
+        self.insert_subheading("PRODUCT Does Not Exist... Add INFORMATION")
         
         self.populate_product_fields()
         self.populate_medicine_fields()
        
 
-        self.setLayout(layout)
+        self.setLayout(self.layout)
         
         # Buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)   # Save → dialog.accept()
         button_box.rejected.connect(self.reject)   # Cancel → dialog.reject()
-        layout.addWidget(button_box)
+        self.layout.addWidget(button_box)
     
     
 
@@ -1506,7 +1601,6 @@ class ImportDialog(QDialog):
         subheader_layout.addWidget(subheading)
         self.layout.addLayout(subheader_layout)
         
-        self.layout.addSpacing(10)
         
         
     
@@ -1514,8 +1608,7 @@ class ImportDialog(QDialog):
         
         labels = ["Product Name", "Code/Barcode", "Category", "Brand"]
         
-        self.name_input = QComboBox()
-        self.name_input.setEditable(True)
+        self.name_input = QLineEdit()
         self.code_input = QLineEdit()
         self.category_input = QComboBox()
         self.category_input.addItems(["Medicine", "General Item", "Other"])
@@ -1530,7 +1623,7 @@ class ImportDialog(QDialog):
         
         # === Sub Header Row ===
         self.medicine_layout = QHBoxLayout()
-        self.medicine_subheading = QLabel("MEDICINE & BATCH  INFORMATION", objectName="SubHeading")
+        self.medicine_subheading = QLabel("MEDICINE INFORMATION", objectName="SubHeading")
         
         self.medicine_layout.addWidget(self.medicine_subheading)
         self.layout.addLayout(self.medicine_layout)
@@ -1544,15 +1637,15 @@ class ImportDialog(QDialog):
         self.strength_input = QLineEdit()
         self.expiry_input = QDateEdit()
         self.expiry_input.setCalendarPopup(True)
-        self.batch_input = QLineEdit()
-        self.expiry_input.setDate(QDate.currentDate())
+        self.packsize = QLineEdit()
+        self.saleprice = QLineEdit()
 
         self.medicine_fields = [
             ("Formula:", self.formula_input),
             ("Form (Tablet/Syrup):", self.form_input),
             ("Strength:", self.strength_input),
-            ("Batch No:", self.batch_input),
-            ("Expiry Date:", self.expiry_input)
+            ("Pack Size:", self.packsize),
+            ("Sale Price:", self.saleprice)
             
         ]
         
@@ -1600,7 +1693,39 @@ class ImportDialog(QDialog):
             
     
 
-    
+    def insert_labels_and_fields(self, labels, fields):
+        
+        
+        for (label, field) in zip(labels, fields):
+
+            row = QHBoxLayout()
+            
+            # Left line indicator
+            indicator = QFrame()
+            indicator.setFixedWidth(4)
+            indicator.setStyleSheet("background-color: #ccc; border: none;")
+            
+            lbl = QLabel(label)
+            lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            lbl.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+            field.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            lbl.setMinimumWidth(250)
+            lbl.setStyleSheet("padding-left: 10px;")
+
+            row.addWidget(indicator) 
+            row.addWidget(lbl, 1)
+            row.addWidget(field, 8)
+
+            self.layout.addLayout(row)
+            self.layout.setSpacing(10)  # reduce space between rows
+            
+            # Keep mapping
+            self.indicators[field] = indicator
+
+            # Install event filters to track focus
+            field.installEventFilter(self)
+            
+      
 
 
 

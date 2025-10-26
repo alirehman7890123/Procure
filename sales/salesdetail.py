@@ -438,8 +438,19 @@ class SalesDetailWidget(QWidget):
         else:
             print("Query failed:", query.lastError().text())
 
+        # get business information
         
-    
+        business_query = QSqlQuery()
+        business_query.prepare("SELECT businessname, address, contact FROM business WHERE id = 1")
+        business_query.exec()
+
+        if business_query.next():
+            business_name = business_query.value(0)
+            business_address = business_query.value(1)
+            business_contact = business_query.value(2)
+        else:
+            print("Business information not found.")
+
         pdf = QPdfWriter(filename)
         pdf.setPageSize(QPageSize(QPageSize.A4))
         pdf.setResolution(300)
@@ -458,7 +469,7 @@ class SalesDetailWidget(QWidget):
         business_font = QFont("Arial", 16, QFont.Bold)
         painter.setFont(business_font)
 
-        business_name = "Muzammil Medical & General Store"
+        # business name
         painter.drawText(x, y, business_name)
 
         y += 80
@@ -466,11 +477,11 @@ class SalesDetailWidget(QWidget):
         address_font = QFont("Arial", 12)
         painter.setFont(address_font)
         
-        address = "123 Health St, Wellness City"
+        address = business_address
         painter.drawText(x, y, address)
         
         y += 70
-        contact = "Phone: (123) 456-7890"
+        contact = business_contact
         painter.drawText(x, y, contact)
         
         

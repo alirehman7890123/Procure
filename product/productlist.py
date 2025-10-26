@@ -1,7 +1,9 @@
-from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QHeaderView,QDialog, QLineEdit, QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QTableWidget, QTableWidgetItem
-from PySide6.QtCore import QFile, Qt, Signal
+from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QHeaderView,QDialog, QLineEdit,QComboBox, QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QTableWidget, QTableWidgetItem
+from PySide6.QtCore import QFile, Qt, Signal, QTimer
 from PySide6.QtSql import QSqlQuery
 from functools import partial
+from PySide6.QtGui import QColor
+
 
 from utilities.stylus import load_stylesheets
 
@@ -57,15 +59,69 @@ class ProductListWidget(QWidget):
         self.layout.addWidget(line)
         self.layout.addSpacing(20)
         
+        info_layout = QHBoxLayout()
         
+        total_products_label = QLabel("Total Products: ")
+        self.total_products_value = QLabel("0") 
+
+        low_products_label = QLabel(" | Low Stock Products: ")
+        self.low_products_value = QLabel("0")
+        
+        expired_products_label = QLabel(" | Expired Products: ")
+        self.expired_products_value = QLabel("0")
+        
+        info_layout.addWidget(total_products_label, 2)
+        info_layout.addWidget(self.total_products_value, 2)
+        info_layout.addSpacing(30)
+        info_layout.addWidget(low_products_label, 2)
+        info_layout.addWidget(self.low_products_value, 2)
+        info_layout.addSpacing(30)
+        info_layout.addWidget(expired_products_label, 2)
+        info_layout.addWidget(self.expired_products_value, 2)
+        
+        low_stock = QPushButton("View Low Stock", objectName="TopRightButton")
+        low_stock.clicked.connect(lambda: self.view_low_stock())
+        
+        info_layout.addWidget(low_stock, 2)
+        low_stock.setCursor(Qt.PointingHandCursor)
+
+        expiry_alert = QPushButton("View Expired Products", objectName="TopRightButton")
+        expiry_alert.clicked.connect(lambda: self.view_expired_products())
+        expiry_alert.setCursor(Qt.PointingHandCursor)
+        
+        info_layout.addWidget(expiry_alert, 2)
+        
+
+        self.layout.addLayout(info_layout)
+        self.layout.addSpacing(20)
+        
+
         # Search Field
         search_layout = QHBoxLayout()
-        search_edit = QLineEdit()
-        search_edit.setPlaceholderText("Search Product...")
-        search_edit.textChanged.connect(self.search_rows)
-        search_layout.addWidget(search_edit)
+        
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search Product...")
+
+        search_by = QLabel("Search By")
+        search_by.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        self.search_in = QComboBox()
+        self.search_in.addItems(["Product", "Code", "Formula", "Brand"])
+        
+        self.search_timer = QTimer()
+        self.search_timer.setSingleShot(True)
+        self.search_timer.timeout.connect(lambda: self.search_rows(self.search_edit.text()))
+        
+        self.search_edit.textChanged.connect(lambda: self.search_timer.start(300))
+
+
+        search_layout.addWidget(self.search_edit, 6)
+        search_layout.addWidget(search_by, 1)
+        search_layout.addWidget(self.search_in, 2)
         self.layout.addLayout(search_layout)
         self.layout.addSpacing(10)
+        
+        
 
 
         self.row_height = 40
@@ -102,12 +158,560 @@ class ProductListWidget(QWidget):
 
         self.layout.addWidget(self.table)
         
-        self.layout.addStretch()
+        # Pagination Layout
+        pagination_layout = QHBoxLayout()
+        
+        self.page_size = 50
+        self.current_page = 1
 
+        self.prev_button = QPushButton("Previous", objectName="TopRightButton")
+        self.prev_button.clicked.connect(self.show_previous_page)
+
+        self.next_button = QPushButton("Next", objectName="TopRightButton")
+        self.next_button.clicked.connect(self.show_next_page)
+
+        pagination_layout.addWidget(self.prev_button)
+        pagination_layout.addWidget(self.next_button)
+
+        self.layout.addLayout(pagination_layout)
+
+        
+        self.layout.addStretch()
+        self.show_products_info()
 
         
         self.setStyleSheet(load_stylesheets())
+        
+        
+        
+    def view_low_stock(self):
+        
+        print("view low stock clicked")
 
+        # Implement the logic to view low stock products
+        low_stock_query = QSqlQuery()
+        low_stock_query.exec("""
+            SELECT * FROM product p
+            JOIN stock s ON p.id = s.product
+            WHERE s.units <= s.reorder
+        """)
+
+        # Show the results in a new dialog or table
+        self.show_query_results(low_stock_query)
+        
+        
+        
+    def view_expired_products(self):
+        
+        print("view expired products clicked")
+
+        # Implement the logic to view expired products
+        expired_query = QSqlQuery()
+        expired_query.exec("""
+            SELECT * FROM product p
+            JOIN stock s ON p.id = s.product
+            WHERE s.expiry_date < CURRENT_DATE
+        """)
+
+        # Show the results in a new dialog or table
+        self.show_query_results(expired_query)
+
+    
+    
+    def show_query_results(self, query):
+        # Create a dialog to show the results
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Query Results")
+        dialog_layout = QVBoxLayout(dialog)
+        
+        
+        query_layout = QHBoxLayout()
+
+        item_count = QLabel("Items Found: ")
+        count_value = QLabel("0")
+        
+        query_layout.addWidget(item_count)
+        query_layout.addWidget(count_value)
+
+        dialog_layout.addLayout(query_layout)
+
+        results_table = MyTable(column_ratios=[0.1, 0.3, 0.2, 0.2, 0.2])
+        results_table.setColumnCount(5)  # Adjust based on expected columns
+        results_table.setHorizontalHeaderLabels(['ID', 'Name', 'Code', 'Category', 'Brand'])  # Adjust headers
+
+        results_table.setRowCount(0)
+        row = 0
+
+        while query.next():
+            results_table.insertRow(row)
+            for col in range(5):  # Adjust based on expected columns
+                item = QTableWidgetItem(str(query.value(col)))
+                results_table.setItem(row, col, item)
+            row += 1
+
+        count_value.setText(str(row))
+
+        dialog_layout.addWidget(results_table)
+        dialog.resize(800, 600)
+        dialog.exec()
+        
+        
+
+
+    def show_products_info(self):
+        
+        # Fetch total products
+        total_query = QSqlQuery()
+        total_query.exec("SELECT COUNT(*) FROM product")
+        if total_query.next():
+            total_products = total_query.value(0)
+            self.total_products_value.setText(str(total_products))
+        else:
+            self.total_products_value.setText("0")
+
+        # Fetch low stock products
+        low_stock_query = QSqlQuery()
+        low_stock_query.exec("""
+            SELECT COUNT(*) FROM product p
+            JOIN stock s ON p.id = s.product
+            WHERE s.units <= s.reorder
+        """)
+        if low_stock_query.next():
+            low_stock_products = low_stock_query.value(0)
+            self.low_products_value.setText(str(low_stock_products))
+        else:
+            self.low_products_value.setText("0")
+
+        # Fetch expired products
+        expired_query = QSqlQuery()
+        expired_query.exec("""
+            SELECT COUNT(*) FROM product p
+            JOIN stock s ON p.id = s.product
+            WHERE s.expiry_date < CURRENT_DATE
+        """)
+        if expired_query.next():
+            expired_products = expired_query.value(0)
+            self.expired_products_value.setText(str(expired_products))
+        else:
+            self.expired_products_value.setText("0")
+            
+            
+
+
+    def show_next_page(self):
+        
+        import math
+        from PySide6.QtSql import QSqlQuery, QSqlQueryModel
+        from PySide6.QtWidgets import QMessageBox
+
+
+        # get total rows
+        count_q = QSqlQuery()
+        if not count_q.exec_("SELECT COUNT(*) FROM product"):
+            QMessageBox.critical(None, "Error", f"Count query failed: {count_q.lastError().text()}")
+            return
+        
+        count_q.next()
+        total_rows = count_q.value(0) or 0
+        total_pages = max(1, math.ceil(int(total_rows) / int(self.page_size)))
+        
+        print("Total Pages are: ", total_pages)
+
+        # don't advance beyond last page
+        if self.current_page >= total_pages:
+            self.next_button.setEnabled(False)
+            return
+
+        self.current_page += 1
+        offset = (self.current_page - 1) * self.page_size
+
+        sql = f"SELECT * FROM product LIMIT {self.page_size} OFFSET {offset}"
+        query = QSqlQuery()
+        query.prepare(sql)
+
+        if not query.exec():
+            QMessageBox.critical(None, "Error", f"Query failed: {query.lastError().text()}")
+            return
+       
+        try:
+            # self.table.clearContents()
+            # rows = model.rowCount()
+            # cols = model.columnCount()
+            # self.table.setRowCount(rows)
+            # self.table.setColumnCount(cols)
+            # # set headers if available
+            # headers = [model.headerData(c, 1) for c in range(cols)]
+            # self.table.setHorizontalHeaderLabels([str(h) if h is not None else "" for h in headers])
+            # for r in range(rows):
+            #     for c in range(cols):
+            #         value = model.data(model.index(r, c))
+            #         item = QTableWidgetItem(str(value) if value is not None else "")
+            #         self.table.setItem(r, c, item)
+            
+            self.table.setRowCount(0)  # Clear existing rows
+            row = 0
+            
+            print("Query Successful Got the rows, populating table now")
+
+            while query.next():
+
+                counter = str(offset + row + 1)
+                self.table.insertRow(row)
+
+                product_id = query.value(0)
+                name = query.value(1)
+                code = query.value(2)
+                category = query.value(3)
+                brand = query.value(4)
+                form = query.value(6)
+                strength = query.value(7)
+                
+                name = f"{name} {form} {strength}"
+                
+                counter = QTableWidgetItem(counter)
+                name = QTableWidgetItem(name)
+                code = QTableWidgetItem(code)
+                category = QTableWidgetItem(category)
+                brand = QTableWidgetItem(brand)
+
+                
+                self.table.setItem(row, 0, counter)
+                self.table.setItem(row, 1, name)
+                self.table.setItem(row, 2, code)
+                self.table.setItem(row, 3, category)
+                self.table.setItem(row, 4, brand)
+                
+                product_id = int(product_id)
+                
+                
+                # bring stock and level from stock table
+                stock_query = QSqlQuery()
+                stock_query.prepare("SELECT packsize, units, reorder from stock where product = ?")
+                stock_query.addBindValue(product_id)
+                
+                if stock_query.exec() and stock_query.next():
+                    
+                    packsize = stock_query.value(0)
+                    units = stock_query.value(1)
+                    reorder = stock_query.value(2)
+                    
+                    # packsize = int(packsize)
+                    # units = int(units)
+                    # reorder = int(reorder)
+                    
+                    level = ""
+                    
+                    
+                    if packsize != 0:
+                        
+                        packs = units // packsize
+                        
+                        if packs > reorder:
+                            level = 'normal'
+                        else:
+                            level = 'low'
+                        
+                        
+                        rems = units % packsize
+
+                        if packs > 0 and rems > 0:
+                            stock = f"{packs} + ({rems})"
+                        elif packs > 0:
+                            stock = f"{packs}"
+                        else:
+                            stock = f"    ({rems})"
+
+                    
+                    
+                    stock = QTableWidgetItem(str(stock))
+                    # stock.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    level = QTableWidgetItem(level)
+                    
+                    self.table.setItem(row, 5, stock)
+                    self.table.setItem(row, 6, level)
+                
+                    
+                
+                
+                # inserting product status from batch table
+                
+                batch_query = QSqlQuery()
+                batch_query.prepare("SELECT status, resolved FROM batch WHERE product = :product_id")
+                batch_query.bindValue(":product_id", product_id)
+                
+                status = "Valid"
+                
+                if batch_query.exec():
+                    
+                    while batch_query.next():
+
+                        batch_status = batch_query.value(0)
+                        resolved = batch_query.value(1)
+                        
+                        if resolved:
+                            continue
+                        
+                        if batch_status == 'near-expiry' or batch_status == 'expired':
+                            status = 'Near / Expired'
+                        
+                        
+                else:
+                    
+                    print("Error executing batch query:", batch_query.lastError().text())
+                
+                
+                status = QTableWidgetItem(status)
+                self.table.setItem(row, 7, status)
+                
+                detail = QPushButton('Details')
+                detail.setCursor(Qt.PointingHandCursor)
+                detail.setStyleSheet("""
+                        QPushButton {
+                            background-color: transparent;
+                            color: #333;
+                            padding: 4px 12px;
+                            border-radius: 2px;
+                            font-weight: 600;
+                        }
+                        QPushButton:hover {
+                            background-color: #340238;
+                            color: #fff;
+                        }
+                        QPushButton:pressed {
+                            background-color: #47034E;
+                            color: #fff;
+                        }
+                    
+                """)
+                
+                
+                self.table.setCellWidget(row, 8, detail)
+                detail.clicked.connect(partial(self.detailpagesignal.emit, product_id))
+                
+                row += 1
+            
+                    
+        except Exception:
+            # if fallback fails, at least inform user
+            QMessageBox.information(None, "Info", "Unable to populate table widget with model; check table type.")
+
+        # update buttons enabled state
+        self.prev_button.setEnabled(self.current_page > 1)
+        self.next_button.setEnabled(self.current_page < total_pages)
+
+        
+    
+    def show_previous_page(self):
+        
+        import math
+        from PySide6.QtSql import QSqlQuery, QSqlQueryModel
+        from PySide6.QtWidgets import QMessageBox, QTableWidgetItem
+
+        if not hasattr(self, "page_size"):
+            self.page_size = 50
+        if not hasattr(self, "current_page"):
+            self.current_page = 1
+
+        # Get total row count
+        count_q = QSqlQuery()
+        if not count_q.exec_("SELECT COUNT(*) FROM product"):
+            QMessageBox.critical(None, "Error", f"Count query failed: {count_q.lastError().text()}")
+            return
+        count_q.next()
+        total_rows = count_q.value(0) or 0
+        total_pages = max(1, math.ceil(int(total_rows) / int(self.page_size)))
+
+        # Don't go below page 1
+        if self.current_page <= 1:
+            self.prev_button.setEnabled(False)
+            return
+
+        self.current_page -= 1
+        offset = (self.current_page - 1) * self.page_size
+
+        # Query for that page
+        sql = f"SELECT * FROM product LIMIT {self.page_size} OFFSET {offset}"
+        query = QSqlQuery()
+        query.prepare(sql)
+        
+        if not query.exec():
+            QMessageBox.critical(None, "Error", f"Query failed: {query.lastError().text()}")
+            return
+
+
+        try:
+            # self.table.clearContents()
+            # rows = model.rowCount()
+            # cols = model.columnCount()
+            # self.table.setRowCount(rows)
+            # self.table.setColumnCount(cols)
+            # # set headers if available
+            # headers = [model.headerData(c, 1) for c in range(cols)]
+            # self.table.setHorizontalHeaderLabels([str(h) if h is not None else "" for h in headers])
+            # for r in range(rows):
+            #     for c in range(cols):
+            #         value = model.data(model.index(r, c))
+            #         item = QTableWidgetItem(str(value) if value is not None else "")
+            #         self.table.setItem(r, c, item)
+            
+            self.table.setRowCount(0)  # Clear existing rows
+            row = 0
+
+            while query.next():
+
+                counter = counter = str(offset + row + 1)
+                self.table.insertRow(row)
+
+                product_id = query.value(0)
+                name = query.value(1)
+                code = query.value(2)
+                category = query.value(3)
+                brand = query.value(4)
+                form = query.value(6)
+                strength = query.value(7)
+                
+                name = f"{name} {form} {strength}"
+                
+                counter = QTableWidgetItem(counter)
+                name = QTableWidgetItem(name)
+                code = QTableWidgetItem(code)
+                category = QTableWidgetItem(category)
+                brand = QTableWidgetItem(brand)
+
+                
+                self.table.setItem(row, 0, counter)
+                self.table.setItem(row, 1, name)
+                self.table.setItem(row, 2, code)
+                self.table.setItem(row, 3, category)
+                self.table.setItem(row, 4, brand)
+                
+                product_id = int(product_id)
+                
+                
+                # bring stock and level from stock table
+                stock_query = QSqlQuery()
+                stock_query.prepare("SELECT packsize, units, reorder from stock where product = ?")
+                stock_query.addBindValue(product_id)
+                
+                if stock_query.exec() and stock_query.next():
+                    
+                    packsize = stock_query.value(0)
+                    units = stock_query.value(1)
+                    reorder = stock_query.value(2)
+                    
+                    # packsize = int(packsize)
+                    # units = int(units)
+                    # reorder = int(reorder)
+                    
+                    level = ""
+                    
+                    
+                    if packsize != 0:
+                        
+                        packs = units // packsize
+                        
+                        if packs > reorder:
+                            level = 'normal'
+                        else:
+                            level = 'low'
+                        
+                        
+                        rems = units % packsize
+
+                        if packs > 0 and rems > 0:
+                            stock = f"{packs} + ({rems})"
+                        elif packs > 0:
+                            stock = f"{packs}"
+                        else:
+                            stock = f"    ({rems})"
+
+                    
+                    level = QTableWidgetItem(level)
+                    if level == 'low':
+                        level.setForeground(QColor("red"))
+                    
+                    
+                    
+                    
+                    stock = QTableWidgetItem(str(stock))
+                    
+                    self.table.setItem(row, 5, stock)
+                    self.table.setItem(row, 6, level)
+                
+                    
+                
+                
+                # inserting product status from batch table
+                
+                batch_query = QSqlQuery()
+                batch_query.prepare("SELECT status, resolved FROM batch WHERE product = :product_id")
+                batch_query.bindValue(":product_id", product_id)
+                
+                status = "Valid"
+                
+                if batch_query.exec():
+                    
+                    while batch_query.next():
+
+                        batch_status = batch_query.value(0)
+                        resolved = batch_query.value(1)
+                        
+                        if resolved:
+                            continue
+                        
+                        if batch_status == 'near-expiry' or batch_status == 'expired':
+                            status = 'Near / Expired'
+                        
+                        
+                else:
+                    
+                    print("Error executing batch query:", batch_query.lastError().text())
+                
+                
+                status = QTableWidgetItem(status)
+                self.table.setItem(row, 7, status)
+                
+                detail = QPushButton('Details')
+                detail.setCursor(Qt.PointingHandCursor)
+                detail.setStyleSheet("""
+                        QPushButton {
+                            background-color: transparent;
+                            color: #333;
+                            padding: 4px 12px;
+                            border-radius: 2px;
+                            font-weight: 600;
+                        }
+                        QPushButton:hover {
+                            background-color: #340238;
+                            color: #fff;
+                        }
+                        QPushButton:pressed {
+                            background-color: #47034E;
+                            color: #fff;
+                        }
+                    
+                """)
+                
+                
+                self.table.setCellWidget(row, 8, detail)
+                detail.clicked.connect(partial(self.detailpagesignal.emit, product_id))
+                
+                row += 1
+            
+                    
+        except Exception:
+            # if fallback fails, at least inform user
+            QMessageBox.information(None, "Info previous", "Unable to populate table widget with model; check table type.")
+
+        # update buttons enabled state
+        
+        self.prev_button.setEnabled(self.current_page > 1)
+        self.next_button.setEnabled(self.current_page < total_pages)
+
+
+
+        
+    
     
     def showEvent(self, event):
         
@@ -118,14 +722,197 @@ class ProductListWidget(QWidget):
 
     def search_rows(self, text):
         
-        for row in range(self.table.rowCount()):
-            match = False
-            for col in range(self.table.columnCount() - 1):
-                item = self.table.item(row, col)
-                if item and text.lower() in item.text().lower():
-                    match = True
-                    break
-            self.table.setRowHidden(row, not match)
+        # search text from db
+
+        if text.strip() == '':
+            return
+
+        field = self.search_in.currentText().lower()
+        
+        column_map = {
+            "product": "name",
+            "code": "code",
+            "brand": "brand",
+            "formula": "formula"
+        }
+
+        column = column_map.get(field, "name")  # default to name
+
+
+        pattern = f"%{text}%"
+        
+        search_query = QSqlQuery()
+        search_query.prepare(f"SELECT * FROM product WHERE {column} LIKE ? LIMIT 50")
+        search_query.addBindValue(pattern)
+        
+                
+        if search_query.exec():
+            
+            print("Searching for ", text, " and query is successful")
+            
+            
+            self.table.setRowCount(0)  # Clear existing rows
+            row = 0
+            
+            while search_query.next():
+                
+                print("returned records")
+                
+                counter = row + 1
+                counter = str(counter)
+                self.table.insertRow(row)
+                
+                product_id = search_query.value(0)
+                name = search_query.value(1)
+                code = search_query.value(2)
+                category = search_query.value(3)
+                brand = search_query.value(4)
+                form = search_query.value(6)
+                strength = search_query.value(7)
+                
+                name = f"{name} {form} {strength}"
+                
+                counter = QTableWidgetItem(counter)
+                name = QTableWidgetItem(name)
+                code = QTableWidgetItem(code)
+                category = QTableWidgetItem(category)
+                brand = QTableWidgetItem(brand)
+
+                
+                self.table.setItem(row, 0, counter)
+                self.table.setItem(row, 1, name)
+                self.table.setItem(row, 2, code)
+                self.table.setItem(row, 3, category)
+                self.table.setItem(row, 4, brand)
+                
+                product_id = int(product_id)
+                
+                
+                # bring stock and level from stock table
+                stock_query = QSqlQuery()
+                stock_query.prepare("SELECT packsize, units, reorder from stock where product = ?")
+                stock_query.addBindValue(product_id)
+                
+                if stock_query.exec() and stock_query.next():
+                    
+                    packsize = stock_query.value(0)
+                    units = stock_query.value(1)
+                    reorder = stock_query.value(2)
+                    
+                    # packsize = int(packsize)
+                    # units = int(units)
+                    # reorder = int(reorder)
+                    
+                    level = ""
+                    
+                    
+                    if packsize != 0:
+                        
+                        packs = units // packsize
+                        
+                        if packs > reorder:
+                            level = 'normal'
+                        else:
+                            level = 'low'
+                        
+                        
+                        rems = units % packsize
+
+                        if packs > 0 and rems > 0:
+                            stock = f"{packs} + ({rems})"
+                        elif packs > 0:
+                            stock = f"{packs}"
+                        else:
+                            stock = f"    ({rems})"
+
+                    
+                    
+                    stock = QTableWidgetItem(str(stock))
+                    # stock.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    level = QTableWidgetItem(level)
+                    
+                    self.table.setItem(row, 5, stock)
+                    self.table.setItem(row, 6, level)
+                
+                    
+                
+                
+                # inserting product status from batch table
+                
+                batch_query = QSqlQuery()
+                batch_query.prepare("SELECT status, resolved FROM batch WHERE product = :product_id")
+                batch_query.bindValue(":product_id", product_id)
+                
+                status = "Valid"
+                
+                if batch_query.exec():
+                    
+                    while batch_query.next():
+
+                        batch_status = batch_query.value(0)
+                        resolved = batch_query.value(1)
+                        
+                        if resolved:
+                            continue
+                        
+                        if batch_status == 'near-expiry' or batch_status == 'expired':
+                            status = 'Near / Expired'
+                        
+                        
+                else:
+                    
+                    print("Error executing batch query:", batch_query.lastError().text())
+                
+                
+                status = QTableWidgetItem(status)
+                self.table.setItem(row, 7, status)
+                
+                detail = QPushButton('Details')
+                detail.setCursor(Qt.PointingHandCursor)
+                detail.setStyleSheet("""
+                        QPushButton {
+                            background-color: transparent;
+                            color: #333;
+                            padding: 4px 12px;
+                            border-radius: 2px;
+                            font-weight: 600;
+                        }
+                        QPushButton:hover {
+                            background-color: #340238;
+                            color: #fff;
+                        }
+                        QPushButton:pressed {
+                            background-color: #47034E;
+                            color: #fff;
+                        }
+                    
+                """)
+                
+                
+                self.table.setCellWidget(row, 8, detail)
+                detail.clicked.connect(partial(self.detailpagesignal.emit, product_id))
+                
+                row += 1
+            
+        
+                
+                
+                
+                
+        
+        
+        
+        
+        
+        
+        # for row in range(self.table.rowCount()):
+        #     match = False
+        #     for col in range(self.table.columnCount() - 1):
+        #         item = self.table.item(row, col)
+        #         if item and text.lower() in item.text().lower():
+        #             match = True
+        #             break
+        #     self.table.setRowHidden(row, not match)
     
 
 

@@ -123,6 +123,9 @@ class MainReportsPage(QWidget):
         layout.addItem(spacer, 13, 0)
 
         self.setStyleSheet(load_stylesheets())
+        
+        
+        self.setLayout(layout)
 
 
 
