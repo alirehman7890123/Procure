@@ -76,7 +76,9 @@ class MainWindow(QMainWindow):
         self.setGeometry(0,0, width, height)
         
         
-        
+        self.history = []
+        self.current_index = 0
+
         
         
         
@@ -168,6 +170,16 @@ class MainWindow(QMainWindow):
         
         header_layout.addWidget(business_title)
         
+        self.back_button = QPushButton("Back")
+        header_layout.addWidget(self.back_button)
+        
+        self.forward_button = QPushButton("Forward")
+        header_layout.addWidget(self.forward_button)
+        
+        
+        
+        
+       
         header_layout.addStretch()
         
         logout_button = QPushButton("Logout")
@@ -175,7 +187,6 @@ class MainWindow(QMainWindow):
         logout_button.clicked.connect(self.logout)
         
         header_layout.addWidget(logout_button)
-        
         
         
         
@@ -443,6 +454,8 @@ class MainWindow(QMainWindow):
         self.main_content_layout.addWidget(self.reports)
         self.main_content_layout.addWidget(self.holdsales)
         
+
+        
         
         
         # making all widgets focusable
@@ -451,7 +464,29 @@ class MainWindow(QMainWindow):
         
         self.layout.addWidget(sidebar_scroll)
         self.layout.addWidget(content_area_widget)
+    
+    
+    
+    
+    
+    def go_to_page(self, index):
+        self.main_content_layout.setCurrentIndex(index)
         
+        if self.current_index < len(self.history) - 1:
+            self.history = self.history[:self.current_index + 1]
+            
+        self.history.append(index)
+        self.current_index = len(self.history) - 1
+
+    def next_page(self):
+        if self.current_index < len(self.history) - 1:
+            self.current_index += 1
+            self.main_content_layout.setCurrentIndex(self.history[self.current_index])
+
+    def prev_page(self):
+        if self.current_index > 0:
+            self.current_index -= 1
+            self.main_content_layout.setCurrentIndex(self.history[self.current_index])
         
         
     
@@ -531,33 +566,41 @@ class MainWindow(QMainWindow):
     @permission.require_permission('dashboard')
     def set_dashboard(self, widget, layout):
         layout.setCurrentWidget(widget)
+        self.go_to_page(0)
         
     def set_business(self, widget, layout):
         layout.setCurrentWidget(widget)
+        self.go_to_page(1)
 
     def set_profile(self, widget, layout):
         self.profile.reset_to_default()
         layout.setCurrentWidget(widget)
+        self.go_to_page(2)
 
     def set_supplier(self, widget, layout):
         self.supplier.reset_to_default()
         layout.setCurrentWidget(widget)
+        self.go_to_page(3)
 
     def set_salesrep(self, widget, layout):
         self.salesrep.reset_to_default()
         layout.setCurrentWidget(widget)
+        self.go_to_page(4)
     
     def set_purchase(self, widget, layout):
         self.purchase.reset_to_default()
         layout.setCurrentWidget(widget)
+        self.go_to_page(5)
     
     def set_sales(self, widget, layout):
         self.base_sales.reset_to_default()
         layout.setCurrentWidget(widget)
+        self.go_to_page(6)
 
     def set_customer(self, widget, layout):
         self.base_customer.reset_to_default()
         layout.setCurrentWidget(widget)
+        self.go_to_page(7)
 
     def set_product(self, widget, layout):
         self.product.reset_to_default()
@@ -622,9 +665,74 @@ class MainWindow(QMainWindow):
 
 
 
+from PySide6.QtCore import QObject, QEvent
+from PySide6.QtWidgets import QApplication, QStackedWidget
+
+
+from PySide6.QtWidgets import QApplication, QStackedWidget, QWidget
+from PySide6.QtCore import QObject
+
+class PageTracker(QObject):
+    def __init__(self):
+        super().__init__()
+        self.history = []
+        self.current = -1
+
+    def attach_to(self, root: QWidget):
+        """Find all QStackedWidgets inside the given root widget and attach signals."""
+        stacks = root.findChildren(QStackedWidget)
+        for s in stacks:
+            self._register_stack(s)
+
+    def _register_stack(self, stack: QStackedWidget):
+        # Avoid double connection
+        if getattr(stack, "_tracker_connected", False):
+            return
+        stack.currentChanged.connect(lambda _: self._page_changed(stack))
+        stack._tracker_connected = True
+
+    def _page_changed(self, stack):
+        widget = stack.currentWidget()
+        if not widget:
+            return
+
+        if self.history and self.history[-1] == widget:
+            return
+
+        # trim forward history if needed
+        if self.current < len(self.history) - 1:
+            self.history = self.history[:self.current + 1]
+
+        self.history.append(widget)
+        self.current = len(self.history) - 1
+        print(f"Page shown: {widget.objectName()} ({hex(id(widget))})")
+
+    def back(self):
+        if self.current > 0:
+            self.current -= 1
+            self._show_widget(self.history[self.current])
+
+    def forward(self):
+        if self.current < len(self.history) - 1:
+            self.current += 1
+            self._show_widget(self.history[self.current])
+
+    def _show_widget(self, widget):
+        # find parent QStackedWidget and raise this widget
+        parent = widget.parent()
+        while parent and not isinstance(parent, QStackedWidget):
+            parent = parent.parent()
+        if parent:
+            parent.setCurrentWidget(widget)
+
+
+
 if __name__ == '__main__':
 
     app = QApplication([])
+    
+    tracker = PageTracker()
+    app.installEventFilter(tracker)
     
     style = ""
     for css_file in css_files:
@@ -637,5 +745,13 @@ if __name__ == '__main__':
     app.setStyleSheet(style)
     
     window = MainWindow()
+    
+    
+    tracker.attach_to(window)
+    
+    window.back_button.clicked.connect(tracker.back)
+    window.forward_button.clicked.connect(tracker.forward)
+    
+    
     window.show()
     app.exec()

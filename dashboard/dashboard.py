@@ -321,7 +321,7 @@ class DashboardWidget(QWidget):
         total_purchase, invoice_count = self.get_purchase_summary('today')
         
         self.card2_data.setText(f"{total_purchase:.2f}")
-        self.card2_bottom.setText(f"{total_invoices} Invoice(s) ")
+        self.card2_bottom.setText(f"{invoice_count} Invoice(s) ")
         
         
         
@@ -336,25 +336,44 @@ class DashboardWidget(QWidget):
         
 
 
-
+    def showEvent(self, event):
+        
+        print("Showing Dashboard Widget")
+        
+        super().showEvent(event)
+        
+        total_sales, total_invoices = self.get_sales_summary('today')
+        
+        self.card1_data.setText(f"{total_sales:.2f}")
+        self.card1_bottom.setText(f"{total_invoices} Invoice(s) ")
+        
+        total_expense, num_records = self.get_total_expenses('today')
+        self.card3_data.setText(f"{total_expense:.2f}")
+        self.card3_bottom.setText(f"{num_records} Expense(s) ")
+        
+        # Card 2 = Purchase Invoices
+        total_purchase, invoice_count = self.get_purchase_summary('today')
+        
+        self.card2_data.setText(f"{total_purchase:.2f}")
+        self.card2_bottom.setText(f"{invoice_count} Invoice(s) ")
+        
+        self.get_stock_summary()
+        self.get_supplier_summary()
+        self.get_customer_summary()
+        
 
 
 
     def get_sales_summary(self, duration="today"):
-        """
-        Fetch total sales and invoice count for a given duration.
+        print("Fetching sales summary for duration:", duration)
         
-        duration: str
-            "today", "week", "month", "year", "all"
-        Returns:
-            total_sales (float), total_invoices (int)
-        """
-        db = QSqlDatabase.database()
-        if not db.isValid() or not db.isOpen():
-            print("Database is not open")
-            return 0, 0
+        # db = QSqlDatabase.database()
+        # if not db.isValid() or not db.isOpen():
+        #     print("Database is not open")
+        #     return 0, 0
 
         # Build WHERE clause using date ranges
+        
         duration = duration.lower()
         if duration == "today":
             where_clause = "DATE(creation_date) = DATE('now')"
@@ -376,7 +395,7 @@ class DashboardWidget(QWidget):
         # Query total sales and invoice count
         query = QSqlQuery()
         sql = f"""
-            SELECT IFNULL(SUM(total),0), COUNT(*)
+            SELECT IFNULL(SUM(received),0), COUNT(*)
             FROM sales
             WHERE {where_clause}
         """
@@ -395,14 +414,8 @@ class DashboardWidget(QWidget):
 
 
     def get_purchase_summary(self, duration="today"):
-        """
-        Fetch total purchase amount and number of purchase invoices for a given duration.
-        
-        duration: str
-            "today", "week", "month", "year", "all"
-        Returns:
-            total_purchase (float), total_invoices (int)
-        """
+      
+      
         db = QSqlDatabase.database()
         if not db.isValid() or not db.isOpen():
             print("Database is not open")

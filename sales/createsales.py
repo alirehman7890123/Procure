@@ -9,6 +9,7 @@ from PySide6.QtGui import QPalette, QColor, QKeyEvent, QPdfWriter, QKeySequence,
 from functools import partial
 import math
 from utilities.stylus import load_stylesheets
+from PySide6.QtGui import QKeySequence, QShortcut
 
 
 
@@ -57,10 +58,17 @@ class CreateSalesWidget(QWidget):
         header_layout = QHBoxLayout()
         heading = QLabel("Create Sales Receipt", objectName='SectionTitle')
         
+        clear_btn = QPushButton('Clear Sale', objectName='TopRightButton')
+        clear_btn.setCursor(Qt.PointingHandCursor)
+        clear_btn.clicked.connect(lambda: self.clear_fields())
+        
+        
         self.invoicelist = QPushButton('SO List', objectName='TopRightButton')
         self.invoicelist.setCursor(Qt.PointingHandCursor)
+        
         header_layout.addWidget(heading)
         header_layout.addStretch()
+        header_layout.addWidget(clear_btn)
         header_layout.addWidget(self.invoicelist)
         self.layout.addLayout(header_layout)
 
@@ -88,8 +96,8 @@ class CreateSalesWidget(QWidget):
         self.min_visible_rows = 5
         
     
-        self.table = MyTable(column_ratios=[0.05, 0.35, 0.08, 0.08, 0.08, 0.08, 0.08, 0.15, 0.05])
-        headers = ["#", " Product Description", "Stock", " Qty", "Rate", "Disc %", "Flat disc.", "Total", "X"]
+        self.table = MyTable(column_ratios=[0.05, 0.35, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.05])
+        headers = ["#", " Product Description", "Stock","Pack Price", " Qty", "Unit Rate", "Disc %", "Flat disc.", "Total", "X"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         
@@ -157,21 +165,56 @@ class CreateSalesWidget(QWidget):
         subtotal_row.addWidget(right_total)
         subtotal_row.addWidget(self.right_totaldata)
         self.layout.addLayout(subtotal_row)
+        
+        charges_row = QHBoxLayout()
+        
+        
+        label1 = QLabel()
+        label1.setMinimumWidth(350)
+        charges_row.addWidget(label1)
+        
+        label2 = QLabel()
+        label2.setMinimumWidth(350)
+        charges_row.addWidget(label2)
+        
+        
+        
+        additional_charge_label = QLabel("Additional Charges")
+        additional_charge_label.setMinimumWidth(100)
+        
+        self.additional_charges = KeyUpLineEdit()
+        self.additional_charges.setPlaceholderText("0.00")
+        self.additional_charges.setMinimumWidth(100)
+        
+        self.additional_charges.keyReleased.connect(self.update_total_amount)
+        
+
+        charges_row.addWidget(additional_charge_label)
+        charges_row.addWidget(self.additional_charges)
+        self.layout.addLayout(charges_row)
+        
 
         # === Discount + Roundoff Row ===
         discount_row = QHBoxLayout()
         discount = QLabel("Discount")
         discount.setMinimumWidth(200)
+        
         self.percentage = KeyUpLineEdit()
-        self.percentage.setPlaceholderText(" Disc % ")
+        self.percentage.setPlaceholderText("Disc %")
         self.percentage.setMinimumWidth(150)
         self.flatdiscount = KeyUpLineEdit()
         self.flatdiscount.setPlaceholderText("Flat")
         self.flatdiscount.setMinimumWidth(150)
+        
         roundofflabel = QLabel("Roundoff")
         roundofflabel.setMinimumWidth(200)
         self.roundoffdata = QLabel("0.00")
         self.roundoffdata.setMinimumWidth(200)
+        
+        
+        
+        
+
         discount_row.addWidget(discount)
         discount_row.addWidget(self.percentage)
         discount_row.addWidget(self.flatdiscount)
@@ -266,10 +309,18 @@ class CreateSalesWidget(QWidget):
         save_row.addWidget(addreceipt, 1)
         save_row.addStretch()
         self.layout.addLayout(save_row)
+        
+
+
+        QShortcut(QKeySequence("Ctrl+Return"), self, activated=lambda: self.save_receipt())
+        QShortcut(QKeySequence("Ctrl+Enter"), self, activated=lambda: self.save_receipt())  
 
         
         self.setStyleSheet(load_stylesheets())
         self.layout.addStretch()
+
+
+
 
 
 
@@ -283,7 +334,7 @@ class CreateSalesWidget(QWidget):
         
         elif event.modifiers() & Qt.ControlModifier and event.key() == Qt.Key_L:
             self.load_hold_orders()
-            
+        
             
         else:
             super().keyPressEvent(event)  # Propagate if not handled
@@ -429,7 +480,11 @@ class CreateSalesWidget(QWidget):
         stock.setReadOnly(True)
         stock = self.table.setCellWidget(row, 2, stock)
         
-        
+        pack_price = QLineEdit()
+        pack_price.setPlaceholderText("pack price")
+        pack_price.setReadOnly(True)
+        pack_price = self.table.setCellWidget(row, 3, pack_price)
+
         qty_edit = QLineEdit()
         qty_edit.setPlaceholderText("qty")
         
@@ -449,18 +504,19 @@ class CreateSalesWidget(QWidget):
         amount_edit.setReadOnly(True)
         amount_edit.setPlaceholderText("total")
         amount_edit.setText("0.00")
+        amount_edit.setStyleSheet("font-weight: bold;")
         
         remove_btn = QPushButton("X")
         remove_btn.clicked.connect(lambda _, r=row: self.remove_row(r))
         remove_btn.setStyleSheet("color: #333;")
        
         
-        self.table.setCellWidget(row, 3, qty_edit)
-        self.table.setCellWidget(row, 4, rate_edit)
-        self.table.setCellWidget(row, 5, discount)
-        self.table.setCellWidget(row, 6, discount_amount)
-        self.table.setCellWidget(row, 7, amount_edit)
-        self.table.setCellWidget(row, 8, remove_btn)
+        self.table.setCellWidget(row, 4, qty_edit)
+        self.table.setCellWidget(row, 5, rate_edit)
+        self.table.setCellWidget(row, 6, discount)
+        self.table.setCellWidget(row, 7, discount_amount)
+        self.table.setCellWidget(row, 8, amount_edit)
+        self.table.setCellWidget(row, 9, remove_btn)
         
         
         
@@ -486,21 +542,21 @@ class CreateSalesWidget(QWidget):
         
         try:
             
-            qty_text = self.table.cellWidget(row, 3).text()
-            rate_text = self.table.cellWidget(row, 4).text()
+            qty_text = self.table.cellWidget(row, 4).text()
+            rate_text = self.table.cellWidget(row, 5).text()
             # get percentage amount
-            percentage_discount = self.table.cellWidget(row,5).text()
+            percentage_discount = self.table.cellWidget(row, 6).text()
 
             qty = float(qty_text) if qty_text else 0
             rate = float(rate_text) if rate_text else 0
             percentage_discount = float(percentage_discount) if percentage_discount else 0
             
             discount_amount =  rate * (percentage_discount / 100)
-            self.table.cellWidget(row, 6).setText(f"{discount_amount:.2f}")
+            self.table.cellWidget(row, 7).setText(f"{discount_amount:.2f}")
             price = rate - discount_amount
             
             total = qty * price
-            self.table.cellWidget(row, 7).setText(f"{total:.2f}")
+            self.table.cellWidget(row, 8).setText(f"{total:.2f}")
             
             self.update_total_amount()
             
@@ -516,10 +572,10 @@ class CreateSalesWidget(QWidget):
         
         try:
             
-            qty_text = self.table.cellWidget(row, 3).text()
-            rate_text = self.table.cellWidget(row, 4).text()
+            qty_text = self.table.cellWidget(row, 4).text()
+            rate_text = self.table.cellWidget(row, 5).text()
             # get percentage amount
-            flat_discount = self.table.cellWidget(row,6).text()
+            flat_discount = self.table.cellWidget(row,7).text()
 
             qty = float(qty_text) if qty_text else 0
             rate = float(rate_text) if rate_text else 0
@@ -529,20 +585,20 @@ class CreateSalesWidget(QWidget):
                 percentage = ( flat_discount / rate ) * 100
             else:
                 percentage = 0.0
-                
-            self.table.cellWidget(row, 5).setText(f"{percentage:.2f}")
-            
+
+            self.table.cellWidget(row, 6).setText(f"{percentage:.2f}")
+
             price = rate - flat_discount
             
             total = price * qty
             
-            self.table.cellWidget(row, 7).setText(f"{total:.2f}")
+            self.table.cellWidget(row, 8).setText(f"{total:.2f}")
 
             self.update_total_amount()
             
         except ValueError:
         
-            self.table.cellWidget(row, 7).setText("0")
+            self.table.cellWidget(row, 8).setText("0")
         
         
         
@@ -557,7 +613,7 @@ class CreateSalesWidget(QWidget):
 
         # Reconnect all remove buttons with updated row numbers
         for row in range(self.table.rowCount()):
-            widget = self.table.cellWidget(row, 4)
+            widget = self.table.cellWidget(row, 9)
             if isinstance(widget, QPushButton):
                 widget.clicked.disconnect()
                 widget.clicked.connect(lambda _, r=row: self.remove_row(r))
@@ -634,21 +690,23 @@ class CreateSalesWidget(QWidget):
         
     def confirm_and_save_sale(self):
         
-        reply = QMessageBox.question(
-            self,
-            "Confirm Sale",
-            "Do you want to proceed and save this sale?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
+        # reply = QMessageBox.question(
+        #     self,
+        #     "Confirm Sale",
+        #     "Do you want to proceed and save this sale?",
+        #     QMessageBox.Yes | QMessageBox.No,
+        #     QMessageBox.No
+        # )
 
-        if reply == QMessageBox.Yes:
-            # 👉 Place your DB insert logic here
-            print("Sale stored in database.")
-            return True
-        else:
-            print("Sale ignored.")
-            return False
+        # if reply == QMessageBox.Yes:
+        #     # 👉 Place your DB insert logic here
+        #     print("Sale stored in database.")
+        #     return True
+        # else:
+        #     print("Sale ignored.")
+        #     return False
+        
+        return True
         
         
     
@@ -658,8 +716,6 @@ class CreateSalesWidget(QWidget):
         
         if confirmation:
         
-            print("Inserting sales receipts")
-            
             try:
 
                 customer = self.customer.currentData()
@@ -672,12 +728,11 @@ class CreateSalesWidget(QWidget):
                 tax = self.taxedit.text()
                 taxamount = self.taxamount.text()
                 totalaftertax = self.right_totaldata.text()
+                additional_charges = self.additional_charges.text()
                 roundoff = self.roundoffdata.text()
                 total = self.final_amountdata.text()
                 received = self.receiveedit.text()
                 remaining = self.remainingdata.text()
-                print("About to find customer out...")
-                print("customer is: ", customer)
                 
                 if customer == '':
                     customer = None
@@ -696,6 +751,7 @@ class CreateSalesWidget(QWidget):
                 tax = float(tax) if tax else 0
                 taxamount = float(taxamount) if taxamount else 0
                 totalaftertax = float(totalaftertax) if totalaftertax else 0
+                charges = float(additional_charges) if additional_charges else 0
                 roundoff = float(roundoff) if roundoff else 0
                 total = float(total) if total else 0
                 received = float(received) if received else 0
@@ -710,6 +766,7 @@ class CreateSalesWidget(QWidget):
                 print("Tax: ", tax)
                 print("Tax Amount: ", taxamount)
                 print("Total After Tax: ", totalaftertax)
+                print("Additional Charges are: ", charges)
                 print("Roundoff: ", roundoff)
                 print("Total: ", total)
                 print("Received: ", received)
@@ -758,8 +815,8 @@ class CreateSalesWidget(QWidget):
                 sales_query = QSqlQuery()
                 sales_query.prepare("""
                             INSERT INTO sales (customer, salesman, subtotal, discount, discamount, netamount,
-                            tax, taxamount, totalaftertax, roundoff, total, received, remaining, writeoff, payable, receiveable)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                            tax, taxamount, totalaftertax, additional_charges, roundoff, total, received, remaining, writeoff, payable, receiveable)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                         """)
                         
                 sales_query.addBindValue(customer)
@@ -772,6 +829,7 @@ class CreateSalesWidget(QWidget):
                 sales_query.addBindValue(tax)
                 sales_query.addBindValue(taxamount)
                 sales_query.addBindValue(totalaftertax)
+                sales_query.addBindValue(charges)
                 sales_query.addBindValue(roundoff)
                 sales_query.addBindValue(total)
                 sales_query.addBindValue(received)
@@ -882,7 +940,6 @@ class CreateSalesWidget(QWidget):
                     
                     insert_id = query.lastInsertId()
                     print("Transaction is saved ...")
-                    QMessageBox.information(None, "Success", "Customer Transaction Stored Successfully with ID: " + str(insert_id) )
                     
                     
                 else:
@@ -1015,13 +1072,13 @@ class CreateSalesWidget(QWidget):
                 
                 print("Current Data is: ", product_id)
                 
-                qty = int(self.table.cellWidget(row, 3).text())
-                rate = float(self.table.cellWidget(row, 4).text())
-                discount = float(self.table.cellWidget(row, 5).text())
-                discountamount = float(self.table.cellWidget(row, 6).text())
-                total = float(self.table.cellWidget(row, 7).text())
-                
-                
+                qty = int(self.table.cellWidget(row, 4).text())
+                rate = float(self.table.cellWidget(row, 5).text())
+                discount = float(self.table.cellWidget(row, 6).text())
+                discountamount = float(self.table.cellWidget(row, 7).text())
+                total = float(self.table.cellWidget(row, 8).text())
+
+
                 print("we have reached here...")
             
                 # Insert sales item
@@ -1414,6 +1471,7 @@ class CreateSalesWidget(QWidget):
             while query.next():
                 
                 product_id = query.value(0)
+                
                 name = query.value(1)
                 form = query.value(2)
                 strength = query.value(3)
@@ -1479,7 +1537,8 @@ class CreateSalesWidget(QWidget):
                 print(f"Stock info is: {units} {saleprice}")
 
                 self.table.cellWidget(row, 2).setText(f'{units}')
-                self.table.cellWidget(row, 4).setText(f'{unit_sale_price:.2f}')
+                self.table.cellWidget(row, 3).setText(f'{saleprice}')
+                self.table.cellWidget(row, 5).setText(f'{unit_sale_price:.2f}')
                 
             else:
                 print("Stock Error... Maybe not found")
@@ -1549,18 +1608,17 @@ class CreateSalesWidget(QWidget):
             stock = int(stock)
             
             
-            qty_text = self.table.cellWidget(row, 3).text()
+            qty_text = self.table.cellWidget(row, 4).text()
             
             if int(qty_text) > stock:
                 
                 QMessageBox.information(None, "Error", "Quantity cannot be greater than available stock")
-                self.table.cellWidget(row, 3).setText("0")
+                self.table.cellWidget(row, 4).setText("0")
                 qty_text = 0
-            
-            
-            rate_text = self.table.cellWidget(row, 4).text()
-            discount_edit = self.table.cellWidget(row, 5).text()
-            discount_amount_edit = self.table.cellWidget(row, 6).text()
+
+            rate_text = self.table.cellWidget(row, 5).text()
+            discount_edit = self.table.cellWidget(row, 6).text()
+            discount_amount_edit = self.table.cellWidget(row, 7).text()
             
             print("Discount is: ", discount_edit)
 
@@ -1582,13 +1640,13 @@ class CreateSalesWidget(QWidget):
              
             total = float(f"{total:.2f}")
 
-            self.table.cellWidget(row, 7).setText(str(total))
+            self.table.cellWidget(row, 8).setText(str(total))
             
             self.update_total_amount()
             
         except ValueError:
         
-            self.table.cellWidget(row, 7).setText("0")
+            self.table.cellWidget(row, 8).setText("0")
 
     
     
@@ -1600,7 +1658,7 @@ class CreateSalesWidget(QWidget):
 
         for row in range(self.table.rowCount()):
             
-            linetotal = self.table.cellWidget(row, 7).text()
+            linetotal = self.table.cellWidget(row, 8).text()
             
             if linetotal:
                 try:
@@ -1644,10 +1702,12 @@ class CreateSalesWidget(QWidget):
         rounded_total = math.floor(total)
         roundoff = round(total - rounded_total, 2)
         print("round off is: ", roundoff)
-        # set Round off
-        
-        finaltotal = rounded_total
-        
+
+        additional = self.additional_charges.text()
+        additional = float(additional) if additional else 0
+
+        finaltotal = rounded_total + additional
+
         self.roundoffdata.setText(f"{roundoff:.2f}")
         self.final_amountdata.setText(f"{finaltotal:.2f}")
         
@@ -2042,23 +2102,23 @@ class CreateSalesWidget(QWidget):
     
     
     
-    def hideEvent(self, event):
+    # def hideEvent(self, event):
         
-        if self.order_modified:
-            reply = QMessageBox.question(
-                self,
-                "Unsaved Changes",
-                "You have unsaved changes. Do you want to discard this order?",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if reply == QMessageBox.No:
-                event.ignore()
-                return
+    #     if self.order_modified:
+    #         reply = QMessageBox.question(
+    #             self,
+    #             "Unsaved Changes",
+    #             "You have unsaved changes. Do you want to discard this order?",
+    #             QMessageBox.Yes | QMessageBox.No
+    #         )
+    #         if reply == QMessageBox.No:
+    #             event.ignore()
+    #             return
 
-            else:
-                self.clear_fields()
+    #         else:
+    #             self.clear_fields()
             
-        super().hideEvent(event)
+    #     super().hideEvent(event)
     
     
 
@@ -2104,12 +2164,6 @@ class CreateSalesWidget(QWidget):
         print("Exporting PDF")
         
         print("Sales id is: ", sales_id)
-        
-        
-        
-        
-        
-        
         
         
         query = QSqlQuery()
@@ -2344,6 +2398,7 @@ class CreateSalesWidget(QWidget):
         return filename
     
 
+
     def print_pdf(self, filename):
         
         system = platform.system()
@@ -2353,7 +2408,10 @@ class CreateSalesWidget(QWidget):
             os.startfile(filename, "print")
 
     
+    
+    
 class MyTable(QTableWidget):
+    
     def __init__(self, rows=0, cols=0, column_ratios=None, parent=None):
         super().__init__(rows, cols, parent)
         self.column_ratios = column_ratios or []

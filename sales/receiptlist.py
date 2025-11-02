@@ -129,10 +129,11 @@ class ReceiptListWidget(QWidget):
 
         self.row_height = 40
 
-        self.table = MyTable(column_ratios=[0.05, 0.25, 0.15, 0.20, 0.15, 0.10])
-        headers = ["Id", "Customer", "SalesMan", "Received", "Date", "Detail"]
+        self.table = MyTable(column_ratios=[0.05, 0.15, 0.40, 0.10, 0.10, 0.08])
+        headers = ["Id", "Customer", "Products", "Received", "Date", "Detail"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
+        self.table.setTextElideMode(Qt.ElideRight)
         
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.table.verticalHeader().setDefaultSectionSize(self.row_height)
@@ -229,7 +230,7 @@ class ReceiptListWidget(QWidget):
     def load_sales_into_table(self):
         
         query = QSqlQuery()
-        query.exec("SELECT id, customer, salesman, received, creation_date FROM sales")
+        query.exec("SELECT id, customer, received, creation_date FROM sales")
 
         self.table.setRowCount(0)  # Clear existing rows
 
@@ -238,9 +239,6 @@ class ReceiptListWidget(QWidget):
         while query.next():
             
             self.table.insertRow(row)
-            
-            
-
             
             sales_id = int(query.value(0))
             customer = query.value(1)
@@ -266,19 +264,36 @@ class ReceiptListWidget(QWidget):
                 if query2.exec() and query2.next():
                     
                     customer = str(query2.value(0))
-
-
-            salesman_query = QSqlQuery()
-            salesman_query.prepare("SELECT name FROM salesman WHERE id = ?")
-            salesman_query.addBindValue(salesman)
+                    
             
-
-            if salesman_query.exec() and salesman_query.next():
-                salesman = str(salesman_query.value(0))
+            products = ''
+            
+            # get salesitems 
+            items_query = QSqlQuery()
+            items_query.prepare("SELECT product FROM salesitem WHERE sales = ? ")
+            items_query.addBindValue(sales_id)
+            
+            if items_query.exec():
                 
+                while items_query.next():
+                    
+                    product_id = items_query.value(0)
+                    
+                    product_query = QSqlQuery()
+                    product_query.prepare("SELECT name, form FROM product WHERE id=?")
+                    product_query.addBindValue(product_id)
+                    
+                    if product_query.exec() and product_query.next():
+                        
+                        product_name = product_query.value(0)
+                        form = product_query.value(1)
+                        
+                        products += f"[ {product_name} {form} ]"
+
+
+            
             sales_id = str(sales_id)
             customer = str(customer)
-            salesman = str(salesman)
             received = str(received)
             
             joining_date = creation
@@ -289,19 +304,20 @@ class ReceiptListWidget(QWidget):
             else:
                 joining_date = str(joining_date)
                         
+                        
                     
             creation = joining_date
             
             id = QTableWidgetItem(sales_id)
             customer = QTableWidgetItem(customer)
-            salesman = QTableWidgetItem(salesman)
+            products = QTableWidgetItem(products)
             received = QTableWidgetItem(received)
             creation = QTableWidgetItem(creation)
 
 
             self.table.setItem(row, 0, id)
             self.table.setItem(row, 1, customer)
-            self.table.setItem(row, 2, salesman)
+            self.table.setItem(row, 2, products)
             self.table.setItem(row, 3, received)
             self.table.setItem(row, 4, creation)
             

@@ -16,12 +16,12 @@ if not os.environ.get("QT_QPA_PLATFORMTHEME"):
 
 from PySide6.QtWidgets import QApplication, QWidget, QMainWindow, QPushButton, QHBoxLayout, QVBoxLayout, QLabel,QLineEdit
 
-from utilities.database import SQLiteConnectionManager
+from utilities.database import SQLiteConnectionManager, QSqlDatabase
 from utilities.mylogin import MainWindow
 import bcrypt
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtSql import QSqlQuery
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, QSettings, QTimer
 
 import shutil, subprocess
 
@@ -49,7 +49,7 @@ class AuthWindow(QMainWindow):
     def __init__(self):
 
         super().__init__()
-        
+        self.settings = QSettings("procure", "procure_medics")  # unique identifiers
         
         check_xcb_support()
         
@@ -98,6 +98,8 @@ class AuthWindow(QMainWindow):
         self.username = QLineEdit()
         self.username.setPlaceholderText('Username')
         self.username.setStyleSheet('width: 300px; padding: 5px 8px; margin-bottom: 20px;')
+        
+        
 
         self.password = QLineEdit()
         self.password.setPlaceholderText('Password')
@@ -148,6 +150,10 @@ class AuthWindow(QMainWindow):
         central_layout.addWidget(companyinfo)
         central_layout.addWidget(authinfo)
         
+
+        self.load_username()
+        QTimer.singleShot(0, self.password.setFocus)
+        
         connection = SQLiteConnectionManager('ProcureApp')
         connection.open()
         
@@ -155,6 +161,10 @@ class AuthWindow(QMainWindow):
 
         self.setCentralWidget(central_widget)
         
+    
+    def load_username(self):
+        last_user = self.settings.value("last_username", "")
+        self.username.setText(last_user)
         
     
 
@@ -194,7 +204,12 @@ class AuthWindow(QMainWindow):
             if not update_query.exec():
                 print(f"Failed to update batch {batch_id}: {update_query.lastError().text()}")
 
-        
+    
+    
+    
+    
+    
+    
     
         
     def log_in(self, username, password):
@@ -211,6 +226,18 @@ class AuthWindow(QMainWindow):
             if self.authenticate_user(username, password):
                 
                 print("User Logged In")
+                
+                self.settings.setValue("last_username", username)
+                
+                db = QSqlDatabase.database()
+                db.transaction()
+
+                try:
+                    self.ensure_additional_charges_column()
+                    db.commit()
+                except Exception as e:
+                    db.rollback()
+                    print("Migration failed:", e)
                 
                 
                 # Checking Products Expiry Status
@@ -380,7 +407,28 @@ class AuthWindow(QMainWindow):
             
         return True
             
-            
+    
+    
+    def ensure_additional_charges_column(self):
+        
+        check_query = QSqlQuery()
+        check_query.exec("PRAGMA table_info(sales)")
+
+        columns = []
+        while check_query.next():
+            column_name = check_query.value(1)  # 1 = column name
+            columns.append(column_name)
+
+        if "additional_charges" not in columns:
+            print("Adding new column 'additional_charges'...")
+            alter_query = QSqlQuery()
+            alter_query.exec("ALTER TABLE sales ADD COLUMN additional_charges FLOAT DEFAULT 0;")
+        else:
+            print("Column 'additional_charges' already exists, skipping.")
+
+
+        
+        
         
 
     def create_supplier_table(self):
@@ -1047,6 +1095,7 @@ class AuthWindow(QMainWindow):
                 tax REAL NOT NULL,
                 taxamount REAL NOT NULL,
                 totalaftertax REAL NOT NULL,
+                additional_charges REAL NOT NULL,
                 roundoff REAL NOT NULL,
                 total REAL NOT NULL,
                 received REAL NOT NULL,

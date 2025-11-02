@@ -527,8 +527,7 @@ class AddPurchaseWidget(QWidget):
             self.new_product = product.currentText()
             
             if self.new_product.strip() != "":
-                self.add_new_product_dialog(new_product=self.new_product)
-        
+                self.add_new_product_dialog(combo, new_product=self.new_product)
 
         
         
@@ -1006,6 +1005,7 @@ class AddPurchaseWidget(QWidget):
                 for row in range(self.table.rowCount()):
                     
                     print("Row number is:", row)
+                    print("Rows text and data is ", self.table.cellWidget(row, 1).currentText(), self.table.cellWidget(row, 1).currentData())
                     
                     product_widget = self.table.cellWidget(row, 1)
                     
@@ -1130,13 +1130,10 @@ class AddPurchaseWidget(QWidget):
                                 print("Error inserting stockcost:", cost_query.lastError().text())
                             else:
                                 print("Stock Cost saved successfully")
-                                self.clear_fields()
                         else:
                             print("Failed to update stock:", update_query.lastError().text())
                     else:
                         print("Stock record not found for product_id:", product_id)            
-                        self.clear_fields()
-                        print("Table and fields are cleared")
                         
                         
                 if not item_exist:
@@ -1156,6 +1153,7 @@ class AddPurchaseWidget(QWidget):
                 db.commit()
                 print("Transaction committed successfully")
                 QMessageBox.information(None, "Success", "Purchase saved successfully")
+                self.clear_fields()
             
             finally:
                 print("Database connection closed")
@@ -1462,7 +1460,7 @@ class AddPurchaseWidget(QWidget):
             return False
 
 
-    def add_new_product_dialog(self, new_product=None):
+    def add_new_product_dialog(self, combo, new_product=None):
         
         dialog = ImportDialog(self)
         
@@ -1473,6 +1471,11 @@ class AddPurchaseWidget(QWidget):
             print("New Product is: ", new_product)
             
             code = dialog.code_input.text()
+            
+            if code == '':
+                code = None
+                
+                
             category = dialog.category_input.currentText()
             brand = dialog.brand_input.text()
             
@@ -1529,6 +1532,8 @@ class AddPurchaseWidget(QWidget):
                     print("Stock record created successfully for new product")
                 
 
+            combo.addItem(new_product, product_id)
+            
             print("Import Dialog Accepted")
             
         else:
