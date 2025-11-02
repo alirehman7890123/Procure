@@ -170,11 +170,11 @@ class MainWindow(QMainWindow):
         
         header_layout.addWidget(business_title)
         
-        self.back_button = QPushButton("Back")
-        header_layout.addWidget(self.back_button)
+        # self.back_button = QPushButton("Back")
+        # header_layout.addWidget(self.back_button)
         
-        self.forward_button = QPushButton("Forward")
-        header_layout.addWidget(self.forward_button)
+        # self.forward_button = QPushButton("Forward")
+        # header_layout.addWidget(self.forward_button)
         
         
         
@@ -664,75 +664,9 @@ class MainWindow(QMainWindow):
 
 
 
-
-from PySide6.QtCore import QObject, QEvent
-from PySide6.QtWidgets import QApplication, QStackedWidget
-
-
-from PySide6.QtWidgets import QApplication, QStackedWidget, QWidget
-from PySide6.QtCore import QObject
-
-class PageTracker(QObject):
-    def __init__(self):
-        super().__init__()
-        self.history = []
-        self.current = -1
-
-    def attach_to(self, root: QWidget):
-        """Find all QStackedWidgets inside the given root widget and attach signals."""
-        stacks = root.findChildren(QStackedWidget)
-        for s in stacks:
-            self._register_stack(s)
-
-    def _register_stack(self, stack: QStackedWidget):
-        # Avoid double connection
-        if getattr(stack, "_tracker_connected", False):
-            return
-        stack.currentChanged.connect(lambda _: self._page_changed(stack))
-        stack._tracker_connected = True
-
-    def _page_changed(self, stack):
-        widget = stack.currentWidget()
-        if not widget:
-            return
-
-        if self.history and self.history[-1] == widget:
-            return
-
-        # trim forward history if needed
-        if self.current < len(self.history) - 1:
-            self.history = self.history[:self.current + 1]
-
-        self.history.append(widget)
-        self.current = len(self.history) - 1
-        print(f"Page shown: {widget.objectName()} ({hex(id(widget))})")
-
-    def back(self):
-        if self.current > 0:
-            self.current -= 1
-            self._show_widget(self.history[self.current])
-
-    def forward(self):
-        if self.current < len(self.history) - 1:
-            self.current += 1
-            self._show_widget(self.history[self.current])
-
-    def _show_widget(self, widget):
-        # find parent QStackedWidget and raise this widget
-        parent = widget.parent()
-        while parent and not isinstance(parent, QStackedWidget):
-            parent = parent.parent()
-        if parent:
-            parent.setCurrentWidget(widget)
-
-
-
 if __name__ == '__main__':
 
     app = QApplication([])
-    
-    tracker = PageTracker()
-    app.installEventFilter(tracker)
     
     style = ""
     for css_file in css_files:
@@ -741,17 +675,11 @@ if __name__ == '__main__':
             style += f.read() + "\n"
 
 
-
     app.setStyleSheet(style)
     
     window = MainWindow()
     
-    
-    tracker.attach_to(window)
-    
-    window.back_button.clicked.connect(tracker.back)
-    window.forward_button.clicked.connect(tracker.forward)
-    
-    
     window.show()
     app.exec()
+    
+    
