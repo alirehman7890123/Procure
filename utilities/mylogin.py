@@ -469,27 +469,6 @@ class MainWindow(QMainWindow):
     
     
     
-    def go_to_page(self, index):
-        self.main_content_layout.setCurrentIndex(index)
-        
-        if self.current_index < len(self.history) - 1:
-            self.history = self.history[:self.current_index + 1]
-            
-        self.history.append(index)
-        self.current_index = len(self.history) - 1
-
-    def next_page(self):
-        if self.current_index < len(self.history) - 1:
-            self.current_index += 1
-            self.main_content_layout.setCurrentIndex(self.history[self.current_index])
-
-    def prev_page(self):
-        if self.current_index > 0:
-            self.current_index -= 1
-            self.main_content_layout.setCurrentIndex(self.history[self.current_index])
-        
-        
-    
     def set_business_name(self):
         
         query = QSqlQuery()
@@ -566,41 +545,33 @@ class MainWindow(QMainWindow):
     @permission.require_permission('dashboard')
     def set_dashboard(self, widget, layout):
         layout.setCurrentWidget(widget)
-        self.go_to_page(0)
         
     def set_business(self, widget, layout):
         layout.setCurrentWidget(widget)
-        self.go_to_page(1)
 
     def set_profile(self, widget, layout):
         self.profile.reset_to_default()
         layout.setCurrentWidget(widget)
-        self.go_to_page(2)
 
     def set_supplier(self, widget, layout):
         self.supplier.reset_to_default()
         layout.setCurrentWidget(widget)
-        self.go_to_page(3)
 
     def set_salesrep(self, widget, layout):
         self.salesrep.reset_to_default()
         layout.setCurrentWidget(widget)
-        self.go_to_page(4)
     
     def set_purchase(self, widget, layout):
         self.purchase.reset_to_default()
         layout.setCurrentWidget(widget)
-        self.go_to_page(5)
     
     def set_sales(self, widget, layout):
         self.base_sales.reset_to_default()
         layout.setCurrentWidget(widget)
-        self.go_to_page(6)
 
     def set_customer(self, widget, layout):
         self.base_customer.reset_to_default()
         layout.setCurrentWidget(widget)
-        self.go_to_page(7)
 
     def set_product(self, widget, layout):
         self.product.reset_to_default()
