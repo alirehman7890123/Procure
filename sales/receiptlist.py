@@ -247,9 +247,8 @@ class ReceiptListWidget(QWidget):
                 customer = 0
                 
             customer = int(customer)
-            salesman = str(query.value(2))
-            received = query.value(3)
-            creation = query.value(4)
+            received = query.value(2)
+            creation = query.value(3)
             
             if customer == 0:
                 

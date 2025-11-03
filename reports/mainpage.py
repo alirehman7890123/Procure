@@ -198,18 +198,40 @@ class MainReportsPage(QWidget):
         monthly_sales = {day: 0 for day in range(1, 32)}
 
         query = QSqlQuery()
+        # query.prepare("""
+        #     SELECT
+        #         day::int,
+        #         COALESCE(SUM(total), 0) AS total_sales
+        #     FROM
+        #         generate_series(1, 31) AS day
+        #     LEFT JOIN
+        #         sales ON EXTRACT(DAY FROM creation_date) = day
+        #             AND date_trunc('month', creation_date) = date_trunc('month', CURRENT_DATE)
+        #     GROUP BY day
+        #     ORDER BY day;
+        # """)
+        
         query.prepare("""
+            WITH RECURSIVE days(day) AS (
+                SELECT 1
+                UNION ALL
+                SELECT day + 1 FROM days WHERE day < 31
+            )
             SELECT
-                day::int,
-                COALESCE(SUM(total), 0) AS total_sales
+                days.day,
+                COALESCE(SUM(s.total), 0) AS total_sales
             FROM
-                generate_series(1, 31) AS day
+                days
             LEFT JOIN
-                sales ON EXTRACT(DAY FROM creation_date) = day
-                    AND date_trunc('month', creation_date) = date_trunc('month', CURRENT_DATE)
-            GROUP BY day
-            ORDER BY day;
+                sales s
+                ON CAST(STRFTIME('%d', s.creation_date) AS INTEGER) = days.day
+                AND STRFTIME('%Y-%m', s.creation_date) = STRFTIME('%Y-%m', 'now')
+            GROUP BY
+                days.day
+            ORDER BY
+                days.day;
         """)
+
 
         if query.exec():
             while query.next():

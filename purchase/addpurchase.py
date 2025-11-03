@@ -606,11 +606,10 @@ class AddPurchaseWidget(QWidget):
         rate_edit.setText("0.00")
         
         
-        discount = KeyUpLineEdit()
+        discount = QLineEdit()
         discount.setText("0")
         
-        discount_amount = KeyUpLineEdit()
-        discount_amount.setReadOnly(True)
+        discount_amount = QLineEdit()
         discount_amount.setStyleSheet("background-color: #ccc")
         discount_amount.setText("0.0")
         
@@ -652,14 +651,15 @@ class AddPurchaseWidget(QWidget):
         qty_edit.textChanged.connect(lambda _: self.update_amount(qty_edit))
         rate_edit.textChanged.connect(lambda _: self.update_amount(rate_edit))
         
-        discount.keyReleased.connect(lambda _: self.update_amount(discount))
-        discount_amount.keyReleased.connect(lambda _:self.update_amount(discount_amount))
+        discount.textChanged.connect(lambda _: self.update_amount(discount))
+        discount_amount.textChanged.connect(lambda _:self.update_amount(discount_amount))
         tax.textChanged.connect(lambda _: self.update_amount(tax))
         
         remove_btn.clicked.connect(lambda _, r=row: self.remove_row(r))
 
         self.update_table_height()
-        
+    
+    
         
 
     def remove_row(self, target_row):
@@ -1268,6 +1268,9 @@ class AddPurchaseWidget(QWidget):
             
             discount_edit = self.table.cellWidget(row,7).text()
             
+            if discount_edit == '':
+                discount_edit = 0
+            
             tax_edit = self.table.cellWidget(row,9).text()
 
             qty = int(qty_text) if qty_text else 0
@@ -1281,6 +1284,12 @@ class AddPurchaseWidget(QWidget):
             if discount :
                 discount = rate * discount / 100
                 self.table.cellWidget(row, 8).setText(str(discount))
+            
+            if discount == 0:
+                self.table.cellWidget(row, 8).setText(str(discount))
+            
+            
+                
                 
                 
             flat_discount = self.table.cellWidget(row,8).text()
