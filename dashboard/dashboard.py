@@ -76,6 +76,7 @@ class DashboardWidget(QWidget):
         self.product_btn.clicked.connect(partial(self.product_page_signal.emit))
 
         header_layout.addWidget(self.create_sale, 0, Qt.AlignRight)
+        header_layout.addWidget(self.product_btn, 0, Qt.AlignRight)
 
         self.layout.addLayout(header_layout)
         
