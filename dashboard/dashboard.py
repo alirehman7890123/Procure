@@ -1,8 +1,10 @@
 from PySide6.QtWidgets import QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QDateEdit, QPushButton, QLabel, QFrame, QComboBox
-from PySide6.QtCore import Qt, QFile, QDate
+from PySide6.QtCore import Qt, QFile, QDate, Signal
 import sys, os
 from PySide6.QtSql import QSqlQuery, QSqlDatabase
 from PySide6.QtCore import QDate
+from functools import partial
+from utilities import mylogin
 
 
 
@@ -39,6 +41,11 @@ def load_stylesheets():
 
 
 class DashboardWidget(QWidget):
+    
+    
+    sales_page_signal = Signal()
+    product_page_signal = Signal()
+    
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -56,6 +63,19 @@ class DashboardWidget(QWidget):
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
         # header_layout.addWidget(self.supplierlist)
+        
+        
+        self.create_sale = QPushButton("Create New Sale", objectName="TopRightButton")
+        self.create_sale.setCursor(Qt.PointingHandCursor)
+        self.create_sale.setFixedWidth(150)
+        self.create_sale.clicked.connect(partial(self.sales_page_signal.emit))
+        
+        self.product_btn = QPushButton("View Products", objectName="TopRightButton")
+        self.product_btn.setCursor(Qt.PointingHandCursor)
+        self.product_btn.setFixedWidth(150)
+        self.product_btn.clicked.connect(partial(self.product_page_signal.emit))
+
+        header_layout.addWidget(self.create_sale, 0, Qt.AlignRight)
 
         self.layout.addLayout(header_layout)
         
@@ -92,16 +112,27 @@ class DashboardWidget(QWidget):
         
         self.date_from = QDateEdit()
         self.date_from.setCalendarPopup(True)
+        self.date_from.setDisplayFormat("dd/MM/yyyy")
         self.date_from.setDate(QDate.currentDate())
         
         
         self.date_to = QDateEdit()
         self.date_to.setCalendarPopup(True)
+        self.date_from.setDisplayFormat("dd/MM/yyyy")
         self.date_to.setDate(QDate.currentDate()) 
+        
+        get_data_btn = QPushButton("Get Data", objectName="TopRightButton")
+        get_data_btn.setCursor(Qt.PointingHandCursor)
+        get_data_btn.setFixedWidth(100)
+        
+        self.date_from.dateChanged.connect(self.get_duration_data)
+        self.date_to.dateChanged.connect(self.get_duration_data)
+        get_data_btn.clicked.connect(self.get_duration_data)
         
         filter_row.addWidget(self.date_from)
         filter_row.addWidget(self.date_to)
-        
+        # filter_row.addWidget(get_data_btn)
+
         self.layout.addLayout(filter_row)
         
         
@@ -362,6 +393,69 @@ class DashboardWidget(QWidget):
         self.get_customer_summary()
         
 
+    
+    
+    
+    
+    
+    def get_duration_data(self):
+        
+        print("Get Data button clicked")
+        date_from = self.date_from.date().toString("yyyy-MM-dd")
+        date_to = self.date_to.date().toString("yyyy-MM-dd")
+        
+        
+        print("Fetching data from", date_from, "to", date_to)
+
+        # get sales summary
+        query = QSqlQuery()
+        sql = f"""
+            SELECT IFNULL(SUM(received),0), COUNT(*)
+            FROM sales
+            WHERE DATE(creation_date) BETWEEN '{date_from}' AND '{date_to}'
+        """
+        if not query.exec(sql):
+            print("Query failed:", query.lastError().text())
+            return 0, 0
+
+        total_sales = 0
+        total_invoices = 0
+        if query.next():
+            total_sales = query.value(0) or 0
+            total_invoices = query.value(1) or 0
+
+        
+        self.card1_data.setText(f"{total_sales:.2f}")
+        self.card1_bottom.setText(f"{total_invoices} Invoice(s) ")
+    
+    
+        
+        
+        # get purchase summary
+        
+        date_from_str = self.date_from.date().toString("yyyy-MM-dd") + " 00:00:00"
+        date_to_str   = self.date_to.date().toString("yyyy-MM-dd") + " 23:59:59"
+        
+        sql = f"""
+            SELECT IFNULL(SUM(paid), 0), COUNT(*)
+            FROM purchase
+            WHERE creation_date BETWEEN '{date_from_str}' AND '{date_to_str}'
+        """
+        
+        if not query.exec(sql):
+            print("Query failed:", query.lastError().text())
+            return 0.0, 0
+
+        total_purchase = 0.0
+        total_invoices = 0
+        if query.next():
+            total_purchase = query.value(0) or 0.0
+            total_invoices = query.value(1) or 0
+
+        self.card2_data.setText(f"{total_purchase:.2f}")
+        self.card2_bottom.setText(f"{total_invoices} Invoice(s) ")
+        
+        
 
 
     def get_sales_summary(self, duration="today"):

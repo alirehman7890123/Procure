@@ -1711,6 +1711,8 @@ class CreateSalesWidget(QWidget):
         self.roundoffdata.setText(f"{roundoff:.2f}")
         self.final_amountdata.setText(f"{finaltotal:.2f}")
         
+        self.receiveedit.setText(f"{finaltotal:.2f}")
+        
 
 
 
@@ -2143,6 +2145,8 @@ class CreateSalesWidget(QWidget):
         self.lefttotaldata.clear()
         self.receiveedit.clear()
         self.remainingdata.clear()
+        self.additional_charges.clear()
+        
         
         self.checkbox.setChecked(True)        
         

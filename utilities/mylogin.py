@@ -1,6 +1,6 @@
 
 from PySide6.QtWidgets import QApplication, QWidget,QTableWidget, QMainWindow,QMessageBox, QPushButton, QHBoxLayout, QVBoxLayout, QStackedLayout, QLabel,  QSizePolicy
-from PySide6.QtCore import QSize, Qt, QEvent
+from PySide6.QtCore import QSize, Qt, QEvent, Signal
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtWidgets import QScrollArea
 from utilities.sidebarbutton import SideBarButton
@@ -57,6 +57,9 @@ css_files = [
 
 
 class MainWindow(QMainWindow):
+    
+    
+    
 
     def __init__(self):
 
@@ -94,12 +97,12 @@ class MainWindow(QMainWindow):
         
         
         # SIDE-BAR SCROLL
-        sidebar_scroll = QScrollArea()
-        sidebar_scroll.setFixedWidth(210)
-        sidebar_scroll.setWidgetResizable(True)
-        sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.sidebar_scroll = QScrollArea()
+        self.sidebar_scroll.setFixedWidth(210)
+        self.sidebar_scroll.setWidgetResizable(True)
+        self.sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
-        sidebar_scroll.setStyleSheet(""" 
+        self.sidebar_scroll.setStyleSheet(""" 
                                     background-color: #47034E;
                                     
                                     QScrollArea {
@@ -107,7 +110,10 @@ class MainWindow(QMainWindow):
                                         border: none;
                                     }
                                 """)
-    
+
+
+        self.sidebar_scroll.setAttribute(Qt.WA_Hover, True)
+        self.sidebar_scroll.installEventFilter(self)
     
         # SIDE-BAR WIDGET
         sidebar_widget = QWidget()
@@ -117,7 +123,7 @@ class MainWindow(QMainWindow):
         
 
         sidebar_widget.setLayout(sidebar_layout)
-        sidebar_scroll.setWidget(sidebar_widget)
+        self.sidebar_scroll.setWidget(sidebar_widget)
         
         
         
@@ -155,7 +161,7 @@ class MainWindow(QMainWindow):
         icon = QIcon(QPixmap(resource_path("res/ham.png")))
         ham.setIcon(icon)
 
-        ham.toggled.connect(lambda: self.toggle_sidebar(sidebar_scroll, ham))
+        ham.clicked.connect(lambda: self.toggle_sidebar(self.sidebar_scroll, ham))
 
         header_layout.addWidget(ham)
         
@@ -368,11 +374,12 @@ class MainWindow(QMainWindow):
 
 
         self.dashboard = DashboardWidget()
+        
+        
         self.welcome = WelcomeWidget()
         self.profile = BaseProfileWidget()
         self.business = BaseBusinessWidget()
         self.supplier = BaseSupplierWidget()
-        
         
         self.salesrep = BaseSalesRepWidget()
         self.purchase = BasePurchaseWidget()
@@ -381,6 +388,8 @@ class MainWindow(QMainWindow):
         
         self.base_customer = BaseCustomerWidget(controller=self)
         self.product = BaseProductWidget()
+        
+        
         self.employee = BaseEmployeeWidget()
         self.transaction = BaseTransactionWidget()
         self.purchasereturn = BasePurchaseReturnWidget()
@@ -389,6 +398,10 @@ class MainWindow(QMainWindow):
         self.reports = BaseReportsWidget()
         
         self.holdsales = BaseHoldSalesWidget(controller=self)
+        
+        
+        self.dashboard.sales_page_signal.connect(lambda: self.set_sales(self.base_sales, self.main_content_layout))
+        self.dashboard.product_page_signal.connect(lambda: self.set_product(self.product, self.main_content_layout))
         
         
 
@@ -462,8 +475,11 @@ class MainWindow(QMainWindow):
         self.make_all_focusable(self)
 
         
-        self.layout.addWidget(sidebar_scroll)
+        self.layout.addWidget(self.sidebar_scroll)
         self.layout.addWidget(content_area_widget)
+        
+        
+        
     
     
     
@@ -520,20 +536,36 @@ class MainWindow(QMainWindow):
                 child.setTabKeyNavigation(False)  # allow leaving with Tab
                 child.installEventFilter(self)   # optional: catch Tab manually
 
+    
 
     def eventFilter(self, obj, event):
-        if obj is self.table and event.type() == QEvent.KeyPress:
-            if event.key() == Qt.Key_Tab:
-                if self.table.currentRow() == self.table.rowCount() - 1 and \
-                self.table.currentColumn() == self.table.columnCount() - 1:
-                    # last cell → move focus out
-                    self.focusNextChild()
-                    return True
-            elif event.key() == Qt.Key_Backtab:
-                if self.table.currentRow() == 0 and self.table.currentColumn() == 0:
-                    # first cell + shift+tab → move focus backwards
-                    self.focusPreviousChild()
-                    return True
+
+        if obj is self.sidebar_scroll and event.type() == QEvent.HoverLeave:
+            print("Hover left sidebar — hiding")
+            self.hide_sidebar(obj)
+
+        # if obj is self.table and event.type() == QEvent.KeyPress:
+        #     if event.key() == Qt.Key_Tab:
+        #         if self.table.currentRow() == self.table.rowCount() - 1 and \
+        #         self.table.currentColumn() == self.table.columnCount() - 1:
+        #             # last cell → move focus out
+        #             self.focusNextChild()
+        #             return True
+        #     elif event.key() == Qt.Key_Backtab:
+        #         if self.table.currentRow() == 0 and self.table.currentColumn() == 0:
+        #             # first cell + shift+tab → move focus backwards
+        #             self.focusPreviousChild()
+        #             return True
+                
+                
+        # if event.type() == QEvent.FocusOut:
+        #     if obj is self.sidebar_scroll:
+        #         print("Hiding sidebar")
+        #         self.hide_sidebar(obj)
+                
+                
+     
+        
         return super().eventFilter(obj, event)
 
     
@@ -614,13 +646,21 @@ class MainWindow(QMainWindow):
 
 
     def toggle_sidebar(self, sidebar, button):
+        
+        sidebar.show()
 
-        if button.isChecked():
-            sidebar.show()
-        else: 
-            sidebar.hide()
+        # if button.isChecked():
+        #     sidebar.show()
+        # else: 
+        #     sidebar.hide()
 
 
+
+    def hide_sidebar(self, sidebar):
+        
+        sidebar.hide()
+        
+        
     
     
     def reset_widget_size(self, layout, widget):
