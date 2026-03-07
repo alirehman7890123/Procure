@@ -1,4 +1,5 @@
-from PySide6.QtWidgets import QWidget, QCompleter, QVBoxLayout, QHBoxLayout, QFrame,  QStyledItemDelegate, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
+from datetime import datetime
+from PySide6.QtWidgets import QWidget, QCompleter, QVBoxLayout, QHBoxLayout, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
 from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, QTimer, Signal, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtGui import QPalette, QColor, QKeyEvent
@@ -66,7 +67,7 @@ class AddPurchaseWidget(QWidget):
 
 
         self.layout.addWidget(line)
-        self.layout.addSpacing(20)
+        self.layout.addSpacing(5)
         
         
         
@@ -104,15 +105,37 @@ class AddPurchaseWidget(QWidget):
 
         
         self.supplier_edit.currentIndexChanged.connect(self.populate_reps)
+        
+        
+        
+        line = QFrame()
+        line.setObjectName("lineSeparator")
+
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        line.setStyleSheet("""
+                QFrame#lineSeparator {
+                    border: none;
+                    border-top: 2px solid #333;
+                }
+            """)
 
 
+        self.layout.addWidget(line)
+        self.layout.addSpacing(10)
+        
+        
+        ### Populate Labels & Entry Line
+        self.populate_label_line()
+        
+        
+        
         # Purchse Table
         self.row_height = 40
         self.min_visible_rows = 5
-        
     
-        self.table = MyTable(column_ratios=[0.03, 0.25, 0.07, 0.10, 0.05, 0.05, 0.07, 0.05, 0.07, 0.05, 0.07, 0.10, 0.05])
-        headers = ["#", "Product Description", "Batch", "Expiry", "Qty", "Bonus", "Rate", "Disc% ", "Amt", "Tax %", "Amt", "Total", "X"]
+        self.table = MyTable(column_ratios=[0.03, 0.25, 0.07, 0.10, 0.05, 0.05, 0.07, 0.07, 0.05, 0.10, 0.05])
+        headers = ["#", "Product", "Batch", "Expiry", "Qty", "Bonus", "Rate", "Disc % ", "Tax %", "Total", "X"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         
@@ -148,171 +171,123 @@ class AddPurchaseWidget(QWidget):
 
         self.layout.addWidget(self.table)
         
-        
-      
-        # Fill initial rows
-        for _ in range(5):
-            
-            self.add_row()
-        
-        self.table.currentCellChanged.connect(self.on_cell_focus)
-        
-        
-        # === Add Row Button ===
-        add_button_row = QHBoxLayout()
-        self.add_button = QPushButton("Add Row", objectName='TopRightButton')
-        
-        self.add_button.clicked.connect(self.add_row)
-        add_button_row.addWidget(self.add_button, stretch=1)
-        self.layout.addLayout(add_button_row)
-        
-        
-        
-        
-        
-        
-        # Cacluation Layout
-        
-        calculation_layout = QHBoxLayout()
-        
-        left_wrapper_widget = QWidget()
-        left_layout = QVBoxLayout()
-        left_wrapper_widget.setLayout(left_layout)
-        
-        subtotal_row = QHBoxLayout()
-        subtotal = QLabel("Sub Total")
-        self.subtotaldata = QLabel("0.00")
-
-        subtotal_row.addWidget(subtotal, 1)
-        subtotal_row.addWidget(self.subtotaldata, 2)
-
-        left_layout.addLayout(subtotal_row)
-        left_layout.addSpacing(5)
-        
-        discount_row = QHBoxLayout()
-        discount = QLabel("Discount")
-        self.percentage = KeyUpLineEdit()
-        self.percentage.setPlaceholderText(" Disc % ")
-        self.flatdiscount = KeyUpLineEdit()
-        self.flatdiscount.setPlaceholderText("Flat")
-        discount_row.addWidget(discount, 1)
-        discount_row.addWidget(self.percentage, 1)
-        discount_row.addWidget(self.flatdiscount, 1)
-        left_layout.addLayout(discount_row)
-        
-        self.percentage.keyReleased.connect(self.percentage_discount)
-        self.flatdiscount.keyReleased.connect(self.flat_discount)
-        
-        
-        netamount_row = QHBoxLayout()
-        net_amount = QLabel("Net Amount")
-        self.net_amountdata = QLabel("0.00")
-        netamount_row.addWidget(net_amount, 1)
-        netamount_row.addWidget(self.net_amountdata, 2)
-        left_layout.addLayout(netamount_row)
-        
-        
-        tax_row = QHBoxLayout()
-        taxlabel = QLabel("Tax")
-        self.taxedit = KeyUpLineEdit()
-        self.taxedit.setPlaceholderText("Tax %")
-        self.taxamount = QLabel("0.00")
-        tax_row.addWidget(taxlabel, 1)
-        tax_row.addWidget(self.taxedit, 1)
-        tax_row.addWidget(self.taxamount, 1)
-        left_layout.addLayout(tax_row)
-        self.taxedit.keyReleased.connect(self.calculate_tax)
-        
-        left_layout.addSpacing(15)
-        
-        total_row = QHBoxLayout()
-        lefttotal = QLabel("Total")
-        self.lefttotaldata = QLabel("0.00")
-
-        total_row.addWidget(lefttotal, 1)
-        total_row.addWidget(self.lefttotaldata, 2)
-        
-        left_layout.addLayout(total_row)
-        
-        
-        right_wrapper_widget = QWidget()
-        right_layout = QVBoxLayout()
-        right_wrapper_widget.setLayout(right_layout)
-        
-        
-        right_total_row = QHBoxLayout()
-        right_total = QLabel("Total")
-        self.right_totaldata = QLabel("0.00")
-        right_total_row.addWidget(right_total, 1)
-        right_total_row.addWidget(self.right_totaldata, 2)
-        right_layout.addLayout(right_total_row)
-        right_layout.addSpacing(5)
 
 
-        roundoff_row = QHBoxLayout()
-        roundofflabel = QLabel("Roundoff")
-        self.roundoffdata = QLabel("0.00")
-        roundoff_row.addWidget(roundofflabel, 1)
-        roundoff_row.addWidget(self.roundoffdata, 2)
-        right_layout.addLayout(roundoff_row)
-
-
-        final_amount_row = QHBoxLayout()
-        final_amount = QLabel("Final Amount")
-        self.final_amountdata = QLabel("0.00")
-        final_amount_row.addWidget(final_amount, 1)
-        final_amount_row.addWidget(self.final_amountdata, 2)
-        right_layout.addLayout(final_amount_row)
-        
-        
-        payment_method_row = QHBoxLayout()
-        payment_method_label = QLabel("Payment Method")
-        self.payment_method_combo = QComboBox()
-        self.payment_method_combo.addItems(["Cash", "On Credit", "Bank Transfer", "JazzCash", "EasyPaisa"])
-        self.payment_method_combo.currentIndexChanged.connect(self.pay_method_change)
-        
-        payment_method_row.addWidget(payment_method_label, 1)
-        payment_method_row.addWidget(self.payment_method_combo, 2)
-        right_layout.addLayout(payment_method_row)
-
+        entry_layout = QVBoxLayout()
+        entry_layout.setSpacing(10)
 
         
-        payment_row = QHBoxLayout()
-        paidlabel = QLabel("Paid Amount")
-        self.paidedit = QLineEdit()
-        payment_row.addWidget(paidlabel, 1)
-        payment_row.addWidget(self.paidedit, 2)
-        right_layout.addLayout(payment_row)
+        ### --- calculate label 
+        
+        calculate_labels_layout = QHBoxLayout()
+        
+        gross_label = QLabel("Gross Amount")
+        calculate_labels_layout.addWidget(gross_label, 1)
+        
+        discount_label = QLabel("Discount")
+        calculate_labels_layout.addWidget(discount_label, 1)
+        
+        taxable_label = QLabel("Taxable")
+        calculate_labels_layout.addWidget(taxable_label, 1)
+        
+        tax_236g_label = QLabel("Tax 236(G)")
+        calculate_labels_layout.addWidget(tax_236g_label, 1)
+        
+        tax_236h_label = QLabel("Tax 236(H)")
+        calculate_labels_layout.addWidget(tax_236h_label, 1)
+        
+        sales_tax_label = QLabel("Sales Tax")
+        calculate_labels_layout.addWidget(sales_tax_label, 1)
+        
+        net_amount_label = QLabel("Net Amount")
+        calculate_labels_layout.addWidget(net_amount_label, 1)
+        
+        cn_adjust_label = QLabel("CN Adjustment")
+        calculate_labels_layout.addWidget(cn_adjust_label, 1)
+        
+        final_label = QLabel("Final Amount")
+        calculate_labels_layout.addWidget(final_label, 1)
+        
+        self.final_amount = QLabel("0.0")
+        calculate_labels_layout.addWidget(self.final_amount, 1)
+        
+        
+        entry_layout.addLayout(calculate_labels_layout)
+        # self.layout.addLayout(calculate_labels_layout)
+        
+        
+        
+        calculate_entry_layout = QHBoxLayout()
+        
+        self.gross_entry = QLabel("0.00")
+        calculate_entry_layout.addWidget(self.gross_entry, 1)
+        
+        self.discount_entry = QLineEdit()
+        calculate_entry_layout.addWidget(self.discount_entry, 1)
+        
+        self.taxable_entry = QLabel("0.00")
+        calculate_entry_layout.addWidget(self.taxable_entry, 1)
+        
+        self.tax_236g_entry = QLineEdit()
+        calculate_entry_layout.addWidget(self.tax_236g_entry, 1)
+        
+        self.tax_236h_entry = QLineEdit()
+        calculate_entry_layout.addWidget(self.tax_236h_entry, 1)
+        
+        self.sales_tax_entry = QLineEdit()
+        calculate_entry_layout.addWidget(self.sales_tax_entry, 1)
+        
+        self.net_amount_entry = QLabel("0.00")
+        calculate_entry_layout.addWidget(self.net_amount_entry, 1)
+        
+        self.cn_adjustment_entry = QLineEdit()
+        calculate_entry_layout.addWidget(self.cn_adjustment_entry, 1)
+        
+        self.paid_label = QLabel("Paid Amount")
+        calculate_entry_layout.addWidget(self.paid_label, 1)
+        
+        self.paid_amount = QLineEdit()
+        calculate_entry_layout.addWidget(self.paid_amount, 1)
+        
 
-        self.paidedit.textChanged.connect(self.calculate_payment)
+        entry_layout.addLayout(calculate_entry_layout)
+        # self.layout.addLayout(calculate_entry_layout)
+        
+        self.layout.addLayout(entry_layout)
         
         
-        remaining_row = QHBoxLayout()
-        remaininglabel = QLabel("Remaining")
+        self.discount_entry.textChanged.connect(self.update_total_amount)
+        self.tax_236g_entry.textChanged.connect(self.update_total_amount)
+        self.tax_236h_entry.textChanged.connect(self.update_total_amount)
+        self.sales_tax_entry.textChanged.connect(self.update_total_amount)
+        self.cn_adjustment_entry.textChanged.connect(self.update_total_amount)
+        
+        self.paid_amount.textChanged.connect(self.calculate_payment)
+        
+        
+        
+        
+        
+        
+        
+        remaining_layout = QHBoxLayout()
+        
+        spacer_label = QLabel()
+        remaining_layout.addWidget(spacer_label, 7)
+        
+        self.remaining_label = QLabel("Remaining Amount")
+        remaining_layout.addWidget(self.remaining_label, 1)
+        
         self.remainingdata = QLabel("0.00")
-        self.checkbox = QCheckBox("Write off")
-        self.checkbox.setStyleSheet("color: #333;")
-        self.checkbox.toggled.connect(self.writeoffcheck)
-        remaining_row.addWidget(remaininglabel, 1)
-        remaining_row.addWidget(self.remainingdata, 1)
-        remaining_row.addWidget(self.checkbox, 1)
-        right_layout.addLayout(remaining_row)
+        self.remainingdata.setStyleSheet("font-weight: bold;")
+        self.remainingdata.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        remaining_layout.addWidget(self.remainingdata, 1)
         
+        self.writeoff_check = QCheckBox("Write-off Remaining")
+        remaining_layout.addWidget(self.writeoff_check, 1)
+        self.writeoff_check.setStyleSheet("QCheckBox { color: #333; }")
         
-
-        calculation_layout.addWidget(left_wrapper_widget)
-        calculation_layout.addWidget(right_wrapper_widget)
-        self.layout.addLayout(calculation_layout)
-        
-        
-        note_row = QHBoxLayout()
-        
-        self.note = QLabel("Note")
-        self.note_edit = QLineEdit()
-        note_row.addWidget(self.note, 1)
-        note_row.addWidget(self.note_edit, 3)
-        
-        self.layout.addLayout(note_row)
+        self.layout.addLayout(remaining_layout)
         
         
         # === Save Button ===
@@ -339,93 +314,299 @@ class AddPurchaseWidget(QWidget):
 
         
         
+        
+        
+    def update_line_total(self):
+        
+        qty = self.qty_edit.text()
+        rate = self.rate_edit.text()
+        
+        
+        if qty == '':
+            qty = 0
+            
+        if rate == '':
+            rate = 0.00
+        
+        
+        discount = self.discount_edit.text()
+        
+        if discount == "":
+            discount = 0.00
+        
+        # turn it into flat discount
+        flat_discount = 0.00
+        if discount:
+            try:
+                discount_value = float(discount)
+                subtotal = float(qty) * float(rate)
+                flat_discount = (subtotal * discount_value) / 100
+            except ValueError:
+                pass
+            
+            
+        # calculate tax amount
+        tax = self.tax_edit.text()
+        
+        if tax == "":
+            tax = 0.00
+        
+        tax_amount = 0.00
+        if tax:
+            try:
+                tax_value = float(tax)
+                taxable_amount = (float(qty) * float(rate)) - flat_discount
+                tax_amount = (taxable_amount * tax_value) / 100
+            except ValueError:
+                pass
+        
+        # update the total label
+        total = float(qty) * float(rate) - flat_discount + tax_amount
+        self.amount_edit.setText(f"{total:.2f}")
+        
+        
+        
+        
+        
+        
+    def populate_label_line(self):
+        
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(10)
+        
+        label_style = """
+
+            QLabel {
+                margin: 0;
+                padding: 0;
+            }
+            
+            QLineEdit {
+                margin: 0;
+                padding: 5px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                font-size: 14px;
+                background-color: #f9f9f9;
+            }
+            QComboBox {
+                margin: 0;
+                padding: 5px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                font-size: 14px;
+                background-color: #f9f9f9;
+            }
+            KeyUpLineEdit {
+                margin: 0;
+                padding: 5px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                font-size: 14px;
+                background-color: #f9f9f9;
+            }   
+            
+            
+        """
+        
+        
+        label_line = QHBoxLayout()
+
+        
+        product_label = QLabel("Enter Product")
+        product_label.setStyleSheet(label_style)
+        label_line.addWidget(product_label, 3)
+        
+        qty_label = QLabel("Qty (Pack)")
+        qty_label.setStyleSheet(label_style)
+        label_line.addWidget(qty_label, 1)
+
+        bonus_label = QLabel("Bonus (Pack)")
+        bonus_label.setStyleSheet(label_style)
+        label_line.addWidget(bonus_label, 1)
+
+        rate_label = QLabel("Pack Cost")
+        rate_label.setStyleSheet(label_style)
+        label_line.addWidget(rate_label, 1)
+        
+        batch_label = QLabel("Batch")
+        # rate_label.setFixedWidth(100)
+        batch_label.setStyleSheet(label_style)
+        label_line.addWidget(batch_label, 1)
+        
+        expiry_label = QLabel("Expiry")
+        # rate_label.setFixedWidth(100)
+        expiry_label.setStyleSheet(label_style)
+        label_line.addWidget(expiry_label, 1)
+        
+        discount_label = QLabel("Discount %")
+        # rate_label.setFixedWidth(200)
+        discount_label.setStyleSheet(label_style)
+        label_line.addWidget(discount_label, 1)
+        
+        tax_label = QLabel("Tax %")
+        # rate_label.setFixedWidth(200)
+        tax_label.setStyleSheet(label_style)
+        label_line.addWidget(tax_label, 1)
+        
+        
+        
+        total_label = QLabel("Total")
+        # total_label.setFixedWidth(100)
+        total_label.setStyleSheet(label_style)
+        label_line.addWidget(total_label, 1)
+        
+        add_button_label = QLabel()
+        add_button_label.setStyleSheet(label_style)
+        label_line.addWidget(add_button_label, 1)
+        
+        
+
+
+
+        entry_line = QHBoxLayout()
+        
+        
+        self.item = QComboBox()
+        self.item.wheelEvent = lambda event: event.ignore()
+        self.item.setPlaceholderText("select product")
+        self.item.setEditable(True)
+        
+        self.item.lineEdit().editingFinished.connect(lambda c=self.item: self.handle_editing_finished(c))
+        
+        completer = QCompleter()
+        self.item.setCompleter(completer)
+        completer.setCompletionMode(QCompleter.PopupCompletion)
+        
+        self.item.lineEdit().completer().popup().setStyleSheet("""
+            QListView {
+                padding: 5px;
+                background-color: white;
+                border: 1px solid gray;
+                color: #333;
+            }
+            QListView::item {
+                padding: 6px 10px;
+            }
+            QListView::item:selected {
+                background-color: #0078d7;
+                color: white;
+            }
+        """)
+
+
+        self.item.lineEdit().textEdited.connect(lambda: self.load_product_suggestions(self.item, completer))
+        
+        
+        
+        
+        self.item.setStyleSheet(label_style)
+        entry_line.addWidget(self.item, 3)
+        
+        self.qty_edit = QLineEdit()
+        self.qty_edit.setPlaceholderText("qty")
+        self.qty_edit.setStyleSheet(label_style)
+        entry_line.addWidget(self.qty_edit, 1)
+        
+        self.qty_edit.textChanged.connect(self.update_total_amount)
+        
+        self.bonus_edit = QLineEdit()
+        self.bonus_edit.setPlaceholderText("bonus")
+        self.bonus_edit.setStyleSheet(label_style)
+        entry_line.addWidget(self.bonus_edit, 1)
+        
+        self.rate_edit = QLineEdit()
+        self.rate_edit.setPlaceholderText("rate")
+        self.rate_edit.setStyleSheet(label_style)
+        entry_line.addWidget(self.rate_edit, 1)
+        
+        self.batch_edit = QLineEdit()
+        self.batch_edit.setPlaceholderText("batch")
+        self.batch_edit.setStyleSheet(label_style)
+        entry_line.addWidget(self.batch_edit, 1)
+        
+        
+        self.expiry_edit = QDateEdit()
+        self.expiry_edit.setCalendarPopup(True)
+        self.expiry_edit.setDisplayFormat("dd MMM yyyy")
+        self.expiry_edit.setMinimumDate(QDate.currentDate())
+        self.expiry_edit.setDate(self.expiry_edit.minimumDate()) 
+
+        self.expiry_edit.setStyleSheet("""
+            QDateEdit {
+                padding: 4px;
+            }
+
+            QCalendarWidget QWidget {
+                background-color: white;
+                color: black;
+            }
+
+            QCalendarWidget QAbstractItemView {
+                selection-background-color: #0078d7;
+                selection-color: white;
+                color: black;
+            }
+
+            QCalendarWidget QToolButton {
+                background: none;
+                color: black;
+            }
+        """)
+        
+        entry_line.addWidget(self.expiry_edit, 1)
+        
+        
+        self.discount_edit = KeyUpLineEdit()
+        self.discount_edit.setPlaceholderText("% Disc")
+        self.discount_edit.setStyleSheet(label_style)
+        entry_line.addWidget(self.discount_edit, 1)
+        
+        self.tax_edit = KeyUpLineEdit()
+        self.tax_edit.setPlaceholderText("% Tax")
+        self.tax_edit.setStyleSheet(label_style)
+        entry_line.addWidget(self.tax_edit, 1)
+        
+        self.amount_edit = QLineEdit()
+        self.amount_edit.setReadOnly(True)
+        self.amount_edit.setText("0.00")
+        self.amount_edit.setStyleSheet("font-weight: bold;")
+        self.amount_edit.setStyleSheet(label_style)
+        entry_line.addWidget(self.amount_edit, 1)
+        
+        
+        
+        self.rate_edit.textChanged.connect(self.update_line_total)
+        self.qty_edit.textChanged.connect(self.update_line_total)
+        self.discount_edit.textChanged.connect(self.update_line_total)
+        self.tax_edit.textChanged.connect(self.update_line_total)
+
+        
+        
+        add_button = QPushButton("Add", objectName="SaveButton")
+        entry_line.addWidget(add_button, 1)
+        
+        add_button.clicked.connect(self.add_row)
+        
+        
+        info_layout.addLayout(label_line)
+        info_layout.addLayout(entry_line)
+        
+        
+        
+        self.layout.addLayout(info_layout)
 
         
     
     
-    def writeoffcheck(self):
         
-        remaining = self.remainingdata.text()
-        remaining = float(remaining) if remaining else 0
-        
-        if remaining > 0:
-            
-            if self.checkbox.isChecked():
-                
-                self.note.setText(f"Amount {remaining} will be wrote-off / Cleared")
-            else:
-                self.note.setText(f"Amount {remaining} will be added to payable")
-        
-        else:
-            
-            self.note.setText(f"Amount {remaining} is excessive and will be added to receiveable")    
-    
-    
-    
-    
-    def percentage_discount(self):
-        
-        print("Running Percentage Discount")
-        
-        subtotal = self.subtotaldata.text()
-        subtotal = float(subtotal) if subtotal else 0
-        
-        discount = self.percentage.text()
-        discount = float(discount) if discount else 0
-        
-        print("Subtotal is: ", subtotal, " percentage discount is; ", discount )
-        amount = subtotal * discount / 100
-        print("Flat Dsicout is: ", amount)
-        self.flatdiscount.setText(f"{amount:.2f}")
-        
-        self.update_total_amount()
-        
-        
-        
-        
-    def flat_discount(self):
-        
-        print("Running Flat Discount")
-        
-        subtotal = self.subtotaldata.text()
-        subtotal = float(subtotal) if subtotal else 0
-        
-        
-        discount = self.flatdiscount.text()
-        discount = float(discount) if discount else 0
-        
-        percentage = ( discount / subtotal ) * 100
-        self.percentage.setText(f"{percentage:.2f}")
-        
-        self.update_total_amount()
-        
-        
-        
-    
-    
-    def calculate_tax(self):
-        
-        net_amount = self.net_amountdata.text()
-        net_amount = float(net_amount) if net_amount else 0
-        
-        tax = self.taxedit.text()
-        tax = float(tax) if tax else 0
-        
-        tax_amount = net_amount * tax / 100
-        self.taxamount.setText(f"{tax_amount:.2f}")
-        
-        self.update_total_amount()
-        
-        
-
     def update_total_amount(self):
         
         
         subtotal = 0.00
         for row in range(self.table.rowCount()):
             
-            linetotal = self.table.cellWidget(row, 11).text()
-            
+            linetotal = self.table.cellWidget(row, 9).text()
             
             if linetotal:
                 try:
@@ -439,75 +620,50 @@ class AddPurchaseWidget(QWidget):
             else:
                 continue
                 
-        self.subtotaldata.setText(f"{subtotal:.2f}")
+        self.gross_entry.setText(f"{subtotal:.2f}")
+        discount = self.discount_entry.text()
+        discount = float(discount) if discount else 0.00
         
-        discount = self.flatdiscount.text()
-        print("Discount is: ", discount)
-        discount = float(discount) if discount else 0
-        netamount = subtotal - discount
+        taxable = subtotal - discount
+        self.taxable_entry.setText(f"{taxable:.2f}")
         
-        # set Net Amount 
-        self.net_amountdata.setText(f"{netamount:.2f}")
+        tax_236g = self.tax_236g_entry.text()
+        tax_236g = float(tax_236g) if tax_236g else 0.00
         
+        tax_236h = self.tax_236h_entry.text()
+        tax_236h = float(tax_236h) if tax_236h else 0.00
         
+        sales_tax = self.sales_tax_entry.text()
+        sales_tax = float(sales_tax) if sales_tax else 0.00
         
-        tax = self.taxedit.text()
-        tax = float(tax) if tax else 0
+        tax_amount = tax_236g + sales_tax - tax_236h
+        net_amount = taxable + tax_amount
         
-        taxamount = netamount * tax/100
-        self.taxamount.setText(f"{taxamount:.2f}")
+        self.net_amount_entry.setText(f"{net_amount:.2f}")
         
-        total = netamount + taxamount
-        self.lefttotaldata.setText(f"{total:.2f}")
+        cn_adjust = self.cn_adjustment_entry.text()
+        cn_adjust = float(cn_adjust) if cn_adjust else 0.00
         
-        # set Right Side Total
-        self.right_totaldata.setText(f"{total:.2f}")
+        final_amount = net_amount - cn_adjust
+        self.final_amount.setText(f"{final_amount:.2f}")
         
+        self.final_amount.setStyleSheet("font-weight: bold;")
         
-        rounded_total = math.floor(total)
-        roundoff = round(total - rounded_total, 2)
-        print("round off is: ", roundoff)
-        # set Round off
-        
-        finaltotal = rounded_total
-        
-        self.roundoffdata.setText(f"{roundoff:.2f}")
-        self.final_amountdata.setText(f"{finaltotal:.2f}")
-        
+    
 
 
     def calculate_payment(self):
         
-        finalamount = self.final_amountdata.text()
+        finalamount = self.final_amount.text()
         finalamount = float(finalamount) if finalamount else 0.00
         
-        paid = self.paidedit.text()
+        paid = self.paid_amount.text()
         paid = float(paid) if paid else 0.00
         
         remaining = finalamount - paid
         self.remainingdata.setText(str(remaining))
         
-        self.writeoffcheck()
-         
     
-         
-    # def eventFilter(self, obj, event):
-        
-    #     if isinstance(obj, QComboBox) and event.type() == QEvent.FocusOut:
-            
-    #         obj._focus_handled = False
-    #         print("Current Data is: ", obj.currentData())
-            
-    #         index = self.table.indexAt(obj.pos())
-    #         row = index.row()
-    #         col = index.column()
-    #         print(f"ComboBox at row {row}, col {col} lost focus: {obj.currentText()}")
-            
-    #     else:
-            
-    #         return super().eventFilter(obj, event)
-                
-
 
        
     def handle_editing_finished(self, combo):
@@ -530,134 +686,175 @@ class AddPurchaseWidget(QWidget):
                 self.add_new_product_dialog(combo, new_product=self.new_product)
 
         
-        
-    
-    
     
     
     def add_row(self):
         
         row = self.table.rowCount()
         
-        self.table.insertRow(row)
-        
         self.table.setRowHeight(row, self.row_height)
         
         counter = QLabel(str(row + 1))
         counter.setAlignment(Qt.AlignCenter)
 
+        remove_btn = QPushButton("X")
+        remove_btn.clicked.connect(lambda _, r=row: self.remove_row(r))
+        remove_btn.setStyleSheet("color: #333;")
+        
+        product_name = self.item.currentText()
+        product_id = self.item.currentData()
+        
+        print(f"Product Name: {product_name}, Product ID: {product_id}")
+        
+        
+        product_combo = QComboBox()
+        product_combo.setEditable(True)
+        product_combo.lineEdit().setReadOnly(True)
+        product_combo.setInsertPolicy(QComboBox.NoInsert)
+        
+        
+        if product_name == '':
+            print("Please Select a product first")
+            QMessageBox.information(self, 'Error', "Please Select a product first")
+            product_combo.setFocus()
+            return
+        elif product_id is None:
+            print("Entered product is not available... Please Add this product first")
+            QMessageBox.information(self, 'Error', "Entered product is not available... Please Add this product first")
+            product_combo.setFocus()
+            return
+        
+        
+        
+        product_combo.addItem(product_name, product_id)
 
-        dummy_item1 = QTableWidgetItem()
-        dummy_item1.setFlags(Qt.NoItemFlags)
-        self.table.setItem(row, 1, dummy_item1)
-
-        product = QComboBox()
-        product.setPlaceholderText("select product")
-        
-        product.setEditable(True)
-        product.wheelEvent = lambda event: event.ignore()
-        
-        # product.installEventFilter(self)
-        
-        
-        
-        completer = QCompleter()
-        product.setCompleter(completer)
-        completer.setCompletionMode(QCompleter.PopupCompletion)
-        
-        product.lineEdit().completer().popup().setStyleSheet("""
-            QListView {
-                padding: 5px;
-                background-color: white;
-                border: 1px solid gray;
-                color: #333;
-            }
-            QListView::item {
-                padding: 6px 10px;
-            }
-            QListView::item:selected {
-                background-color: #0078d7;
-                color: white;
-            }
+        product_combo.setStyleSheet("""
+        QComboBox::drop-down {
+            border: 0px;
+        }
+        QComboBox::down-arrow {
+            image: none;
+        }
         """)
-
-
-        product.lineEdit().textEdited.connect(lambda: self.load_product_suggestions(product, completer))
-        product.lineEdit().editingFinished.connect(lambda c=product: self.handle_editing_finished(c))
         
-        batch = QLineEdit()
-        batch.setPlaceholderText("Batch")
         
-        expiry = QLineEdit()
-        expiry.setInputMask("00-00-0000")
-        expiry.setPlaceholderText("dd-mm-yyyy")
-    
+        ### get data from Entry Line
+        
+        qty_data = self.qty_edit.text()
+        bonus_data = self.bonus_edit.text()
+        rate_data = self.rate_edit.text()
+        batch_data = self.batch_edit.text()
+        expiry_data = self.expiry_edit.date().toString("dd-MM-yyyy")
+        discount_data = self.discount_edit.text()
+        tax_data = self.tax_edit.text()
+        total_data = self.amount_edit.text()
+        
+        
+        if expiry_data:
+            try:
+                expiry_date = datetime.strptime(expiry_data, "%d-%m-%Y").date()
+                if expiry_date <= datetime.now().date():
+                    expiry_data = ''  
+                    print("Expiry date cannot be in the past. Setting it to empty.")
+            except ValueError:
+                expiry_data = ''  # If the date is invalid, set it to empty string
+        
+        
+        if discount_data == "":
+            discount_data = "0.0"
+            
+        
+        if tax_data == "":
+            tax_data = "0.0"
+            
+        if bonus_data == "":
+            bonus_data = "0"
+            
+        
+        # quantity check
+        if qty_data == "" or qty_data == "0" or rate_data == "" or rate_data == "0":
+            print("Quantity or Rate cannot be empty or zero.")
+            QMessageBox.information(self, 'Error', "Quantity or Rate cannot be empty or zero.")
+            return
+            
         
         qty_edit = QLineEdit()
-        qty_edit.setPlaceholderText("qty")
-        qty_edit.setText("0")
+        qty_edit.setReadOnly(True)
+        qty_edit.setText(qty_data)
+        
         
         bonus_edit = QLineEdit()
-        bonus_edit.setPlaceholderText("bonus")
-        bonus_edit.setText("0")
+        bonus_edit.setReadOnly(True)
+        bonus_edit.setText(bonus_data)
         
         rate_edit = QLineEdit()
-        rate_edit.setPlaceholderText("rate")
-        rate_edit.setText("0.00")
+        rate_edit.setReadOnly(True)
+        rate_edit.setText(rate_data)
         
+        batch_edit = QLineEdit()
+        batch_edit.setReadOnly(True)
+        batch_edit.setText(batch_data)  
         
-        discount = QLineEdit()
-        discount.setText("0")
+        expiry_edit = QLineEdit()
+        expiry_edit.setReadOnly(True)
+        expiry_edit.setText(expiry_data)
         
-        discount_amount = QLineEdit()
-        discount_amount.setStyleSheet("background-color: #ccc")
-        discount_amount.setText("0.0")
+        discount_edit = QLineEdit()
+        discount_edit.setReadOnly(True)
+        discount_edit.setText(discount_data)
         
-        tax = QLineEdit()
-        tax.setText("0")
-        
-        tax_amount = QLineEdit()
-        tax_amount.setReadOnly(True)
-        tax_amount.setStyleSheet("background-color: #ccc")
+        tax_edit = QLineEdit()
+        tax_edit.setReadOnly(True)
+        tax_edit.setText(tax_data)
         
         total_edit = QLineEdit()
         total_edit.setReadOnly(True)
-        total_edit.setText("0.0")
+        total_edit.setText(total_data)
         
         
         remove_btn = QPushButton("X")
         remove_btn.setCursor(Qt.PointingHandCursor)#
         remove_btn.setStyleSheet("color: #333;")
         
+        self.table.insertRow(row)
+        
         
         self.table.setCellWidget(row, 0, counter)
-        self.table.setCellWidget(row, 1, product)
-        self.table.setCellWidget(row, 2, batch)
-        self.table.setCellWidget(row, 3, expiry)
+        self.table.setCellWidget(row, 1, product_combo)
+        
+        self.table.setCellWidget(row, 2, batch_edit)
+        self.table.setCellWidget(row, 3, expiry_edit)
+       
         self.table.setCellWidget(row, 4, qty_edit)
         self.table.setCellWidget(row, 5, bonus_edit)
         self.table.setCellWidget(row, 6, rate_edit)
-        self.table.setCellWidget(row, 7, discount)
-        self.table.setCellWidget(row, 8, discount_amount)
-        self.table.setCellWidget(row, 9, tax)
-        self.table.setCellWidget(row, 10, tax_amount)
-        self.table.setCellWidget(row, 11, total_edit)
-        self.table.setCellWidget(row, 12, remove_btn)
         
-        dummy_item2 = QTableWidgetItem()
-        dummy_item2.setFlags(Qt.NoItemFlags)  # Makes the cell unselectable
-        self.table.setItem(row, 12, dummy_item2)
+        self.table.setCellWidget(row, 7, discount_edit)
+        self.table.setCellWidget(row, 8, tax_edit)
+        self.table.setCellWidget(row, 9, total_edit)
+        self.table.setCellWidget(row, 10, remove_btn)
         
-        qty_edit.textChanged.connect(lambda _: self.update_amount(qty_edit))
-        rate_edit.textChanged.connect(lambda _: self.update_amount(rate_edit))
         
-        discount.textChanged.connect(lambda _: self.update_amount(discount))
-        discount_amount.textChanged.connect(lambda _:self.update_amount(discount_amount))
-        tax.textChanged.connect(lambda _: self.update_amount(tax))
         
         remove_btn.clicked.connect(lambda _, r=row: self.remove_row(r))
+        
+        self.item.setFocus()
+        
+        self.update_total_amount()
+        
+        self.qty_edit.clear()
+        self.bonus_edit.clear()
+        self.rate_edit.clear()
+        self.batch_edit.clear()
+        self.expiry_edit.setDate(QDate.currentDate())
+        self.discount_edit.clear()
+        self.tax_edit.clear()
+        
+        # clear combo field
+        self.item.setCurrentIndex(-1)
+        
+        
 
-        self.update_table_height()
     
     
         
@@ -668,24 +865,16 @@ class AddPurchaseWidget(QWidget):
 
         # Reconnect all remove buttons with updated row numbers
         for row in range(self.table.rowCount()):
-            widget = self.table.cellWidget(row, 4)
+            widget = self.table.cellWidget(row, 10)
             if isinstance(widget, QPushButton):
                 widget.clicked.disconnect()
                 widget.clicked.connect(lambda _, r=row: self.remove_row(r))
 
-        self.update_table_height()
+        
+        self.update_total_amount()
         
         
 
-    def update_table_height(self):
-        
-        row_count = self.table.rowCount()
-        visible_rows = max(row_count, self.min_visible_rows)
-        header_height = self.table.horizontalHeader().height()
-        total_height = visible_rows * self.row_height + header_height + self.table.frameWidth() * 2 + 6
-        self.table.setFixedHeight(total_height)
-        
-    
     def showEvent(self, event):
         super().showEvent(event)
         self.populate_suppliers()
@@ -715,6 +904,8 @@ class AddPurchaseWidget(QWidget):
         self.populate_reps()
         
         
+        
+        
     def populate_reps(self):
         
         supplier = self.supplier_edit.currentData()
@@ -739,6 +930,7 @@ class AddPurchaseWidget(QWidget):
         
     
     
+    
     def save_purchase(self):
         
         
@@ -759,7 +951,10 @@ class AddPurchaseWidget(QWidget):
             try: 
             
                 supplier = self.supplier_edit.currentData()
+                supplier = int(supplier)
                 rep = self.rep_edit.currentData()
+                if rep is not None:
+                    rep = int(rep)
                 
                 if supplier is None or rep is None:
                     
@@ -773,64 +968,85 @@ class AddPurchaseWidget(QWidget):
                     QMessageBox.warning(None, "Error", "Please enter a seller invoice number.")
                     return
                 
-                subtotal = self.subtotaldata.text()
-                discount = self.percentage.text()
-                discountamount = self.flatdiscount.text()
-                netamount = self.net_amountdata.text()
-                tax = self.taxedit.text()
-                taxamount = self.taxamount.text()
-                totalaftertax = self.right_totaldata.text()
-                roundoff = self.roundoffdata.text()
-                total = self.final_amountdata.text()
-                paid = self.paidedit.text()
+                subtotal = self.gross_entry.text()
+                discount = self.discount_entry.text()
+                
+                taxable = self.taxable_entry.text()
+                
+                tax_236g = self.tax_236g_entry.text()
+                tax_236h = self.tax_236h_entry.text()
+                sales_tax = self.sales_tax_entry.text()
+                
+                netamount = self.net_amount_entry.text()
+                cn_adjustment = self.cn_adjustment_entry.text()
+                final_amount = self.final_amount.text()
+                
+                paid = self.paid_amount.text()
                 remaining = self.remainingdata.text()
                 
                 
                 subtotal = float(subtotal) if subtotal else 0
                 discount = float(discount) if discount else 0
-                discountamount = float(discountamount) if discountamount else 0
+                taxable = float(taxable) if taxable else 0
+                tax_236g = float(tax_236g) if tax_236g else 0
+                tax_236h = float(tax_236h) if tax_236h else 0
+                sales_tax = float(sales_tax) if sales_tax else 0
+                
                 netamount = float(netamount) if netamount else 0
-                tax = float(tax) if tax else 0
-                taxamount = float(taxamount) if taxamount else 0
-                totalaftertax = float(totalaftertax) if totalaftertax else 0
-                roundoff = float(roundoff) if roundoff else 0
-                total = float(total) if total else 0
+
+                cn_adjustment = float(cn_adjustment) if cn_adjustment else 0
+                total = float(final_amount) if final_amount else 0
                 paid = float(paid) if paid else 0
                 remaining = float(remaining) if remaining else 0
                 
                 
-                if remaining == 0.0:
-                    
-                    writeoff = 0.0
-                    payable = 0.0
-                    receiveable = 0.0
-                    
-                elif remaining > 0.0 and self.checkbox.isChecked():
-                    
-                    writeoff = remaining
-                    payable = 0.0
-                    receiveable = 0.0
-                    
-                elif remaining > 0.0 and not self.checkbox.isChecked():
-                    
-                    writeoff = 0.0
-                    payable = remaining
-                    receiveable = 0.0
-                    
-                else:
-                    
-                    writeoff = 0.0
-                    payable = 0.0
-                    receiveable = abs(remaining)
+                
+                # calculating header net amount
+                header_net_amount = ( - discount - tax_236g + tax_236h + sales_tax - cn_adjustment )
+                
+                print("Header Net Amount: ", header_net_amount)
+                
+                
+                # visualize data
+                print("Supplier ID:", supplier)
+                print("Rep ID:", rep)
+                print("Seller Invoice:", sellerinvoice)
+                print("Subtotal:", subtotal)
+                print("Discount:", discount)
+                print("Taxable:", taxable)
+                print("Tax 236G:", tax_236g)
+                print("Tax 236H:", tax_236h)
+                print("Sales Tax:", sales_tax)
+                print("Net Amount:", netamount)
+                print("CN Adjustment:", cn_adjustment)
+                print("Final Amount:", total)
+                print("Paid:", paid)
+                print("Remaining:", remaining)
+                
+                
+                
+                writeoff = 0.0
+                payable = 0.0
+                receivable = 0.0
+
+                if remaining > 0.0:
+                    if self.writeoff_check.isChecked():
+                        writeoff = remaining
+                    else:
+                        payable = remaining
+
+                elif remaining < 0.0:
+                    receivable = abs(remaining)
+
                     
                 
             
                 query = QSqlQuery()
                 
                 query.prepare("""
-                            INSERT INTO purchase (supplier, rep, sellerinvoice, subtotal, discount, discamount, netamount,
-                            tax, taxamount, totalaftertax, roundoff, total, paid, remaining, writeoff, payable, receiveable)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                            INSERT INTO purchase (supplier, rep, sellerinvoice, subtotal, discount, tax_236g, tax_236h, salestax,
+                            netamount, cn_adjustment, total, paid, remaining, writeoff, payable, receiveable)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                         """)
                         
                 query.addBindValue(supplier)
@@ -839,35 +1055,31 @@ class AddPurchaseWidget(QWidget):
                 
                 query.addBindValue(subtotal)
                 query.addBindValue(discount)
-                query.addBindValue(discountamount)
+                query.addBindValue(tax_236g)
+                query.addBindValue(tax_236h)
+                query.addBindValue(sales_tax)
                 query.addBindValue(netamount)
-                query.addBindValue(tax)
-                query.addBindValue(taxamount)
-                query.addBindValue(totalaftertax)
-                query.addBindValue(roundoff)
-                query.addBindValue(total)
+                query.addBindValue(cn_adjustment)
+                query.addBindValue(final_amount)
                 query.addBindValue(paid)
-                query.addBindValue(abs(remaining))
+                query.addBindValue(remaining)
                 query.addBindValue(writeoff)
                 query.addBindValue(payable)
-                query.addBindValue(receiveable)
+                query.addBindValue(receivable)
                 
                 print("Prepared Query: ", query.lastQuery())
                     
                 if not query.exec():
                     print("Insert failed:", query.lastError().text())
+                    db.rollback()
+                    raise Exception("Purchase insert failed")
                 else:
                     QMessageBox.information(None, "Success", 'Purchase Record Saved Successfully')
                     purchase_id = query.lastInsertId()
-                    
+                    print("Successfully inserted purchase record with ID:", purchase_id)
                 
                 
             
-                
-                
-                
-                    
-                
                 #####################################
                 ####    PURCHASE TRANSACTIONS    ####
                 #####################################
@@ -892,21 +1104,62 @@ class AddPurchaseWidget(QWidget):
                     raise Exception
                 
                 
-                transaction_type = 'purchase'
+                # transaction_type = 'purchase'
+                # ref_no = purchase_id
+                # return_ref = None
+                
+                # if remaining > 0.0 :
+                #     current_payable = remaining
+                #     current_receivable = 0.00
+                # elif remaining < 0.0:
+                #     current_payable = 0.00
+                #     current_receivable = abs(remaining)
+                # else:
+                #     current_payable = 0.00
+                #     current_receivable = 0.00
+                    
+                # print("Current Payable: ", current_payable)
+                # print("Current Receivable: ", current_receivable)
+                    
+                
+                # payable_before = supplier_payable
+                # due_now = total
+                # paid_now = paid
+                # remaining_now = remaining
+                # payable_after = payable_before + current_payable
+                
+                # receiveable_before = supplier_receiveable
+                # receiveable_now = current_receivable
+                # received_now = 0.00
+                # remaining_now = 0.00
+                # receiveable_after = receiveable_before + current_receivable
+                
+                
+                
+                transaction_type = 'PURCHASE'
                 ref_no = purchase_id
                 return_ref = None
-                
+
+                current_payable = 0.0
+                current_receivable = 0.0
+
+                if remaining > 0.0:
+                    current_payable = remaining
+                elif remaining < 0.0:
+                    current_receivable = abs(remaining)
+
                 payable_before = supplier_payable
+                payable_after = payable_before + current_payable
+
+                receivable_before = supplier_receiveable
+                receivable_after = receivable_before + current_receivable
+
                 due_amount = total
-                paid = paid
-                remaining_due = total - paid
-                payable_after = payable_before + total - paid
-                
-                receiveable_before = supplier_receiveable
-                receiveable_now = 0.00
-                received = 0.00
-                remaining_now = 0.00
-                receiveable_after = receiveable_before
+                paid_now = paid          # paid at purchase time
+                remaining_due = remaining
+
+                received = 0.0          # for PURCHASE transaction
+                remaining_now = 0.0       # for PURCHASE transaction
                 
                 
                 # insert transaction
@@ -925,16 +1178,18 @@ class AddPurchaseWidget(QWidget):
                 query.addBindValue(transaction_type)
                 query.addBindValue(ref_no)
                 query.addBindValue(return_ref)
+                
                 query.addBindValue(payable_before)
                 query.addBindValue(due_amount)
-                query.addBindValue(paid)
+                query.addBindValue(paid_now)
                 query.addBindValue(remaining_due)
                 query.addBindValue(payable_after)
-                query.addBindValue(receiveable_before)
-                query.addBindValue(receiveable_now)
+                
+                query.addBindValue(receivable_before)
+                query.addBindValue(current_receivable)
                 query.addBindValue(received)
                 query.addBindValue(remaining_now)
-                query.addBindValue(receiveable_after)
+                query.addBindValue(receivable_after)
                 query.addBindValue(rep)
                 
                 
@@ -976,8 +1231,8 @@ class AddPurchaseWidget(QWidget):
                 
                 print("Payable and Receiveable are : ", supplier_payable, supplier_receiveable)
                 
-                supplier_payable = supplier_payable + payable
-                supplier_receiveable = supplier_receiveable + receiveable
+                supplier_payable = supplier_payable + current_payable
+                supplier_receiveable = supplier_receiveable + current_receivable
                 
                 update_supplier = QSqlQuery()
                 update_supplier.prepare("UPDATE supplier SET payable = ? , receiveable = ? WHERE id = ?")
@@ -1009,29 +1264,58 @@ class AddPurchaseWidget(QWidget):
                     
                     product_widget = self.table.cellWidget(row, 1)
                     
-                    
                     if not product_widget or not product_widget.currentData():
                         print("Row is empty ... ignoring it...")
                         continue
 
                     product_id = product_widget.currentData()
-                    
-                    
                     item_exist = True
                     
                     try:
                         
                         batch = self.table.cellWidget(row, 2).text()
                         expiry = self.table.cellWidget(row, 3).text()
+                        print("Expiry is ", expiry)
+                        
+                        # convert string to date
+                        expiry = expiry.strip()
+                        
+                        if expiry == '': 
+                            expiry = None
+                        
+                        if expiry is not None:
+                            
+                            expiry = datetime.strptime(expiry, "%d-%m-%Y").date()
+                            current_date = datetime.now().date()
+                            
+                            print("Current Date is: ", current_date)
+                            
+                            if expiry <= current_date:
+                                expiry = None
+                            else:
+                                # convert date to string in yyyy-mm-dd format for database
+                                expiry = expiry.strftime("%Y-%m-%d")
+
+                        
+                        print("Processed expiry date is: ", expiry)
+                        
                         
                         qty = int(self.table.cellWidget(row, 4).text())
                         bonus = int(self.table.cellWidget(row, 5).text())
                         rate = float(self.table.cellWidget(row, 6).text())
                         discount = float(self.table.cellWidget(row, 7).text())
-                        discountamount = float(self.table.cellWidget(row, 8).text())
-                        tax = float(self.table.cellWidget(row, 9).text())
-                        taxamount = float(self.table.cellWidget(row, 10).text())
-                        total = float(self.table.cellWidget(row, 11).text())
+                        tax = float(self.table.cellWidget(row, 8).text())
+                        line_total = float(self.table.cellWidget(row, 9).text())
+                        
+                        # convert discount and tax into flat values
+                        discount_amount = (qty * rate) * (discount / 100)
+                        tax_amount = ((qty * rate) - discount_amount) * (tax / 100)
+                        
+                        print(f"Calculated discount amount: {discount_amount} and tax amount: {tax_amount} for row {row}")
+                        
+                        
+                        if bonus == '': 
+                            bonus = 0
 
                     except Exception as e:
                         
@@ -1042,8 +1326,8 @@ class AddPurchaseWidget(QWidget):
                     # ✅ Insert purchase item
                     item_query = QSqlQuery()
                     item_query.prepare("""
-                        INSERT INTO purchaseitem (purchase, product, qty, bonus, rate, discount, discountamount, tax, taxamount, total)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO purchaseitem (purchase, product, qty, bonus, rate, discount, tax, total)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """)
                     
                     item_query.addBindValue(purchase_id)
@@ -1051,11 +1335,9 @@ class AddPurchaseWidget(QWidget):
                     item_query.addBindValue(qty)
                     item_query.addBindValue(bonus)
                     item_query.addBindValue(rate)
-                    item_query.addBindValue(discount)
-                    item_query.addBindValue(discountamount)
-                    item_query.addBindValue(tax)
-                    item_query.addBindValue(taxamount)
-                    item_query.addBindValue(total)
+                    item_query.addBindValue(discount_amount)
+                    item_query.addBindValue(tax_amount)
+                    item_query.addBindValue(line_total)
 
                     if not item_query.exec():
                         print("Error inserting purchaseitem:", item_query.lastError().text())
@@ -1065,77 +1347,78 @@ class AddPurchaseWidget(QWidget):
                         item = item_query.lastInsertId()
                         
                         
-                    if batch != '':
-                        
-                        print("EXPIRY IS....  is: ", expiry)
-                        
-                        # insert Batch info if available
-                        batch_query = QSqlQuery()
-                        batch_query.prepare("""
-                            INSERT INTO batch (purchaseitem, product, batch, expiry)
-                            VALUES (?, ?, ?, ?)
-                        """)
-                        batch_query.addBindValue(item)
-                        batch_query.addBindValue(product_id)
-                        batch_query.addBindValue(batch)
-                        batch_query.addBindValue(expiry)
-                        
-                        if not batch_query.exec():
-                            
-                            print("Error inserting batch:", batch_query.lastError().text())
-                            
-                        else:
-                            print("Batch record inserted successfully")
-                        
-                        
-
-                    # ✅ Check and update stock
-                    stock_query = QSqlQuery()
-                    stock_query.prepare("SELECT packsize, units FROM stock WHERE product = ?")
                     
-                    stock_query.addBindValue(product_id)
-
-
-                    if stock_query.exec() and stock_query.next():
+                    # get product packsize from price_pack
+                    product_query = QSqlQuery()
+                    product_query.prepare("SELECT pack_size FROM price_pack WHERE product_id = ?")
+                    product_query.addBindValue(product_id)
+                    
+                    if not product_query.exec():
+                        print("Error fetching pack size:", product_query.lastError().text())
+                        db.rollback()
+                        raise Exception("Failed to fetch pack size for product ID: " + str(product_id))
+                    
+                    pack_size = 1
+                    if product_query.next():
+                        pack_size = int(product_query.value(0))
                         
-                        packsize = stock_query.value(0)
-                        units = stock_query.value(1)
                         
-                        newunits = int(units) + int(qty) * int(packsize)
-                        
+                    print("line total is: ", line_total)
+                    print("subtotal is: ", subtotal)
 
-                        update_query = QSqlQuery()
-                        
-                        update_query.prepare("UPDATE stock SET units = ? WHERE product = ?")
-                        
-                        update_query.addBindValue(newunits)
-                        update_query.addBindValue(product_id)
-
-                        if update_query.exec():
-                            
-                            print("Stock updated successfully")
-                            print(f"Row {row}: product_id={product_id}, qty={qty}, rate={rate}, total={total}")
-
-                            cost_query = QSqlQuery()
-                            cost_query.prepare("""
-                                INSERT INTO stockcost(product, qty, totalcost, stocktype)
-                                VALUES (?, ?, ?, ?)
-                            """)
-                            cost_query.addBindValue(product_id)
-                            cost_query.addBindValue(str(qty))
-                            cost_query.addBindValue(str(total))
-                            cost_query.addBindValue('purchased')
-
-                            if not cost_query.exec():
-                                print("Error inserting stockcost:", cost_query.lastError().text())
-                            else:
-                                print("Stock Cost saved successfully")
-                        else:
-                            print("Failed to update stock:", update_query.lastError().text())
+                    if subtotal > 0:
+                        proportion = line_total / subtotal
+                        allocated_header = proportion * header_net_amount
                     else:
-                        print("Stock record not found for product_id:", product_id)            
+                        allocated_header = 0.0
+                    
+                    
+                    final_line_total = line_total + allocated_header
+                    
+                    # convert packs into units
+                    qty = qty * pack_size
+                    bonus = bonus * pack_size
+                    
+                    paid_qty = qty
+                    total_qty = qty + bonus
+                    
+                    
+                    print("Final Line Total is: ", final_line_total)
+                    print("Total Quantity (including bonus) is: ", total_qty)
+                    
+                    if total_qty > 0:
+                        unit_cost = final_line_total / total_qty 
+                    else:
+                        unit_cost = 0.0
+                    
+                    unit_cost = round(unit_cost, 4)
+
+                    print("Effective Unit Cost is: ", unit_cost)
+                    
+                    # insert Batch info if available
+                    batch_query = QSqlQuery()
+                    batch_query.prepare("""
+                        INSERT INTO batch (batch_no, expiry_date, product_id, total_received, paid_qty, quantity_remaining, unit_cost, source)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """)
+                    batch_query.addBindValue(batch)
+                    batch_query.addBindValue(expiry)
+                    batch_query.addBindValue(product_id)
+                    batch_query.addBindValue(total_qty)
+                    batch_query.addBindValue(paid_qty)
+                    batch_query.addBindValue(total_qty)
+                    batch_query.addBindValue(unit_cost)
+                    batch_query.addBindValue('PURCHASE')
+
+                    if not batch_query.exec():
+                        db.rollback()
+                        raise Exception("Batch insert failed: " + batch_query.lastError().text())
                         
+                    else:
+                        print("Batch record inserted successfully")
                         
+
+
                 if not item_exist:
                     QMessageBox.warning(None, "Error", "No valid items found in the purchase order. Please add items before saving.")
                     db.rollback()
@@ -1158,6 +1441,7 @@ class AddPurchaseWidget(QWidget):
             finally:
                 print("Database connection closed")
         
+      
         
         
     def load_product_suggestions(self, item, completer):
@@ -1172,7 +1456,7 @@ class AddPurchaseWidget(QWidget):
             return 
         
         query = QSqlQuery()
-        query.prepare("SELECT id, name, form, strength FROM product WHERE name LIKE ? LIMIT 10")
+        query.prepare("SELECT id, display_name FROM product WHERE display_name LIKE ? LIMIT 10")
         print("Current Text is: ", current_text)
         query.addBindValue(f"%{current_text}%")
         
@@ -1188,10 +1472,8 @@ class AddPurchaseWidget(QWidget):
                 
                 product_id = query.value(0)
                 name = query.value(1)
-                form = query.value(2)
-                strength = query.value(3)
                 
-                label = f"{name} {form} {strength}".strip()
+                label = f"{name}".strip()
                 products.append(label)
                 item.addItem(label, product_id)
                 
@@ -1215,7 +1497,6 @@ class AddPurchaseWidget(QWidget):
         item.lineEdit().setText(current_text)        
         
 
-
     def on_completer_highlighted(self, text, item):
         
         index = item.findText(text, Qt.MatchFixedString)
@@ -1223,7 +1504,6 @@ class AddPurchaseWidget(QWidget):
             item.setCurrentIndex(index) 
         
         
-
 
     def on_item_selected(self, item):
         
@@ -1256,67 +1536,6 @@ class AddPurchaseWidget(QWidget):
 
 
 
-    def update_amount(self, edited_widget):
-        
-        row = self.table.indexAt(edited_widget.pos()).row()
-        
-        try:
-            
-            qty_text = self.table.cellWidget(row, 4).text()
-            bonus = self.table.cellWidget(row, 5).text()
-            rate_text = self.table.cellWidget(row, 6).text()
-            
-            discount_edit = self.table.cellWidget(row,7).text()
-            
-            if discount_edit == '':
-                discount_edit = 0
-            
-            tax_edit = self.table.cellWidget(row,9).text()
-
-            qty = int(qty_text) if qty_text else 0
-            bonus = int(bonus) if bonus else 0
-            rate = float(rate_text) if rate_text else 0
-            
-            discount = float(discount_edit) if discount_edit else 0
-            
-            tax = float(tax_edit) if tax_edit else 0
-            
-            if discount :
-                discount = rate * discount / 100
-                self.table.cellWidget(row, 8).setText(str(discount))
-            
-            if discount == 0:
-                self.table.cellWidget(row, 8).setText(str(discount))
-            
-            
-                
-                
-                
-            flat_discount = self.table.cellWidget(row,8).text()
-            flat_discount = float(flat_discount) if flat_discount else 0
-            
-            price = rate - flat_discount
-            
-            tax_amount = price * tax / 100
-            
-            self.table.cellWidget(row, 10).setText(str(tax_amount))
-            
-            price = price + tax_amount
-            
-            price = float(f"{price:.2f}")
-            
-            total = qty * price
-
-            self.table.cellWidget(row, 11).setText(str(total))
-            print("Updating Final Amount")
-            self.update_total_amount()
-            
-        except ValueError:
-        
-            self.table.cellWidget(row, 11).setText("0.00")
-
-
-
     def on_cell_focus(self, row, column):
         
         index = self.table.model().index(row, column)
@@ -1342,29 +1561,24 @@ class AddPurchaseWidget(QWidget):
         self.invoice_edit.clear()
         
         self.rep_edit.clear()
-        self.subtotaldata.clear()
-        self.percentage.clear()
-        self.flatdiscount.clear()
+        self.gross_entry.clear()
+        self.discount_entry.clear()
         
-        self.net_amountdata.clear()
-        self.taxedit.clear()
-        self.taxamount.clear()
-        self.right_totaldata.clear()
-        self.roundoffdata.clear()
-        self.final_amountdata.clear()
-        self.lefttotaldata.clear()
-        self.paidedit.clear()
+        self.tax_236g_entry.clear()
+        self.tax_236h_entry.clear()
+        self.sales_tax_entry.clear()
+        self.net_amount_entry.clear()
+        self.final_amount.clear()
+        self.paid_amount.clear()
         self.remainingdata.clear()
         
-        self.checkbox.setChecked(False)        
+        self.writeoff_check.setChecked(False)        
         
         self.table.setRowCount(0)
         
         self.populate_suppliers()
         
-        for _ in range(5):
-            
-            self.add_row()
+       
 
 
     def pay_method_change(self):
@@ -1390,83 +1604,6 @@ class AddPurchaseWidget(QWidget):
         if payment_method == "EasyPaisa":
             self.check_easypaisa(supplier_id)
             
-    
-    def check_bank_transfer(self, supplier_id):
-        """
-        This method is called when the payment method is changed to bank transfer.
-        It checks if bank transfer is available for that supplier.
-        """
-        # Check if bank transfer is available for that supplier
-        query = QSqlQuery()
-        query.prepare("select count(*) from bank where supplier = ?")
-        query.addBindValue(supplier_id)
-        if query.exec() and query.next():
-            bank_transfer = query.value(0)
-            
-            if bank_transfer > 0 :
-                print("Bank Transfer Method Available")
-                return True
-            else:
-                QMessageBox.warning(None, "Bank Transfer Not Available", "Bank Transfer is not available for this supplier.")
-                self.payment_method_combo.setCurrentText('Cash')
-                return False
-                
-        else:
-            QMessageBox.warning(None, "Error", query.lastError().text())
-            self.payment_method_combo.setCurrentText('Cash')
-            return False
-
-
-    def check_jazzcash(self, supplier_id):
-        """
-        This method is called when the payment method is changed to jazzcash.
-        It checks if jazzcash is available for that supplier.
-        """
-        # Check if jazzcash is available for that supplier
-        query = QSqlQuery()
-        query.prepare("select count(*) from jazzcash where supplier = ?")
-        query.addBindValue(supplier_id)
-        if query.exec() and query.next():
-            jazzcash = query.value(0)
-
-            if jazzcash > 0 :
-                print("JazzCash Method Available")
-                return True
-            else:
-                QMessageBox.warning(None, "JazzCash Not Available", "JazzCash is not available for this supplier.")
-                self.payment_method_combo.setCurrentText('Cash')
-                return False
-
-        else:
-            QMessageBox.warning(None, "Error", query.lastError().text())
-            self.payment_method_combo.setCurrentText('Cash')
-            return False
-
-
-    def check_easypaisa(self, supplier_id):
-        """
-        This method is called when the payment method is changed to easypaisa.
-        It checks if easypaisa is available for that supplier.
-        """
-        # Check if easypaisa is available for that supplier
-        query = QSqlQuery()
-        query.prepare("select count(*) from easypaisa where supplier = ?")
-        query.addBindValue(supplier_id)
-        if query.exec() and query.next():
-            easypaisa = query.value(0)
-
-            if easypaisa > 0 :
-                print("EasyPaisa Method Available")
-                return True
-            else:
-                QMessageBox.warning(None, "EasyPaisa Not Available", "EasyPaisa is not available for this supplier.")
-                self.payment_method_combo.setCurrentText('Cash')
-                return False
-
-        else:
-            QMessageBox.warning(None, "Error", query.lastError().text())
-            self.payment_method_combo.setCurrentText('Cash')
-            return False
 
 
     def add_new_product_dialog(self, combo, new_product=None):
@@ -1484,32 +1621,23 @@ class AddPurchaseWidget(QWidget):
             if code == '':
                 code = None
                 
-                
-            category = dialog.category_input.currentText()
+            
+            display_name = dialog.name_input.text()
             brand = dialog.brand_input.text()
-            
-            formula = dialog.formula_input.text()
-            form = dialog.form_input.text()
-            strength = dialog.strength_input.text()
-            
-            packsize = dialog.packsize.text()
-            saleprice = dialog.saleprice.text()
+            packsize = dialog.packsize_input.text()
+            saleprice = dialog.saleprice_input.text()
             
             # Insert Data into Database
             
             query = QSqlQuery()
             query.prepare("""
-                INSERT INTO product (name, code, category, brand, formula, form, strength)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO product (display_name, code, brand )
+                VALUES (?, ?, ?)
             """)
             
-            query.addBindValue(new_product)
+            query.addBindValue(display_name)
             query.addBindValue(code)
-            query.addBindValue(category)
             query.addBindValue(brand)
-            query.addBindValue(formula)
-            query.addBindValue(form)
-            query.addBindValue(strength)    
             
             if not query.exec():
                 
@@ -1523,26 +1651,25 @@ class AddPurchaseWidget(QWidget):
                 print("New Product ID is: ", product_id)
                 
                 # Create Empty Stock Record
-                stock_query = QSqlQuery()
-                stock_query.prepare("""
-                    INSERT INTO stock (product, packsize, units, reorder, saleprice)
-                    VALUES (?, ?, ?, ?, ?)
+                price_query = QSqlQuery()
+                price_query.prepare("""
+                    INSERT INTO price_pack (product_id, pack_size, pack_price)
+                    VALUES (?, ?, ?)
                 """)
                 
-                stock_query.addBindValue(product_id)
-                stock_query.addBindValue(packsize)  # initial packsize
-                stock_query.addBindValue(0)  # default units
-                stock_query.addBindValue(0)  # default reorder
-                stock_query.addBindValue(saleprice)  # initial saleprice
+                price_query.addBindValue(product_id)
+                price_query.addBindValue(packsize)  # initial packsize
+                price_query.addBindValue(saleprice)  # initial saleprice
 
-                if not stock_query.exec():
-                    print("Error inserting stock:", stock_query.lastError().text())
+                if not price_query.exec():
+                    print("Error inserting price_pack:", price_query.lastError().text())
                 else:
-                    print("Stock record created successfully for new product")
+                    print("Price pack record created successfully for new product")
                 
 
-            combo.addItem(new_product, product_id)
-            
+            # clear combo box
+            combo.setCurrentIndex(-1)
+            combo.setFocus()
             print("Import Dialog Accepted")
             
         else:
@@ -1593,7 +1720,6 @@ class ImportDialog(QDialog):
         self.insert_subheading("PRODUCT Does Not Exist... Add INFORMATION")
         
         self.populate_product_fields()
-        self.populate_medicine_fields()
        
 
         self.setLayout(self.layout)
@@ -1620,126 +1746,46 @@ class ImportDialog(QDialog):
     
     def populate_product_fields(self):
         
-        labels = ["Product Name", "Code/Barcode", "Category", "Brand"]
+        item_layout = QHBoxLayout()
+        
+        # Item Label with stretch factor 2
+        item_label = QLabel("Item")
+        item_layout.addWidget(item_label, stretch=2)
+
+        # Spacer with stretch factor 1
+        spacer = QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        item_layout.addItem(spacer)
+
+        # Name input with stretch factor 3
+        name_input = QLineEdit()
+        item_layout.addWidget(name_input, stretch=3)
+
+        # Form input with stretch factor 1
+        form_input = QLineEdit()
+        item_layout.addWidget(form_input, stretch=1)
+
+        # Packing input with stretch factor 1
+        packing_input = QLineEdit()
+        item_layout.addWidget(packing_input, stretch=1)
+        
+        
+        self.layout.addLayout(item_layout)
+        
+        
+        
+        
+        
         
         self.name_input = QLineEdit()
-        self.code_input = QLineEdit()
-        self.category_input = QComboBox()
-        self.category_input.addItems(["Medicine", "General Item", "Other"])
         self.brand_input = QLineEdit()
-        
-        fields = [self.name_input, self.code_input, self.category_input, self.brand_input]
-        
-        self.insert_labels_and_fields(labels, fields)
-        
-        
-    def populate_medicine_fields(self):
-        
-        # === Sub Header Row ===
-        self.medicine_layout = QHBoxLayout()
-        self.medicine_subheading = QLabel("MEDICINE INFORMATION", objectName="SubHeading")
-        
-        self.medicine_layout.addWidget(self.medicine_subheading)
-        self.layout.addLayout(self.medicine_layout)
-        
-        self.layout.addSpacing(10)
-        
-        self.medicine_subheading.hide()
-        
-        self.formula_input = QLineEdit()
-        self.form_input = QLineEdit()
-        self.strength_input = QLineEdit()
-        self.expiry_input = QDateEdit()
-        self.expiry_input.setCalendarPopup(True)
-        self.packsize = QLineEdit()
-        self.saleprice = QLineEdit()
-
-        self.medicine_fields = [
-            ("Formula:", self.formula_input),
-            ("Form (Tablet/Syrup):", self.form_input),
-            ("Strength:", self.strength_input),
-            ("Pack Size:", self.packsize),
-            ("Sale Price:", self.saleprice)
-            
-        ]
+        self.code_input = QLineEdit()
+        self.packsize_input = QLineEdit()
+        self.saleprice_input = QLineEdit()
         
         
-        
-        # Keep track of full row containers for show/hide
-        self.medicine_rows = []
-
-        for label, field in self.medicine_fields:
-            # --- row container ---
-            row_widget = QWidget()
-            row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-
-            # indicator
-            indicator = QFrame()
-            indicator.setFixedWidth(4)
-            indicator.setStyleSheet("background-color: #ccc; border: none;")
-
-            lbl = QLabel(label)
-            lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            lbl.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
-            lbl.setFixedWidth(250)
-            field.setStyleSheet("margin-left: 18px;")
-
-            field.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-
-            row_layout.addWidget(indicator)
-            row_layout.addWidget(lbl, 1)
-            row_layout.addWidget(field, 8)
-
-            # Add whole row widget into main layout
-            self.layout.addWidget(row_widget)
-            self.layout.setSpacing(15)
-
-            # Map indicator for highlighting
-            self.indicators[field] = indicator
-            field.installEventFilter(self)
-
-            # Initially hide medicine rows
-            self.medicine_rows.append(row_widget)
-            
-        
-            self.layout.addSpacing(20)
-            
+         
     
 
-    def insert_labels_and_fields(self, labels, fields):
-        
-        
-        for (label, field) in zip(labels, fields):
-
-            row = QHBoxLayout()
-            
-            # Left line indicator
-            indicator = QFrame()
-            indicator.setFixedWidth(4)
-            indicator.setStyleSheet("background-color: #ccc; border: none;")
-            
-            lbl = QLabel(label)
-            lbl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            lbl.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
-            field.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            lbl.setMinimumWidth(250)
-            lbl.setStyleSheet("padding-left: 10px;")
-
-            row.addWidget(indicator) 
-            row.addWidget(lbl, 1)
-            row.addWidget(field, 8)
-
-            self.layout.addLayout(row)
-            self.layout.setSpacing(10)  # reduce space between rows
-            
-            # Keep mapping
-            self.indicators[field] = indicator
-
-            # Install event filters to track focus
-            field.installEventFilter(self)
-            
-      
 
 
 

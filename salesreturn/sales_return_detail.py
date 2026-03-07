@@ -52,9 +52,9 @@ class SalesReturnDetailWidget(QWidget):
         
         self.supplier_table = MyTable()
         
-        self.supplier_table.setColumnCount(8)
+        self.supplier_table.setColumnCount(7)
         self.supplier_table.setHorizontalHeaderLabels([
-            "#", "Product", "Brand", "Sold", "Return", "Rate", "Discount", "Total"
+            "#", "Product", "Brand", "Sold", "Returned", "Rate", "Total"
         ])
         self.supplier_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.supplier_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)#
@@ -169,146 +169,194 @@ class SalesReturnDetailWidget(QWidget):
 
 
 
-    def load_sales_data(self, id):
+    # def load_sales_data(self, id):
         
-        print("Loading Sales ID:", id)
-        query = QSqlQuery()
-        query.prepare("SELECT salesorder, customer, creation_date, subtotal, roundoff, total, paid, remaining, writeoff  FROM salesreturn WHERE id = ?")
-        query.addBindValue(id)
+    #     print("Loading Sales ID:", id)
+    #     query = QSqlQuery()
+    #     query.prepare("SELECT salesorder, customer, creation_date, subtotal, roundoff, total, paid, remaining, writeoff  FROM salesreturn WHERE id = ?")
+    #     query.addBindValue(id)
         
-        if query.exec() and query.next():
+    #     if query.exec() and query.next():
             
-            orderid = query.value(0)
-            customer_id = query.value(1)
+    #         orderid = query.value(0)
+    #         customer_id = query.value(1)
             
-            if customer_id == '':
-                customer_id = None
+    #         if customer_id == '':
+    #             customer_id = None
             
-            invoicedate = query.value(2)
+    #         invoicedate = query.value(2)
             
-            subtotal = query.value(3)
-            roundoff = query.value(4)
-            total = query.value(5)
-            paid = query.value(6)
-            remaining = query.value(7)
-            writeoff = query.value(8)
+    #         subtotal = query.value(3)
+    #         roundoff = query.value(4)
+    #         total = query.value(5)
+    #         paid = query.value(6)
+    #         remaining = query.value(7)
+    #         writeoff = query.value(8)
             
 
             
-            if isinstance(invoicedate, QDate):  # or QDateTime
-                invoicedate = invoicedate.toString("dd-MM-yyyy")  # or "yyyy-MM-dd"
+    #         if isinstance(invoicedate, QDate):  # or QDateTime
+    #             invoicedate = invoicedate.toString("dd-MM-yyyy")  # or "yyyy-MM-dd"
+    #         else:
+    #             invoicedate = str(invoicedate)
+            
+    #         self.orderid.setText(str(id))
+    #         self.salesorder.setText(str(orderid))
+    #         self.dateandtime.setText(str(invoicedate))
+            
+    #         self.subtotal.setText(str(subtotal))
+    #         self.roundoff.setText(str(roundoff))
+    #         self.finalamount.setText(str(total))
+    #         self.paid.setText(str(paid))
+    #         self.remaining.setText(str(remaining))
+    #         self.writeoff.setText(str(writeoff))
+        
+        
+    #         if customer_id is not None:
+            
+    #             query2 = QSqlQuery()
+    #             query2.prepare("SELECT name FROM customer WHERE id = ?")
+    #             query2.addBindValue(int(customer_id))
+                
+    #             if query2.exec() and query2.next():
+                    
+    #                 customer = query2.value(0)
+    #                 self.customer.setText(customer)
+                    
+    #         else: 
+    #             customer = 'Walk-In Customer'
+    #             self.customer.setText(customer)
+
+                
+            
+    #         self.load_items_into_table(orderid)
+            
+            
+    #     else:
+    #         QMessageBox.information(self, "Error", query.lastError().text() )
+
+
+    def load_sales_data(self, salesreturn_id: int) -> None:
+        
+        print(f"Loading Sales Return ID: {salesreturn_id}")
+
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT salesorder, customer, creation_date,
+                subtotal, roundoff, total,
+                paid, remaining, writeoff
+            FROM salesreturn
+            WHERE id = ?
+        """)
+        query.addBindValue(salesreturn_id)
+
+        if not query.exec() or not query.next():
+            QMessageBox.information(self, "Error", query.lastError().text())
+            return
+
+        salesorder_id = query.value(0)
+        customer_id   = query.value(1)
+        invoice_date  = query.value(2)
+
+        subtotal  = query.value(3)
+        roundoff  = query.value(4)
+        total     = query.value(5)
+        paid      = query.value(6)
+        remaining = query.value(7)
+        writeoff  = query.value(8)
+
+        # Date formatting
+        if isinstance(invoice_date, QDate):
+            invoice_date = invoice_date.toString("dd-MM-yyyy")
+        else:
+            invoice_date = str(invoice_date)
+
+        # Set UI fields
+        self.orderid.setText(str(salesreturn_id))
+        self.salesorder.setText(str(salesorder_id))
+        self.dateandtime.setText(invoice_date)
+
+        self.subtotal.setText(str(subtotal))
+        self.roundoff.setText(str(roundoff))
+        self.finalamount.setText(str(total))
+        self.paid.setText(str(paid))
+        self.remaining.setText(str(remaining))
+        self.writeoff.setText(str(writeoff))
+
+        # Customer handling
+        if customer_id:
+            customer_query = QSqlQuery()
+            customer_query.prepare("SELECT name FROM customer WHERE id = ?")
+            customer_query.addBindValue(customer_id)
+
+            if customer_query.exec() and customer_query.next():
+                self.customer.setText(customer_query.value(0))
             else:
-                invoicedate = str(invoicedate)
-            
-            self.orderid.setText(str(id))
-            self.salesorder.setText(str(orderid))
-            self.dateandtime.setText(str(invoicedate))
-            
-            self.subtotal.setText(str(subtotal))
-            self.roundoff.setText(str(roundoff))
-            self.finalamount.setText(str(total))
-            self.paid.setText(str(paid))
-            self.remaining.setText(str(remaining))
-            self.writeoff.setText(str(writeoff))
-        
-        
-            if customer_id is not None:
-            
-                query2 = QSqlQuery()
-                query2.prepare("SELECT name FROM customer WHERE id = ?")
-                query2.addBindValue(int(customer_id))
-                
-                if query2.exec() and query2.next():
-                    
-                    customer = query2.value(0)
-                    self.customer.setText(customer)
-                    
-            else: 
-                customer = 'Walk-In Customer'
-                self.customer.setText(customer)
-
-                
-            
-            self.load_items_into_table(orderid)
-            
-            
+                self.customer.setText("Unknown Customer")
         else:
-            QMessageBox.information(self, "Error", query.lastError().text() )
+            self.customer.setText("Walk-In Customer")
 
-
+        # 🔥 Correct call
+        self.load_items_into_table(salesreturn_id)
         
 
 
 
 
-    def load_items_into_table(self, id):
-        
-        print("Loading items into table")
-        
+    def load_items_into_table(self, salesreturn_id: int) -> None:
+
+        print(f"Loading Sales Return Items for ID: {salesreturn_id}")
+
         query = QSqlQuery()
-        query.prepare("SELECT * FROM salesreturn_item where salesreturn = ?")
-        query.addBindValue(id)
+        query.prepare("""
+            SELECT 
+                s.product,
+                p.display_name,
+                p.brand,
+                s.sold,
+                s.returned,
+                s.rate,
+                s.total
+            FROM salesreturn_item s
+            LEFT JOIN product p ON s.product = p.id
+            WHERE s.salesreturn = ?
+        """)
+        query.addBindValue(salesreturn_id)
 
-        self.supplier_table.setRowCount(0)  # Clear existing rows
+        if not query.exec():
+            print("Query failed:", query.lastError().text())
+            return
 
-        row = 0
-        
-       
-        
-        if query.exec():
+        # Collect rows first
+        rows = []
+        while query.next():
+            rows.append({
+                "product_id": query.value(0),
+                "name": query.value(1) or "Unknown",
+                "brand": query.value(2) or "",
+                "sold": query.value(3),
+                "returned": query.value(4),
+                "rate": query.value(5),
+                "total": query.value(6),
+            })
             
-            print("Loading items into table")
-            
-            while query.next():
-                
-                self.supplier_table.insertRow(row)
-                
-                med = int(query.value(2))
-                quantity = str(query.value(3))
-                returned = str(query.value(4))
-                rate = str(query.value(5))
-                
-                print("med is: ", med)
-                
-                discountamount = str(query.value(6))
-                
-                
-                total = str(query.value(7))
-                
-                query2 = QSqlQuery()
-                query2.prepare("SELECT name, brand FROM product WHERE id = ?")
-                query2.addBindValue(med)
-                
-                if query2.exec() and query2.next():
-                    
-                    name = query2.value(0)
-                    maker = query2.value(1)
-                
-                counter = QTableWidgetItem(str(row + 1))
-                name = QTableWidgetItem(name)
-                maker = QTableWidgetItem(maker)
-                quantity = QTableWidgetItem(quantity)
-                rate = QTableWidgetItem(rate)
-                returned = QTableWidgetItem(returned)
-                discountamount = QTableWidgetItem(discountamount)
-                total = QTableWidgetItem(total)
-                
-                self.supplier_table.setItem(row, 0, counter)
-                self.supplier_table.setItem(row, 1, name)
-                self.supplier_table.setItem(row, 2, maker)
-                self.supplier_table.setItem(row, 3, quantity)
-                self.supplier_table.setItem(row, 4, returned)
-                self.supplier_table.setItem(row, 5, rate)
-                self.supplier_table.setItem(row, 6, discountamount)
-                self.supplier_table.setItem(row, 7, total)
-                
+            print(f"Fetched item: {rows[-1]}")
+            print("Data is ", query.value(0), query.value(1), query.value(2), query.value(3), query.value(4), query.value(5), query.value(6))
 
-                row += 1
-        
+        # Clear table once
+        self.supplier_table.setRowCount(len(rows))
 
-        else:
-            print("Insert failed:", query.lastError().text())
-            
+        for row_index, data in enumerate(rows):
+            self.supplier_table.setItem(row_index, 0, QTableWidgetItem(str(row_index + 1)))
+            self.supplier_table.setItem(row_index, 1, QTableWidgetItem(str(data["name"])))
+            self.supplier_table.setItem(row_index, 2, QTableWidgetItem(str(data["brand"])))
+            self.supplier_table.setItem(row_index, 3, QTableWidgetItem(str(data["sold"])))
+            self.supplier_table.setItem(row_index, 4, QTableWidgetItem(str(data["returned"])))
+            self.supplier_table.setItem(row_index, 5, QTableWidgetItem(str(data["rate"])))
+            self.supplier_table.setItem(row_index, 6, QTableWidgetItem(str(data["total"])))
+
+        print(f"Loaded {len(rows)} items successfully.")
+    
             
 
 
@@ -323,9 +371,8 @@ class MyTable(QTableWidget):
         self.setColumnWidth(2, int(total_width * 0.20))  
         self.setColumnWidth(3, int(total_width * 0.10))  
         self.setColumnWidth(4, int(total_width * 0.10))  
-        self.setColumnWidth(5, int(total_width * 0.05)) 
-        self.setColumnWidth(6, int(total_width * 0.05))
-        self.setColumnWidth(7, int(total_width * 0.05)) 
+        self.setColumnWidth(5, int(total_width * 0.15)) 
+        self.setColumnWidth(6, int(total_width * 0.15)) 
         
         super().resizeEvent(event)
         

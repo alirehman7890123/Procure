@@ -57,38 +57,29 @@ class ProductDetailWidget(QWidget):
         self.layout.addWidget(line)
         self.layout.addSpacing(20)
         
-        labels = ["Product Name", "Code/Barcode", "Category", "Brand", 
-                   "Formula", "Form", "Strength",
-                   "Pack Size", "Packs", "Units", "Reorder Level", "Sale Price per Pack"]
+        labels = ["Product Name", "Code/Barcode", "Brand", 
+                   "Formula", "Pack Size", "Units", "Pack Price", "Unit Price"]
 
         self.product = QLabel() ; self.productedit = QLineEdit()
         self.code = QLabel() ; self.codeedit = QLineEdit()
-        self.category = QLabel() ; self.categoryedit = QLineEdit()
         self.brand = QLabel() ; self.brandedit = QLineEdit()
         
         self.formula = QLabel() ; self.formulaedit = QLineEdit()
-        self.form = QLabel() ; self.formedit = QLineEdit()
-        self.strength = QLabel() ; self.strengthedit = QLineEdit()
 
         self.packsize = QLabel(); self.packsizeedit = QLineEdit()
-        self.packs = QLabel(); self.packsedit = QLineEdit()
-        self.units = QLabel(); self.unitsedit = QLineEdit()
-        self.reorder_level = QLabel() ; self.reorder_level_edit = QLineEdit()
+        self.units = QLabel(); 
         self.sale_price = QLabel() ; self.sale_price_edit = QLineEdit()
+        self.unit_price = QLabel()
         
         self.field_pairs = [
             (self.product, self.productedit),
             (self.code, self.codeedit),
-            (self.category, self.categoryedit),
             (self.brand, self.brandedit),
             (self.formula, self.formulaedit),
-            (self.form, self.formedit),
-            (self.strength, self.strengthedit),
             (self.packsize, self.packsizeedit),
-            (self.packs, self.packsedit),
-            (self.units, self.unitsedit),
-            (self.reorder_level, self.reorder_level_edit),
+            (self.units, None),
             (self.sale_price, self.sale_price_edit),
+            (self.unit_price, None)
             
         ]
         
@@ -121,8 +112,8 @@ class ProductDetailWidget(QWidget):
         # Create Product Batch Table
         self.row_height = 40
 
-        self.table = MyTable(column_ratios=[1, 2, 2, 2, 2, 2])
-        headers = ["##", "Batch No", "Expiry Date","Status", "RESOLVED", "Detail"]
+        self.table = MyTable(column_ratios=[1, 2, 2, 2, 2, 2, 2], parent=self)
+        headers = ["Id", "Batch No", "Expiry","Received Qty", "Remaining", "Source", "Date/Time"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         
@@ -209,146 +200,101 @@ class ProductDetailWidget(QWidget):
         self.product_id = id
         print("Loading Detail ID:", self.product_id)
         query = QSqlQuery()
-        query.prepare("SELECT name, code, category, brand, formula, form, strength FROM product WHERE id = ?")
+        query.prepare("SELECT display_name, code, generic_name, brand FROM product WHERE id = ?")
         query.addBindValue(self.product_id)
         
         if query.exec() and query.next():
             
             self.product.setText(query.value(0))
             self.code.setText(query.value(1))
-            self.category.setText(query.value(2))
+            self.formula.setText(query.value(2))
             self.brand.setText(query.value(3))
-            self.formula.setText(query.value(4))
-            self.form.setText(query.value(5))
-            self.strength.setText(query.value(6))
+            
+        
+        else:
+            print("Failed to fetch product data:", query.lastError().text())
+            
+            
+            
+        # get batch and stock
+            
+        stock_query = QSqlQuery()
+        stock_query.prepare("""SELECT COALESCE(SUM(quantity_remaining), 0) AS total_stock
+                                FROM batch
+                                WHERE product_id = ?;
+                            """)
+        
+        stock_query.addBindValue(self.product_id)
+        
+        if stock_query.exec() and stock_query.next():
+            
+            total_stock = stock_query.value(0)
+            print("Total stock is: ", total_stock)
+            
+            self.units.setText(str(total_stock))
+            
+        else:
+            self.units.setText("0")
+            
+        
+        
+        
+        # Load Price Data
+        
+        price_query = QSqlQuery()
+        price_query.prepare("SELECT pack_size, pack_price, unit_price FROM price_pack WHERE product_id = ?")
+        price_query.addBindValue(self.product_id)
+        
+        if price_query.exec() and price_query.next():
+            
+            print("Price data found", price_query.value(0), price_query.value(1), price_query.value(2))
+            
+            self.packsize.setText(str(price_query.value(0)))
+            self.sale_price.setText(str(price_query.value(1)))
+            self.unit_price.setText(str(price_query.value(2)))
+        else:
+            self.packsize.setText("0")
+            self.sale_price.setText("0")
+            self.unit_price.setText("0")
             
             
             
             
-            stock_query = QSqlQuery()
-            stock_query.prepare("SELECT packsize, units, reorder, saleprice FROM stock WHERE product = ?")
-            stock_query.addBindValue(self.product_id)
-
-            if stock_query.exec() and stock_query.next():
-                
-                size = stock_query.value(0)
-                units = stock_query.value(1)
-                packs = int(size) if size is not None else 0
-                totalunits = int(units) if units is not None else 0
-
-                packs, leftover_units = self.split_packs_and_units(packs, totalunits)
-
-                self.packsize.setText(str(size))
-                self.packs.setText(str(packs))
-                self.units.setText(str(leftover_units))
-                self.reorder_level.setText(str(stock_query.value(2)))
-                self.sale_price.setText(str(stock_query.value(3)))
-
-            else:
-                print("Failed to fetch stock data:", stock_query.lastError().text())
-    
-    
-        # Load Data into Batch Table
+        # Load Batch Data
         
         batch_query = QSqlQuery()
         batch_query.prepare("""
-                SELECT batch, expiry, status, id, resolved
-                FROM batch
-                WHERE product = ?
-                ORDER BY expiry ASC
-                      
-                      """)
+                            SELECT id, batch_no, expiry_date, total_received, quantity_remaining, source, received_at
+                            FROM batch
+                            WHERE product_id = ?
+                            ORDER BY expiry_date ASC
+                            """)
         batch_query.addBindValue(self.product_id)
-        
-        if not batch_query.exec():
-
-            QMessageBox.critical(self, "Error", "Failed to load product batch: " + batch_query.lastError().text())
-            print("Error executing query:", batch_query.lastError().text())
-            return
-        
-        else:
-            self.table.setRowCount(0)  # Clear existing rows
+        if batch_query.exec():
+            
+            self.table.setRowCount(0)
             row = 0
             
             while batch_query.next():
                 
+                print("Batch:", batch_query.value(0), batch_query.value(1), batch_query.value(2),
+                      batch_query.value(3), batch_query.value(4), batch_query.value(5), batch_query.value(6))
+                
                 self.table.insertRow(row)
                 
-                counter = str(row + 1)
-                batch = batch_query.value(0)
-                expiry = batch_query.value(1)
-                status = batch_query.value(2)
-                batch_id = batch_query.value(3)
-                resolved = batch_query.value(4)
-                
-                if isinstance(expiry, QDateTime):
-                    expiry = expiry.date().toString("dd-MM-yyyy")
-                elif isinstance(expiry, QDate):
-                    expiry = expiry.toString("dd-MM-yyyy")
-                else:
-                    expiry = str(expiry)
-                
-
-                counter = QTableWidgetItem(counter)
-                batch = QTableWidgetItem(batch)
-                expiry = QTableWidgetItem(expiry)
-                status = QTableWidgetItem(status)
-                resolved = QTableWidgetItem(str(resolved))
-                
-                # Apply colouring based on status
-                if status == "expired":
-                    color = QColor(255, 150, 150)  # light red
-                    for item in [counter, batch, expiry, status]:
-                        item.setBackground(color)
-
-                elif status == "near expiry":
-                    color = QColor(255, 255, 150)  # yellow
-                    for item in [counter, batch, expiry, status]:
-                        item.setBackground(color)
-                
-                
-                
-                
-                # Add items to table
-                self.table.setItem(row, 0, counter)
-                self.table.setItem(row, 1, batch)
-                self.table.setItem(row, 2, expiry)
-                self.table.setItem(row, 3, status)
-                self.table.setItem(row, 4, resolved)
-                
-                detail = QPushButton('Details')
-                detail.setCursor(Qt.PointingHandCursor)
-                detail.setStyleSheet("""
-                        QPushButton {
-                            background-color: transparent;
-                            color: #333;
-                            padding: 4px 12px;
-                            border-radius: 2px;
-                            font-weight: 600;
-                        }
-                        QPushButton:hover {
-                            background-color: #340238;
-                            color: #fff;
-                        }
-                        QPushButton:pressed {
-                            background-color: #47034E;
-                            color: #fff;
-                        }
-                    
-                """)
-                
-                batch_id = int(batch_id)
-                self.table.setCellWidget(row, 5, detail)
-                detail.clicked.connect(partial(self.modal_signal.emit, batch_id))
-                # detail.clicked.connect(lambda checked, b_id=batch_id: self.modal_signal.emit(b_id))
+                for col in range(7):
+                    item = QTableWidgetItem(str(batch_query.value(col)))
+                    item.setFlags(item.flags() ^ Qt.ItemIsEditable)  # make item non-editable
+                    self.table.setItem(row, col, item)
                 
                 row += 1
-                
-                
-                
-        self.color_rows_by_status(self.table, status_column=3)
-
-    
+            
+            print(f"[OK] Loaded {row} batches for product ID {self.product_id}")
+            
+            # Colour rows by status
+            self.color_rows_by_status(self.table, status_column=3)
+            
+        
 
 
 
@@ -384,25 +330,9 @@ class ProductDetailWidget(QWidget):
     
     
     
-    def split_packs_and_units(self, pack_size: int, units: int) -> tuple[int, int]:
-   
-        # if pack_size <= 0:
-        #     raise ValueError("Pack size must be greater than zero")
-        # if units < 0:
-        #     raise ValueError("Units cannot be negative")
-        
-        if pack_size <= 0: 
-            packs = 0
-            leftover_units = 0
-        else:
-            packs = units // pack_size
-            leftover_units = units % pack_size
-            
-        return packs, leftover_units
-       
-            
             
     def save_changes(self):
+        
         if not self.product_id:
             print("[ERROR] No Product loaded.")
             QMessageBox.warning(None, "Error", "No product loaded.")
@@ -416,27 +346,22 @@ class ProductDetailWidget(QWidget):
             # --- Get form values ---
             product = self.productedit.text().strip()
             code = self.codeedit.text().strip()
-            category = self.categoryedit.text().strip()
             brand = self.brandedit.text().strip()
             formula = self.formulaedit.text().strip()
-            form = self.formedit.text().strip()
-            strength = self.strengthedit.text().strip()
 
             # Safe type casting
-            try:
-                packsize = int(self.packsizeedit.text()) if self.packsizeedit.text().strip() else 0
-                packs = int(self.packsedit.text()) if self.packsedit.text().strip() else 0
-                units = int(self.unitsedit.text()) if self.unitsedit.text().strip() else 0
-                reorder = int(self.reorder_level_edit.text()) if self.reorder_level_edit.text().strip() else 0
-                sale = float(self.sale_price_edit.text()) if self.sale_price_edit.text().strip() else 0.0
-            except ValueError:
-                raise ValueError("Reorder level must be an integer and Sale Price must be a number.")
+            packsize = int(self.packsizeedit.text()) if self.packsizeedit.text().strip() else 0
+            sale = float(self.sale_price_edit.text()) if self.sale_price_edit.text().strip() else 0.0
+            
+            
+            
+            
 
             # --- Update product table ---
             product_query = QSqlQuery()
             product_query.prepare("""
                 UPDATE product
-                SET name = ?, code = ?, category = ?, brand = ?, formula = ?, form = ?, strength = ?
+                SET display_name = ?, code = ?, brand = ?, generic_name = ?
                 WHERE id = ?
             """)
 
@@ -445,48 +370,37 @@ class ProductDetailWidget(QWidget):
             
             product_query.addBindValue(product)
             product_query.addBindValue(code)
-            product_query.addBindValue(category)
             product_query.addBindValue(brand)
             product_query.addBindValue(formula)
-            product_query.addBindValue(form)
-            product_query.addBindValue(strength)
             product_query.addBindValue(self.product_id)
 
             if not product_query.exec():
                 raise Exception(f"Product update failed: {product_query.lastError().text()}")
 
-            if product_query.numRowsAffected() == 0:
-                raise Exception("No product rows were updated. Invalid product_id?")
 
             print(f"[OK] Product updated. Rows affected: {product_query.numRowsAffected()}")
             
-            units = packsize * packs
-
             # --- Update stock table ---
-            stock_query = QSqlQuery()
-            stock_query.prepare("""
-                UPDATE stock
-                SET packsize = ?, units = ?, reorder = ?, saleprice = ?
-                WHERE product = ?
+            pricing_query = QSqlQuery()
+            pricing_query.prepare("""
+                UPDATE price_pack
+                SET pack_size = ?, pack_price = ?
+                WHERE product_id = ?
             """)
             
-            stock_query.addBindValue(packsize)
-            stock_query.addBindValue(units)
-            stock_query.addBindValue(reorder)
-            stock_query.addBindValue(sale)
-            stock_query.addBindValue(self.product_id)
+            pricing_query.addBindValue(packsize)
+            pricing_query.addBindValue(sale)
+            pricing_query.addBindValue(self.product_id)
 
-            if not stock_query.exec():
-                raise Exception(f"Stock update failed: {stock_query.lastError().text()}")
+            if not pricing_query.exec():
+                raise Exception(f"Stock update failed: {pricing_query.lastError().text()}")
 
-            if stock_query.numRowsAffected() == 0:
-                raise Exception("No stock rows were updated. Invalid product_id link?")
+            if pricing_query.numRowsAffected() == 0:
+                raise Exception("No stock rows were updated. Invalid product_id link ?")
 
-            print(f"[OK] Stock updated. Rows affected: {stock_query.numRowsAffected()}")
+            print(f"[OK] Stock updated. Rows affected: {pricing_query.numRowsAffected()}")
             
             
-            # # --- Update Batch Status ---
-            # self.update_batch_status()
 
             # --- Commit transaction ---
             if not db.commit():
@@ -504,138 +418,9 @@ class ProductDetailWidget(QWidget):
     
 
 
-    def update_batch_status(self):
-        
-        today = QDate.currentDate()
-
-        query = QSqlQuery()
-
-        # Select all batches with expiry dates
-        if not query.exec("SELECT id, expiry FROM batch"):
-            print("Error selecting batches:", query.lastError().text())
-            return
-
-        while query.next():
-            batch_id = query.value(0)
-            expiry_date = query.value(1)  # should be date type in DB
-
-            if expiry_date is None:
-                continue
-
-            days_diff = today.daysTo(expiry_date)
-
-            if days_diff < 0:
-                status = "expired"
-            elif days_diff <= 60:  # within 2 months
-                status = "near expiry"
-            else:
-                status = "valid"
-                
-            # Update status
-            update_query = QSqlQuery()
-            
-            update_query.prepare("UPDATE batch SET status = :status WHERE id = :id")
-            update_query.bindValue(":status", status)
-            update_query.bindValue(":id", batch_id)
-            
-            if not update_query.exec():
-                print("Error updating batch:", update_query.lastError().text())
-
-
 
     
-    def open_modal_window(self, batch_id):
-        
-        print("Opening Batch Details Window")
-        
-        print("THE BATCH ID is : ", batch_id)
-        # get batch query
-        batch_query = QSqlQuery()
-        batch_query.prepare("SELECT batch, resolved FROM batch WHERE id = :batch_id")
-        batch_query.bindValue(":batch_id", batch_id)
-        
-        if batch_query.exec() and batch_query.next():
-            
-            batch = batch_query.value(0)
-            resolved = batch_query.value(1)
-            resolved = bool(resolved)
-            
-            print("Batch is: ", batch, " and resolved is: ", resolved)
-            
-            if resolved:
-                print("Batch is resolved")
-                QMessageBox.information(self, "Already Resolved", "Batch is Already Resolved")
-                return
-                
-        else:
-            
-            print("Could not get Batch", batch_query.lastError().text())
-            return
-        
-            
-        print("Batch not resolved...")
-        modal = BatchDetailsDialog()
-        
-        batch_info = self.get_batch(batch_id)
-        
-        print(batch_info)
-        
-        product_name, batch, expiry, status = batch_info
-        
-        if isinstance(expiry, QDateTime):
-            expiry = expiry.date().toString("dd-MM-yyyy")
-        elif isinstance(expiry, QDate):
-            expiry = expiry.toString("dd-MM-yyyy")
-        else:
-            expiry = str(expiry)
-        
-        modal.batch_id_value.setText(str(batch_id))
-        modal.product_value.setText(str(product_name)) 
-        modal.batch_value.setText(str(batch))
-        modal.expiry_value.setText(str(expiry))
-        modal.status_value.setText(str(status))
-
-        
-        modal.exec()  # <-- blocks until closed
-        
-        
-        
-        
-    def get_batch(self, batch_id):
-        
-        print("Trying to get the batch")
-        
-        # get batch values from db
-        batch_query = QSqlQuery()
-        batch_query.prepare("SELECT product, batch, expiry, status FROM batch WHERE id = :batch_id")
-        batch_query.bindValue(":batch_id", batch_id)
-        
-        if batch_query.exec() and batch_query.next():
-            print("Query successful")
-            product = batch_query.value(0)
-            batch = batch_query.value(1)
-            expiry = batch_query.value(2)
-            status = batch_query.value(3)
-            
-            # get product name
-            product_query = QSqlQuery()
-            product_query.prepare("SELECT name FROM product WHERE id = :product_id")
-            product_query.bindValue(":product_id", product)
-            
-            if product_query.exec() and product_query.next():
-                
-                product_name = product_query.value(0)    
-
-            else:
-                print("Error Getting Product name, ", product_query.lastError().text())
-            
-            return (product_name, batch, expiry, status)
-            
-        else:
-            print(batch_query.lastError().text())
-        
-        
-
+     
             
     
 

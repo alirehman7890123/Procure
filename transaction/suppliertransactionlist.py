@@ -1,5 +1,5 @@
-from PySide6.QtWidgets import QWidget, QComboBox, QGridLayout, QLabel, QMessageBox, QPushButton, QHeaderView, QSizePolicy, QVBoxLayout, QTableWidget, QTableWidgetItem
-from PySide6.QtCore import QFile, Qt, Signal
+from PySide6.QtWidgets import QWidget, QFrame, QLineEdit, QHBoxLayout, QLabel, QMessageBox, QPushButton, QHeaderView, QSizePolicy, QVBoxLayout, QTableWidget, QTableWidgetItem
+from PySide6.QtCore import QFile, Qt, Signal, QEvent
 from PySide6.QtSql import QSqlQuery
 from functools import partial
 
@@ -17,74 +17,106 @@ class SupplierTransactionListWidget(QWidget):
 
         super().__init__(parent)
 
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(40, 40, 40, 40)
+        self.layout.setSpacing(20)
+        
+        # === Header Row ===
+        header_layout = QHBoxLayout()
+        heading = QLabel("All Transactions", objectName="SectionTitle")
+        self.transaction_list = QPushButton("All Supplier Transactions", objectName="TopRightButton")
+        self.transaction_list.setCursor(Qt.PointingHandCursor)
+        self.transaction_list.setFixedWidth(200)
+        header_layout.setContentsMargins(0, 0, 0, 10)
+        header_layout.addWidget(heading)
+        header_layout.addWidget(self.transaction_list)
 
-        layout = QVBoxLayout(self)
+        self.layout.addLayout(header_layout)
 
-        grid_widget = QWidget()
-        grid_layout = QGridLayout()
-        grid_widget.setLayout(grid_layout)
-
-        print("Printing Transaction List")
-
-        heading = QLabel("Transaction List", objectName='myheading')
-        self.addpayment = QPushButton('Add New Payment', objectName='supplierlist')
-
-        grid_layout.addWidget(heading, 0,0)
-        grid_layout.addWidget(self.addpayment, 0,2)
-
-        layout.addWidget(grid_widget)
 
         
+        line = QFrame()
+        line.setObjectName("lineSeparator")
 
-        self.table = QTableWidget()
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        line.setStyleSheet("""
+                QFrame#lineSeparator {
+                    border: none;
+                    border-top: 2px solid #333;
+                }
+            """)
+
+
+
+        self.layout.addWidget(line)
+        self.layout.addSpacing(20)
         
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels([
-            "#", "Supplier", "Type", "Paid", "Received", "Date", "Detail"
-        ])
+        # Search Field
+        search_layout = QHBoxLayout()
+        search_edit = QLineEdit()
+        search_edit.setPlaceholderText("Search Supplier...")
+        search_edit.textChanged.connect(self.search_rows)
+        search_layout.addWidget(search_edit)
+        self.layout.addLayout(search_layout)
+        self.layout.addSpacing(10)
+
+        
+        
+        self.row_height = 40
+
+        self.table = MyTable(column_ratios=[0.05, 0.25, 0.15, 0.20, 0.15, 0.10, 0.10])
+        headers = ["#", "Supplier", "Type", "Paid", "Received", "Date", "Detail"]
+        self.table.setColumnCount(len(headers))
+        self.table.setHorizontalHeaderLabels(headers)
+        
+        
+
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.table.verticalHeader().setDefaultSectionSize(self.row_height)
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        # self.setColumnWidths(table, [0.1, 0.4, 0.3, 0.2, 0.2]) 
-
+        detail_col = headers.index("Detail")
+        self.table.horizontalHeaderItem(detail_col).setTextAlignment(Qt.AlignCenter)
+        
         self.table.setStyleSheet("QTableWidget::item { color: #333; }")
 
         self.table.verticalHeader().setFixedWidth(0)
         header = self.table.horizontalHeader()
-        header.setFixedHeight(30)
+        header.setStretchLastSection(True)   
 
-        header.setStyleSheet("""
-                background-color: #333;
-                color: white;              
-                font-weight: 600;
-            
-        """)
-
-        combo = QComboBox()
-        combo.setEditable(True)
-        combo.addItems(['option 1', 'option 2', 'option 3'])
-
-        combo.setStyleSheet("""
-                                QComboBox {
-                                    background-color: lightgray;
-                                    color: #333;
-                                    padding: 5px;
-                                }
-                                QComboBox QAbstractItemView {
-                                    background-color: white;
-                                    color: black;
-                                    selection-background-color: lightblue;
-                                    selection-color: black;
-                                }
-                            """)
-        layout.addWidget(combo)
+        self.table.setMinimumWidth(1000)
         
-        layout.addWidget(self.table)
-        self.setLayout(layout)
+        # Hide vertical header (row numbers)
+        self.table.verticalHeader().setVisible(False)
+        
+        # Alternating row colors
+        self.table.setAlternatingRowColors(True)
+
 
         
+        
+        self.layout.addWidget(self.table)
+        
+        self.layout.addStretch()
+
+
         self.setStyleSheet(load_stylesheets())
 
+
+
+    def search_rows(self, text):
+        
+        for row in range(self.table.rowCount()):
+            match = False
+            for col in range(self.table.columnCount() - 1):
+                item = self.table.item(row, col)
+                if item and text.lower() in item.text().lower():
+                    match = True
+                    break
+            self.table.setRowHidden(row, not match)
+            
+            
 
 
     
@@ -173,5 +205,31 @@ class SupplierTransactionListWidget(QWidget):
 
 
             
+
+class MyTable(QTableWidget):
+    def __init__(self, rows=0, cols=0, column_ratios=None, parent=None):
+        super().__init__(rows, cols, parent)
+        self.column_ratios = column_ratios or []
+        header = self.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Interactive)  # user can drag
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self.column_ratios:
+            return
+        total = sum(self.column_ratios)
+        width = self.viewport().width()
+        for i, ratio in enumerate(self.column_ratios):
+            col_width = int(width * (ratio / total))
+            self.setColumnWidth(i, col_width)
+
+
+
+
+
+
+
+
+
         
 

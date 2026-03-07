@@ -28,10 +28,11 @@ class BaseTransactionWidget(BasePage):
         # Show Transactions
         self.supplier_transaction_widget = SupplierTransactionWidget()
         self.supplier_transaction_widget.transaction_page_signal.connect(self.set_create_supplier_transaction_widget)
+        self.supplier_transaction_widget.transactionpage.clicked.connect(self.set_maintransaction_widget)
         
         self.customer_transaction_widget = CustomerTransactionWidget()
         self.customer_transaction_widget.transaction_page_signal.connect(self.set_create_customer_transaction_widget)
-        
+        self.customer_transaction_widget.transactionpage.clicked.connect(self.set_maintransaction_widget)
         
         # Create Payment Transactions
         self.create_supplier_transaction_widget = CreateSupplierTransactionWidget()
@@ -44,20 +45,18 @@ class BaseTransactionWidget(BasePage):
 
         # # List transaction Widget
         self.supplier_transaction_list_widget = SupplierTransactionListWidget()
-        self.supplier_transaction_list_widget.addpayment.clicked.connect(self.set_suppliertransaction_widget)
+        self.supplier_transaction_list_widget.transaction_list.clicked.connect(self.set_suppliertransaction_widget)
         self.supplier_transaction_list_widget.transaction_detail_signal.connect(self.set_supplier_transaction_detail_widget)
         
         
         self.customer_transaction_list_widget = CustomerTransactionListWidget()
-        self.customer_transaction_list_widget.addpayment.clicked.connect(self.set_customertransaction_widget)
-        
+        self.customer_transaction_list_widget.transaction_list.clicked.connect(self.set_customertransaction_widget)
         
 
         # # Detail transaction Widget
         self.customer_transaction_detail_widget = CustomerTransactionDetailWidget()
         self.customer_transaction_detail_widget.transactionlist.clicked.connect(self.set_customer_transaction_list_widget)
         self.customer_transaction_list_widget.transaction_detail_signal.connect(self.set_customer_transaction_detail_widget)
-
 
 
         self.supplier_transaction_detail_widget = SupplierTransactionDetailWidget()

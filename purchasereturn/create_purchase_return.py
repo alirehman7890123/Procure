@@ -97,8 +97,8 @@ class AddPurchaseReturnWidget(QWidget):
         self.min_visible_rows = 5
         
     
-        self.table = MyTable(column_ratios=[0.03, 0.25, 0.07, 0.10, 0.05, 0.05, 0.07, 0.05, 0.07, 0.05, 0.07, 0.10, 0.05])
-        headers = ["#", "Product", "Batch", "PO_Ref", "Purchased", "Return", "Rate", "Disc (%)", "Tax (%)", "PO % Disc", "PO % Tax", "Total", "X"]
+        self.table = MyTable(column_ratios=[0.03, 0.25, 0.07, 0.07, 0.05, 0.07, 0.10, 0.05])
+        headers = ["#", "Product", "Batch", "Qty", "Return Qty", "Rate", "Total", "X"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         
@@ -189,6 +189,10 @@ class AddPurchaseReturnWidget(QWidget):
         self.layout.addLayout(final_amount_row)
 
         
+        temporary_row = QHBoxLayout()
+        
+        
+        
         
         
         
@@ -205,16 +209,29 @@ class AddPurchaseReturnWidget(QWidget):
         self.remainingdata = QLabel("0.00")
         
         self.checkbox = QCheckBox("Write off")
-        self.checkbox.toggled.connect(self.writeoffcheck)
-        
         
         # 8th Line
         self.note = QLabel("Note")
+        self.note_entry = QLineEdit()
         
-        savereturn = QPushButton('Save Purchase Return', objectName='supplierlist')
+        temporary_row.addWidget(receivelabel)
+        temporary_row.addWidget(self.receive_edit)
+        temporary_row.addWidget(remaininglabel)
+        temporary_row.addWidget(self.remainingdata)
+        temporary_row.addWidget(self.checkbox)
+        temporary_row.addWidget(self.note)
+        temporary_row.addWidget(self.note_entry)
+        
+        self.layout.addLayout(temporary_row)
+
+        
+        savereturn = QPushButton('Save Purchase Return', objectName='SaveButton')
         savereturn.setCursor(Qt.PointingHandCursor)
         
         savereturn.clicked.connect(lambda: self.save_purchase_return())
+        
+        
+        self.layout.addWidget(savereturn)
         
         self.layout.addStretch()
         
@@ -226,27 +243,6 @@ class AddPurchaseReturnWidget(QWidget):
         
         
         
-        
-        
-
-    
-    def writeoffcheck(self):
-        
-        remaining = self.remainingdata.text()
-        remaining = float(remaining) if remaining else 0
-        
-        if remaining > 0:
-            
-            if self.checkbox.isChecked():
-                
-                self.note.setText(f"Amount {remaining} will be wrote-off / Cleared")
-            else:
-                self.note.setText(f"Amount {remaining} will be added to receiveables")
-        
-        else:
-            
-            self.note.setText(f"Amount {remaining} is excessive and will be added to payables to supplier")    
-    
     
 
     def update_total_amount(self):
@@ -255,7 +251,7 @@ class AddPurchaseReturnWidget(QWidget):
         subtotal = 0.00
         for row in range(self.table.rowCount()):
             
-            linetotal = self.table.cellWidget(row, 11).text()
+            linetotal = self.table.cellWidget(row, 6).text()
             
             if linetotal:
                 try:
@@ -295,7 +291,6 @@ class AddPurchaseReturnWidget(QWidget):
         remaining = finalamount - received
         self.remainingdata.setText(str(remaining))
         
-        self.writeoffcheck()
          
 
        
@@ -351,26 +346,12 @@ class AddPurchaseReturnWidget(QWidget):
         batch = QComboBox()
         batch.activated.connect(partial(self.on_batch_highlighted, item=batch))
         
-        po_ref = QLabel()
-        
-        purchased_qty = QLabel()
+        remaining_qty = QLabel()
         
         return_qty = QLineEdit()
         
         rate = QLabel()
         rate.setText("0.00")
-        
-        discount = QLabel()
-        discount.setText("0.00")
-        
-        tax = QLabel()
-        tax.setText("0.00")
-        
-        po_discount = QLabel()
-        po_discount.setText("0.00")
-        
-        po_tax = QLabel()
-        po_tax.setText("0.00")
         
         total_edit = QLineEdit()
         total_edit.setReadOnly(True)
@@ -384,16 +365,11 @@ class AddPurchaseReturnWidget(QWidget):
         self.table.setCellWidget(row, 0, counter)
         self.table.setCellWidget(row, 1, product)
         self.table.setCellWidget(row, 2, batch)
-        self.table.setCellWidget(row, 3, po_ref)
-        self.table.setCellWidget(row, 4, purchased_qty)
-        self.table.setCellWidget(row, 5, return_qty)
-        self.table.setCellWidget(row, 6, rate)
-        self.table.setCellWidget(row, 7, discount)
-        self.table.setCellWidget(row, 8, tax)
-        self.table.setCellWidget(row, 9, po_discount)
-        self.table.setCellWidget(row, 10, po_tax)
-        self.table.setCellWidget(row, 11, total_edit)
-        self.table.setCellWidget(row, 12, remove_btn)
+        self.table.setCellWidget(row, 3, remaining_qty)
+        self.table.setCellWidget(row, 4, return_qty)
+        self.table.setCellWidget(row, 5, rate)
+        self.table.setCellWidget(row, 6, total_edit)
+        self.table.setCellWidget(row, 7, remove_btn)
         
         
         return_qty.textChanged.connect(lambda _: self.update_amount(return_qty))
@@ -489,336 +465,200 @@ class AddPurchaseReturnWidget(QWidget):
         
         
         db = QSqlDatabase.database()
-        db.transaction()
         
-        try: 
-        
+        if not db.transaction():
+            QMessageBox.critical(None, "Database Error", "Could not start transaction.")
+            return
+
+        try:
+            
             supplier = self.supplier_edit.currentData()
             rep = self.rep_edit.currentData()
-            
-            if supplier is None or rep is None:
-                
-                QMessageBox.warning(None, "Error", "Please select a supplier and a seller representative.")
-                return
-            
-            
-            subtotal = self.subtotal.text()
-            roundoff = self.roundoff.text()
-            total = self.final_amountdata.text()
-            received = self.receive_edit.text()
-            remaining = self.remainingdata.text()
-            
-            
-            subtotal = float(subtotal) if subtotal else 0
-            roundoff = float(roundoff) if roundoff else 0
-            total = float(total) if total else 0
-            received = float(received) if received else 0
-            remaining = float(remaining) if remaining else 0
-            
-            
+
+            if not supplier or not rep:
+                raise ValueError("Supplier and representative must be selected.")
+
+            def safe_float(value):
+                try:
+                    return float(value) if value else 0.0
+                except ValueError:
+                    return 0.0
+
+            subtotal = round(safe_float(self.subtotal.text()), 2)
+            roundoff = round(safe_float(self.roundoff.text()), 2)
+            total = round(safe_float(self.final_amountdata.text()), 2)
+            received = round(safe_float(self.receive_edit.text()), 2)
+            remaining = round(safe_float(self.remainingdata.text()), 2)
+
+            # # --- Financial Consistency Check ---
+            # if round(subtotal + roundoff, 2) != total:
+            #     raise ValueError("Total does not match Subtotal + Roundoff.")
+
+            # if round(total - received, 2) != remaining:
+            #     raise ValueError("Remaining amount calculation mismatch.")
+
+            # --- Remaining Logic ---
+            writeoff = 0.0
+            payable = 0.0
+            receiveable = 0.0
+
             if remaining == 0.0:
-                
-                writeoff = 0.0
-                payable = 0.0
-                receiveable = 0.0
-                
-            elif remaining > 0.0 and self.checkbox.isChecked():
-                
-                writeoff = remaining
-                payable = 0.0
-                receiveable = 0.0
-                
-            elif remaining > 0.0 and not self.checkbox.isChecked():
-                
-                writeoff = 0.0
-                payable = 0.0
-                receiveable = remaining
-                
-            else:
-                
-                writeoff = 0.0
+                pass
+
+            elif remaining > 0.0:
+                if self.checkbox.isChecked():
+                    writeoff = remaining
+                else:
+                    receiveable = remaining
+
+            else:  # remaining < 0
                 payable = abs(remaining)
-                receiveable = 0.0
-                
-            
-        
+
+            # --- Insert Header ---
             query = QSqlQuery()
-            
             query.prepare("""
-                INSERT INTO purchase_return (supplier, rep, subtotal, roundoff, total, received, remaining, writeoff, payable, receiveable)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """)                   
-                    
-            query.addBindValue(supplier)
-            query.addBindValue(rep)
-            
-            query.addBindValue(subtotal)
-            query.addBindValue(roundoff)
-            query.addBindValue(total)
-            
-            query.addBindValue(received)
-            query.addBindValue(remaining)
-            query.addBindValue(writeoff)
-            
-            query.addBindValue(payable)
-            query.addBindValue(receiveable)
-            
-            print("Prepared Query: ", query.lastQuery())
-                
+                INSERT INTO purchase_return
+                (supplier, rep, subtotal, roundoff, total, received, remaining, writeoff, payable, receiveable)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """)
+
+            values = (
+                supplier, rep,
+                subtotal, roundoff, total,
+                received, remaining,
+                writeoff, payable, receiveable
+            )
+
+            for v in values:
+                query.addBindValue(v)
+
             if not query.exec():
-                print("Insert failed:", query.lastError().text())
-            else:
-                QMessageBox.information(None, "Success", 'Purchase Return Saved Successfully')
-                return_id = query.lastInsertId()
-                
-            
-            
+                raise Exception(query.lastError().text())
+
+            return_id = query.lastInsertId()
+
+            if not return_id:
+                raise Exception("Failed to retrieve inserted return ID.")
+
+            db.commit()
+            QMessageBox.information(None, "Success", "Purchase Return Saved Successfully")
+
+
+
             print("About to add purchase transaction")
             
             
-            #####################################
-            ####    PURCHASE TRANSACTIONS    ####
-            #####################################
             
             supplier = int(supplier)
-            supplier_query = QSqlQuery()
-            supplier_query.prepare("SELECT payable, receiveable FROM supplier where id = ?")
-            supplier_query.addBindValue(supplier)
-            
-            if supplier_query.exec() and supplier_query.next():
-                
-                supplier_payable = supplier_query.value(0)
-                supplier_receiveable = supplier_query.value(1)
 
-                supplier_payable = float(supplier_payable)
-                supplier_receiveable = float(supplier_receiveable)
-                               
+            # Fetch current supplier balances
+            supplier_query = QSqlQuery()
+            supplier_query.prepare("SELECT payable, receiveable FROM supplier WHERE id = ?")
+            supplier_query.addBindValue(supplier)
+
+            if supplier_query.exec() and supplier_query.next():
+                supplier_payable = float(supplier_query.value(0))
+                supplier_receiveable = float(supplier_query.value(1))
             else:
-                
-                print("Error ", supplier_query.lastError().text())
+                print("Error fetching supplier:", supplier_query.lastError().text())
                 QMessageBox.critical(self, "Error", "Supplier not found or database error.")
                 raise Exception
-            
-            
-            transaction_type = 'purchase return'
+
+            transaction_type = "PURCHASE RETURN"
             ref_no = None
             return_ref = return_id
-            
+
+            current_payable = 0.0
+            current_receivable = 0.0
+
+            remaining = total - received   # IMPORTANT
+
+            if remaining > 0.0:
+                # Supplier owes you
+                current_receivable = remaining
+
+            elif remaining < 0.0:
+                # You owe supplier (over refund case)
+                current_payable = abs(remaining)
+
+            # Previous balances
             payable_before = supplier_payable
-            due_amount = 0.00
-            paid = 0.00
-            remaining_due = 0.00
-            payable_after = supplier_payable
-            
-            receiveable_before = supplier_receiveable
-            receiveable_now = total
-            received = received
-            remaining_now = total - received
-            receiveable_after = receiveable_before + total - received
-            
-            print("about to insert transaction")
-            # insert transaction
+            receivable_before = supplier_receiveable
+
+            # Apply movement WITHOUT offset
+            payable_after = payable_before + current_payable
+            receivable_after = receivable_before + current_receivable
+
+            # Transaction meta fields
+            due_amount = 0.0              # not applicable for return
+            paid_now = 0.0                # not applicable for return
+            remaining_due = 0.0           # not applicable
+
+            receiveable_now = total       # value of goods returned
+            received = received      # refund received now
+            remaining_now = remaining
+
+            note = "Purchase Return recorded with total amount " + str(total) + ". Received: " + str(received) + ". Remaining: " + str(remaining_now) + ". Write-off: " + str(writeoff)
+
+            # Insert transaction record
             query = QSqlQuery()
             query.prepare("""
-                          INSERT INTO supplier_transaction 
-                          (supplier, transaction_type, ref, return_ref,
-                          payable_before, due_amount, paid, remaining_due, payable_after,
-                          receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
-                          rep) 
-                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                          
-                          """)
-            
+                INSERT INTO supplier_transaction 
+                (supplier, transaction_type, ref, return_ref,
+                payable_before, due_amount, paid, remaining_due, payable_after,
+                receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
+                rep, note)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """)
+
             query.addBindValue(supplier)
             query.addBindValue(transaction_type)
             query.addBindValue(ref_no)
             query.addBindValue(return_ref)
             query.addBindValue(payable_before)
             query.addBindValue(due_amount)
-            query.addBindValue(paid)
+            query.addBindValue(paid_now)
             query.addBindValue(remaining_due)
             query.addBindValue(payable_after)
-            query.addBindValue(receiveable_before)
+            query.addBindValue(receivable_before)
             query.addBindValue(receiveable_now)
             query.addBindValue(received)
             query.addBindValue(remaining_now)
-            query.addBindValue(receiveable_after)
+            query.addBindValue(receivable_after)
             query.addBindValue(rep)
-            
-            
+            query.addBindValue(note if 'note' in locals() else "")
+
             if query.exec():
-                
                 insert_id = query.lastInsertId()
-                print("Transaction is saved ...")
-                QMessageBox.information(None, "Success", "Supplier Transaction Stored Successfully with ID: " + str(insert_id) )
-                
-                
+                print("Supplier transaction saved with ID:", insert_id)
+                QMessageBox.information(None, "Success", f"Supplier Transaction Stored Successfully (ID: {insert_id})")
             else:
-                print("COULD NOT ADD TRANSACTION...")
+                print("Error inserting supplier transaction:", query.lastError().text())
                 QMessageBox.critical(None, "Error", query.lastError().text())
-                print("Query error:", query.lastError().text())
-                raise Exception 
-            
-            
-
-            
-            supplier_query = QSqlQuery()
-            supplier_query.prepare("SELECT payable, receiveable FROM supplier where id = ?")
-            supplier_query.addBindValue(supplier)
-            
-            if supplier_query.exec() and supplier_query.next():
-                
-                supplier_payable = supplier_query.value(0)
-                supplier_receiveable = supplier_query.value(1)
-
-                supplier_payable = float(supplier_payable)
-                supplier_receiveable = float(supplier_receiveable)
-                               
-            else:
-                
-                print("Error ", supplier_query.lastError().text())
-                QMessageBox.critical(self, "Error", "Supplier not found or database error.")
                 raise Exception
-            
-            
-            print("Payable and Receiveable are : ", supplier_payable, supplier_receiveable)
-            
-            supplier_payable = supplier_payable + payable
-            supplier_receiveable = supplier_receiveable + receiveable
-            
+
+            # Update supplier balances
+            new_payable = payable_after
+            new_receiveable = receivable_after
+
             update_supplier = QSqlQuery()
-            update_supplier.prepare("UPDATE supplier SET payable = ? , receiveable = ? WHERE id = ?")
-            
-            update_supplier.addBindValue(supplier_payable)
-            update_supplier.addBindValue(supplier_receiveable)
+            update_supplier.prepare("UPDATE supplier SET payable = ?, receiveable = ? WHERE id = ?")
+            update_supplier.addBindValue(new_payable)
+            update_supplier.addBindValue(new_receiveable)
             update_supplier.addBindValue(supplier)
-            
-            print("New Payable and Receiveable are : ", supplier_payable, supplier_receiveable)
-            
-            if update_supplier.exec(): 
-                
-                print("Supplier Balance updated successfully")
-            
+
+            if update_supplier.exec():
+                print("Supplier balances updated successfully")
             else:
+                print("Error updating supplier balances:", update_supplier.lastError().text())
                 QMessageBox.critical(self, "Error", update_supplier.lastError().text())
                 raise Exception
+
             
             
             
             
-            
-            
-            
-            item_exist = False
-            
-
-            for row in range(self.table.rowCount()):
-                
-                print("Row number is:", row)
-                
-                product_widget = self.table.cellWidget(row, 1)
-                
-                print("Med Widget is: ", product_widget.currentData())
-                
-                if not product_widget or not product_widget.currentData():
-                    print("Row is empty ... ignoring it...")
-                    continue
-
-                product_id = product_widget.currentData()
-                item_exist = True
-                
-                try:
-                    
-                    batch = self.table.cellWidget(row, 2).currentText()
-                    po_ref = self.table.cellWidget(row, 3).text()
-                    purchased = self.table.cellWidget(row, 4).text()
-                    returned = int(self.table.cellWidget(row, 5).text())
-                    rate = float(self.table.cellWidget(row, 6).text())
-                    discount = float(self.table.cellWidget(row, 7).text())
-                    tax = float(self.table.cellWidget(row, 8).text())
-                    po_discount = float(self.table.cellWidget(row, 9).text())
-                    po_tax = float(self.table.cellWidget(row, 10).text())
-                    total = float(self.table.cellWidget(row, 11).text())
-                    
-                    
-                    # get the purchase order by
-                    
-                    
-                    
-                    
-                except (ValueError, AttributeError):
-                    
-                    print("Invalid data in row", row, "- skipping this row")
-                    continue
-
-
-                item_query = QSqlQuery()
-                item_query.prepare("""
-                    INSERT INTO purchase_return_item (purchase_return, po_ref, product, batch, purchased, returned, rate, discount, tax, po_discount, po_tax, total)
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """)
-                
-                item_query.addBindValue(return_id)
-                item_query.addBindValue(po_ref)
-                item_query.addBindValue(product_id)
-                item_query.addBindValue(batch)
-                item_query.addBindValue(purchased)
-                item_query.addBindValue(returned)
-                item_query.addBindValue(rate)
-                item_query.addBindValue(discount)
-                item_query.addBindValue(tax)
-                item_query.addBindValue(po_discount)
-                item_query.addBindValue(po_tax)
-                item_query.addBindValue(total)
-
-                if not item_query.exec():
-                    print("Error inserting purchaseitem:", item_query.lastError().text())
-                
-                else:
-                    print("Purchase item inserted successfully")
-                    item = item_query.lastInsertId()
-                    
-                    
-
-                # ✅ Check and update stock
-                stock_query = QSqlQuery()
-                stock_query.prepare("SELECT packsize, units FROM stock WHERE product = ?")
-                stock_query.addBindValue(product_id)
-
-                if stock_query.exec() and stock_query.next():
-                    
-                    packsize = stock_query.value(0)
-                    units = stock_query.value(1)
-                    
-                    newpacks = int(units) - returned
-
-                    update_query = QSqlQuery()
-                    
-                    update_query.prepare("UPDATE stock SET packs = ? WHERE product = ?")
-                    
-                    update_query.addBindValue(newpacks)
-                    update_query.addBindValue(product_id)
-
-                    if update_query.exec():
-                        
-                        print("Stock decreased successfully")
-                        print(f"Row {row}: product_id={product_id}, qty={returned}, rate={rate}, total={total}")
-
-                        self.clear_fields()
-                    else:
-                        print("Failed to update stock:", update_query.lastError().text())
-                else:
-                    print("Stock record not found for product_id:", product_id)            
-                    self.clear_fields()
-                    print("Table and fields are cleared")
-                    
-                    
-            if not item_exist:
-                QMessageBox.warning(None, "Error", "No valid items found in the purchase order. Please add items before saving.")
-                db.rollback()
-                return
-            
-            print("All items processed successfully")
+            self.return_items(return_id)
         
         
         except Exception as e:
@@ -830,9 +670,155 @@ class AddPurchaseReturnWidget(QWidget):
             db.commit()
             print("Transaction committed successfully")
             QMessageBox.information(None, "Success", "Purchase saved successfully")
+            self.clear_fields()
         
         finally:
             print("Database connection closed")
+        
+        
+    
+    def return_items(self, return_id):
+
+        db = QSqlDatabase.database()
+        
+        def safe_int(widget):
+            if widget is None:
+                return 0
+            value = widget.text()
+            return int(value) if value and value.strip() else 0
+
+        def safe_float(widget):
+            if widget is None:
+                return 0.0
+            value = widget.text()
+            return float(value) if value and value.strip() else 0.0
+
+
+        row_count = self.table.rowCount()
+
+        if row_count == 0:
+            raise ValueError("No items to return.")
+
+
+        print("About to save returned items...")
+
+        for row in range(row_count):
+            
+            product_widget = self.table.cellWidget(row, 1)
+            product_id = product_widget.currentData()
+            
+            
+            product_widget = self.table.cellWidget(row, 1)
+            if not product_widget:
+                raise ValueError(f"Product missing at row {row+1}")
+
+            product_id = product_widget.currentData()
+            if product_id is None:
+                raise ValueError(f"Product not selected at row {row+1}")
+            
+            batch_no = self.table.cellWidget(row, 2).currentText()
+            purchased_qty = safe_int(self.table.cellWidget(row, 3))
+            return_qty = safe_int(self.table.cellWidget(row, 4))
+            rate = safe_float(self.table.cellWidget(row, 5))
+            total = safe_float(self.table.cellWidget(row, 6))
+
+            # --- Basic Validation ---
+            if return_qty <= 0:
+                continue  # skip empty rows safely
+
+            if return_qty > purchased_qty:
+                raise ValueError(
+                    f"Return qty exceeds purchased qty (Row {row + 1})."
+                )
+
+            # --- Fetch Current Batch Quantity ---
+            check_query = QSqlQuery()
+            check_query.prepare("""
+                SELECT quantity_remaining
+                FROM batch
+                WHERE batch_no = ? AND product_id = ?
+            """)
+            check_query.addBindValue(batch_no)
+            check_query.addBindValue(product_id)
+
+            if not check_query.exec() or not check_query.next():
+                raise ValueError(
+                    f"Batch not found (Row {row + 1})."
+                )
+
+            current_qty = check_query.value(0)
+            
+
+            if return_qty > current_qty:
+                raise ValueError(
+                    f"Insufficient stock in batch (Row {row + 1})."
+                )
+
+            print("Data to be inserted is: ", return_id, product_id, batch_no, purchased_qty, return_qty, rate, total)
+            
+            # --- Insert Return Item ---
+            query = QSqlQuery()
+            query.prepare("""
+                INSERT INTO purchase_return_item
+                (purchase_return, product, batch, purchased, returned, rate, total)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """)
+
+            values = (
+                return_id,
+                product_id,
+                batch_no,
+                purchased_qty,
+                return_qty,
+                round(rate, 4),
+                round(total, 2)
+            )
+
+            for v in values:
+                query.addBindValue(v)
+
+            if not query.exec():
+                raise Exception(query.lastError().text())
+
+            
+            
+            
+            print("Updating Batch Quantity")
+            print("DATA TO BE updated is: ", type(batch_no), batch_no, type(product_id), product_id)
+            # --- Update Batch ---
+            update_query = QSqlQuery()
+            update_query.prepare("""
+                UPDATE batch
+                SET quantity_remaining = quantity_remaining - ?
+                WHERE batch_no = ? AND product_id = ?
+            """)
+            
+            if return_qty is None:
+                print("Return quantity is None, defaulting to 0")
+            
+            if batch_no is None:
+                print("Batch number is None, defaulting to empty string")
+
+            if product_id is None:
+                print("Product ID is None, defaulting to 0")
+            
+            update_query.addBindValue(return_qty)
+            update_query.addBindValue(batch_no)
+            update_query.addBindValue(product_id)
+
+            if not update_query.exec():
+                print("some problem occurred...while updating batch qty")
+                print("Error:", update_query.lastError().text())
+                raise Exception(update_query.lastError().text())
+            
+            print("update query executed successfully for batch update")
+
+        return True
+
+        
+        
+        
+        
         
         
         
@@ -848,10 +834,7 @@ class AddPurchaseReturnWidget(QWidget):
             return 
         
         query = QSqlQuery()
-        query.prepare("""
-            SELECT id, name, form, strength
-            FROM product
-            WHERE name ILIKE ? LIMIT 10 """)
+        query.prepare("SELECT id, display_name FROM product WHERE display_name LIKE ? LIMIT 10")
         
         value = f"%{current_text}%"
         query.addBindValue(value)
@@ -866,12 +849,9 @@ class AddPurchaseReturnWidget(QWidget):
         
             while query.next():
                 
-                product_id = query.value(0)
-                name = query.value(1)
-                form = query.value(2)
-                strength = query.value(3)
+                product_id = int(query.value(0))
+                label = query.value(1)
                 
-                label = f"{name} {form} {strength}".strip()
                 products.append(label)
                 item.addItem(label, product_id)
                 
@@ -899,91 +879,39 @@ class AddPurchaseReturnWidget(QWidget):
 
     def on_batch_highlighted(self, text, item):
         
-        
-        # Prevent redundant triggers for the same value
-        # if hasattr(self, "_last_highlighted") and self._last_highlighted == text:
-        #     return
-        
-        # self._last_highlighted = text
-        
-        # index = item.findText(text, Qt.MatchFixedString)
-        # if index >= 0:
-        #     item.setCurrentIndex(index)
-            
-            
+
         row = self.table.indexAt(item.pos()).row()
         batch = self.table.cellWidget(row, 2).currentText()
         
         self.table.cellWidget(row, 3).clear()
         
-        
+        batch = batch.strip()
         print("Batch is: ", batch)
 
-        stock_query = QSqlQuery()
-        stock_query.prepare("SELECT purchaseitem FROM batch WHERE batch = ?")
-        stock_query.addBindValue(batch)
+        batch_query = QSqlQuery()
+        batch_query.prepare("SELECT quantity_remaining, unit_cost FROM batch WHERE batch_no = ?")
+        batch_query.addBindValue(batch)
         
 
         try:
             
-            if stock_query.exec() and stock_query.next():
+            if batch_query.exec() and batch_query.next():
                 
-                purchaseitem = stock_query.value(0)
-                purchaseitem = int(purchaseitem)
+                quantity_remaining = batch_query.value(0)
+                unit_cost = batch_query.value(1)
                 
-                print(f"Purchase item info is: {purchaseitem}")
                 
-                item_query = QSqlQuery()
-                item_query.prepare("SELECT qty, rate, discount, tax, purchase FROM purchaseitem WHERE id = ?")
-                item_query.addBindValue(purchaseitem)
                 
-                if item_query.exec() and item_query.next():
-                    
-                    self.table.cellWidget(row, 3).setText('')
-                    
-                    qty = item_query.value(0)
-                    qty = str(qty)
-                    rate = item_query.value(1)
-                    rate = str(rate)
-                    discount = item_query.value(2)
-                    tax = item_query.value(3)
-                    discount = str(discount)
-                    tax = str(tax)
-                    
-                    purchase = item_query.value(4)
-                    purchase = int(purchase)
-                    
-                    self.table.cellWidget(row, 3).setText(str(purchase))
-                    self.table.cellWidget(row, 4).setText(qty)
-                    self.table.cellWidget(row, 6).setText(rate)
-                    self.table.cellWidget(row, 7).setText(discount)
-                    self.table.cellWidget(row, 8).setText(tax)
-                    
-                    purchase_query = QSqlQuery()
-                    purchase_query.prepare("SELECT id, discount, tax FROM purchase WHERE id = ?")
-                    purchase_query.addBindValue(purchase)
-                    
-                    if purchase_query.exec() and purchase_query.next():
-                        
-                        self.table.cellWidget(row, 8).setText('')
-                        self.table.cellWidget(row, 9).setText('')
-                        
-                        po = str(purchase_query.value(0))
-                        po_discount = str(purchase_query.value(1))
-                        po_tax = str(purchase_query.value(2))
-                        
-                        self.table.cellWidget(row, 8).setText(po_discount)
-                        self.table.cellWidget(row, 9).setText(po_tax)
-                        
-                        
-                    else:
-                        QMessageBox.information(None, 'Error', purchase_query.lastError().text())
+                print(f"Batch info is: {quantity_remaining}, {unit_cost}")
                 
-                else:
-                    QMessageBox.information(None, 'Error', item_query.lastError().text())        
+                qty = str(quantity_remaining)
+                rate = str(unit_cost)
+                
+                self.table.cellWidget(row, 3).setText(qty)
+                self.table.cellWidget(row, 5).setText(rate)
                     
             else:
-                QMessageBox.information(None, 'Error', stock_query.lastError().text())
+                QMessageBox.information(None, 'Error', batch_query.lastError().text())
 
         except Exception as e:
                 
@@ -1013,7 +941,7 @@ class AddPurchaseReturnWidget(QWidget):
         print("Product id is: ", product_id)
 
         stock_query = QSqlQuery()
-        stock_query.prepare("SELECT batch FROM batch WHERE product = ?")
+        stock_query.prepare("SELECT batch_no FROM batch WHERE product_id = ?")
         stock_query.addBindValue(product_id)
         
 
@@ -1048,29 +976,29 @@ class AddPurchaseReturnWidget(QWidget):
         
 
 
-    def on_item_selected(self, item):
+    # def on_item_selected(self, item):
         
-        text = item.currentText()
-        data = item.currentData()
+    #     text = item.currentText()
+    #     data = item.currentData()
 
         
-        print("Selected text is: ",text, data)
-        data = int(data)
+    #     print("Selected text is: ",text, data)
+    #     data = int(data)
         
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT * FROM product
-            WHERE id = ? """)
+    #     query = QSqlQuery()
+    #     query.prepare("""
+    #         SELECT * FROM product
+    #         WHERE id = ? """)
         
-        query.addBindValue(data)
+    #     query.addBindValue(data)
         
-        if not query.exec():
+    #     if not query.exec():
             
-            print("Cannot Get the product")
+    #         print("Cannot Get the product")
             
-        else:
+    #     else:
             
-            print("Got the product")
+    #         print("Got the product")
                 
                 
 
@@ -1082,59 +1010,33 @@ class AddPurchaseReturnWidget(QWidget):
         
         try:
             
-            purchased = self.table.cellWidget(row, 4).text()
+            remaining = self.table.cellWidget(row, 3).text()
+            qty_text = self.table.cellWidget(row, 4).text()
             
-            qty_text = self.table.cellWidget(row, 5).text()
-            
-            if int(qty_text) > int(purchased):
+            if int(qty_text) > int(remaining):
                 
                 QMessageBox.information(None, "Error", "Quantity cannot be greater than purchased stock")
-                self.table.cellWidget(row, 5).setText("0")
+                self.table.cellWidget(row, 4).setText("0")
                 qty_text = 0
             
-            rate_text = self.table.cellWidget(row, 6).text()
+            rate_text = self.table.cellWidget(row, 5).text()
             
-            discount_edit = self.table.cellWidget(row,7).text()
-            tax_edit = self.table.cellWidget(row,8).text()
-            
-            po_discount = self.table.cellWidget(row, 9).text()
-            po_tax = self.table.cellWidget(row, 10).text()
 
             qty = int(qty_text) if qty_text else 0
             rate = float(rate_text) if rate_text else 0
             
-            discount = float(discount_edit) if discount_edit else 0
-            tax = float(tax_edit) if tax_edit else 0
-            
-            po_discount = float(po_discount) if po_discount else 0
-            po_tax = float(po_tax) if po_tax else 0
-            
             amount = qty * rate
             
-            discount = amount * discount / 100
-            amount = amount - discount
-            
-            tax_amount = amount * tax / 100
-            amount = amount + tax_amount
-            
             amount = float(f"{amount:.2f}")
             
-            po_discount = amount * po_discount / 100
-            amount = amount - po_discount
-            
-            po_tax = amount * po_tax / 100
-            amount = amount + po_tax
-            
-            amount = float(f"{amount:.2f}")
-                        
-            self.table.cellWidget(row, 11).setText(str(amount))
+            self.table.cellWidget(row, 6).setText(str(amount))
             print("Updating Final Amount")
             self.update_total_amount()
             
             
         except ValueError:
         
-            self.table.cellWidget(row, 11).setText("0.00")
+            self.table.cellWidget(row, 6).setText("0.00")
 
 
 
@@ -1156,6 +1058,7 @@ class AddPurchaseReturnWidget(QWidget):
             editor.lineEdit().selectAll()
     
     
+    
     def clear_fields(self):
         
         self.supplier_edit.clear()
@@ -1167,13 +1070,16 @@ class AddPurchaseReturnWidget(QWidget):
         self.remainingdata.clear()
         self.checkbox.setChecked(False)        
         self.note.clear()
+        
         self.table.setRowCount(0)
         
         self.populate_suppliers()
         
-        for _ in range(5):
+        # clear the table 
+        
+        
             
-            self.add_row()
+        self.add_row()
 
 
 

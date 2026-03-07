@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QComboBox, QGridLayout, QLabel, QPushButton, QHeaderView, QSizePolicy, QVBoxLayout, QTableWidget, QTableWidgetItem
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QFrame, QLabel, QPushButton, QHeaderView, QSizePolicy, QVBoxLayout, QTableWidget, QTableWidgetItem
 from PySide6.QtCore import QFile, Qt, Signal
 from PySide6.QtSql import QSqlQuery
 from functools import partial
@@ -8,62 +8,88 @@ from utilities.stylus import load_stylesheets
 
 
 
-
 class CustomerTransactionWidget(QWidget):
     
-    transaction_page_signal = Signal(int)  
+    transaction_page_signal = Signal(int)
 
     def __init__(self, parent=None):
 
         super().__init__(parent)
 
 
-        layout = QVBoxLayout(self)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(40, 40, 40, 40)
+        self.layout.setSpacing(20)
 
-        grid_widget = QWidget()
-        grid_layout = QGridLayout()
-        grid_widget.setLayout(grid_layout)
+        # === Header Row ===
+        header_layout = QHBoxLayout()
+        heading = QLabel("Customer Transaction List", objectName="SectionTitle")
+        self.transactionpage = QPushButton("Main Transactions Page", objectName="TopRightButton")
+        self.transactionpage.setCursor(Qt.PointingHandCursor)
+        self.transactionpage.setFixedWidth(200)
+        header_layout.setContentsMargins(0, 0, 0, 10)
+        header_layout.addWidget(heading)
+        header_layout.addWidget(self.transactionpage)
 
-
-        heading = QLabel("Customer List", objectName='myheading')
-        self.addcustomer = QPushButton('Add customer', objectName='supplierlist')
-
-        grid_layout.addWidget(heading, 0,0)
-        grid_layout.addWidget(self.addcustomer, 0,2)
-
-        layout.addWidget(grid_widget)
-
+        self.layout.addLayout(header_layout)
         
-        self.table = QTableWidget()
+
+        line = QFrame()
+        line.setObjectName("lineSeparator")
+
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        line.setStyleSheet("""
+                QFrame#lineSeparator {
+                    border: none;
+                    border-top: 2px solid #333;
+                }
+            """)
+
+        self.layout.addWidget(line)
+        self.layout.addSpacing(20)
         
-        self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels([
-            "#", "Name", "Contact", "Email", "Payable", "Receiveable", "Pay / Receive"
-        ])
+        
+        self.row_height = 40
+
+        self.table = MyTable(column_ratios=[0.05, 0.25, 0.15, 0.20, 0.15, 0.10, 0.10])
+        headers = ["#", "Name", "Contact", "Email", "Payable", "Receiveable", "Pay / Receive"]
+        self.table.setColumnCount(len(headers))
+        self.table.setHorizontalHeaderLabels(headers)
+        
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.table.verticalHeader().setDefaultSectionSize(self.row_height)
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        # self.setColumnWidths(table, [0.1, 0.4, 0.3, 0.2, 0.2]) 
-
+        detail_col = headers.index("Pay / Receive")
+        self.table.horizontalHeaderItem(detail_col).setTextAlignment(Qt.AlignCenter)
+        
         self.table.setStyleSheet("QTableWidget::item { color: #333; }")
 
         self.table.verticalHeader().setFixedWidth(0)
         header = self.table.horizontalHeader()
-        header.setFixedHeight(30)
+        header.setStretchLastSection(True)   
 
-        header.setStyleSheet("""
-                background-color: #333;
-                color: white;              
-                font-weight: 600;
-            
-        """)
+        self.table.setMinimumWidth(1000)
+        
+        # Hide vertical header (row numbers)
+        self.table.verticalHeader().setVisible(False)
+        
+        # Alternating row colors
+        self.table.setAlternatingRowColors(True)
 
         
-        layout.addWidget(self.table)
-        self.setLayout(layout)
+        self.layout.addWidget(self.table)
+        self.layout.addStretch()
 
         
         self.setStyleSheet(load_stylesheets())
+
+        
+        
+        
+        
+
 
 
 
@@ -127,6 +153,29 @@ class CustomerTransactionWidget(QWidget):
             row += 1
         
 
+
+
+
+
+
+
+
+class MyTable(QTableWidget):
+    def __init__(self, rows=0, cols=0, column_ratios=None, parent=None):
+        super().__init__(rows, cols, parent)
+        self.column_ratios = column_ratios or []
+        header = self.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Interactive)  # user can drag
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self.column_ratios:
+            return
+        total = sum(self.column_ratios)
+        width = self.viewport().width()
+        for i, ratio in enumerate(self.column_ratios):
+            col_width = int(width * (ratio / total))
+            self.setColumnWidth(i, col_width)
 
 
 

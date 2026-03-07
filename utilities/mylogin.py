@@ -267,7 +267,7 @@ class MainWindow(QMainWindow):
         self.sales_return = SideBarButton('Sales Return')
         self.expense_button = SideBarButton('Expenses')
         self.reports_button = SideBarButton('Reports')
-        self.holdsales_button = SideBarButton('On-Hold Sales')
+        # self.holdsales_button = SideBarButton('On-Hold Sales')
         
         footer_button = QPushButton()
         footer_button.setStyleSheet("""
@@ -315,7 +315,7 @@ class MainWindow(QMainWindow):
         self.sales_return.setStyleSheet(button_styles)
         self.expense_button.setStyleSheet(button_styles)
         self.reports_button.setStyleSheet(button_styles)
-        self.holdsales_button.setStyleSheet(button_styles)
+        # self.holdsales_button.setStyleSheet(button_styles)
         
         
 
@@ -334,7 +334,7 @@ class MainWindow(QMainWindow):
         self.sales_return.setCursor(Qt.PointingHandCursor)
         self.expense_button.setCursor(Qt.PointingHandCursor)
         self.reports_button.setCursor(Qt.PointingHandCursor)
-        self.holdsales_button.setCursor(Qt.PointingHandCursor)
+        # self.holdsales_button.setCursor(Qt.PointingHandCursor)
 
 
         sidebar_layout.addWidget(self.dashboard_button)
@@ -352,7 +352,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.addWidget(self.sales_return)
         sidebar_layout.addWidget(self.expense_button)
         sidebar_layout.addWidget(self.reports_button)
-        sidebar_layout.addWidget(self.holdsales_button)
+        # sidebar_layout.addWidget(self.holdsales_button)
         
         sidebar_layout.addWidget(footer_button)
 
@@ -397,7 +397,7 @@ class MainWindow(QMainWindow):
         self.expense = BaseExpenseWidget()
         self.reports = BaseReportsWidget()
         
-        self.holdsales = BaseHoldSalesWidget(controller=self)
+        # self.holdsales = BaseHoldSalesWidget(controller=self)
         
         
         self.dashboard.sales_page_signal.connect(lambda: self.set_sales(self.base_sales, self.main_content_layout))
@@ -420,7 +420,7 @@ class MainWindow(QMainWindow):
         self.sales_return.clicked.connect(lambda: self.set_salesreturn(self.salesreturn, self.main_content_layout))
         self.expense_button.clicked.connect(lambda: self.set_expense(self.expense, self.main_content_layout))
         self.reports_button.clicked.connect(lambda: self.set_reports(self.reports, self.main_content_layout))
-        self.holdsales_button.clicked.connect(lambda: self.set_holdsales(self.holdsales, self.main_content_layout))
+        # self.holdsales_button.clicked.connect(lambda: self.set_holdsales(self.holdsales, self.main_content_layout))
         
         
         
@@ -465,7 +465,7 @@ class MainWindow(QMainWindow):
         self.main_content_layout.addWidget(self.salesreturn)
         self.main_content_layout.addWidget(self.expense)
         self.main_content_layout.addWidget(self.reports)
-        self.main_content_layout.addWidget(self.holdsales)
+        # self.main_content_layout.addWidget(self.holdsales)
         
 
         
@@ -537,36 +537,19 @@ class MainWindow(QMainWindow):
                 child.installEventFilter(self)   # optional: catch Tab manually
 
     
+    
+    
+    
+    #### Hide Sideber on Hover Remove
+    
+    # def eventFilter(self, obj, event):
 
-    def eventFilter(self, obj, event):
-
-        if obj is self.sidebar_scroll and event.type() == QEvent.HoverLeave:
-            print("Hover left sidebar — hiding")
-            self.hide_sidebar(obj)
-
-        # if obj is self.table and event.type() == QEvent.KeyPress:
-        #     if event.key() == Qt.Key_Tab:
-        #         if self.table.currentRow() == self.table.rowCount() - 1 and \
-        #         self.table.currentColumn() == self.table.columnCount() - 1:
-        #             # last cell → move focus out
-        #             self.focusNextChild()
-        #             return True
-        #     elif event.key() == Qt.Key_Backtab:
-        #         if self.table.currentRow() == 0 and self.table.currentColumn() == 0:
-        #             # first cell + shift+tab → move focus backwards
-        #             self.focusPreviousChild()
-        #             return True
-                
-                
-        # if event.type() == QEvent.FocusOut:
-        #     if obj is self.sidebar_scroll:
-        #         print("Hiding sidebar")
-        #         self.hide_sidebar(obj)
-                
-                
+    #     if obj is self.sidebar_scroll and event.type() == QEvent.HoverLeave:
+    #         print("Hover left sidebar — hiding")
+    #         self.hide_sidebar(obj)
      
         
-        return super().eventFilter(obj, event)
+    #     return super().eventFilter(obj, event)
 
     
     
@@ -636,8 +619,8 @@ class MainWindow(QMainWindow):
         layout.setCurrentWidget(widget)
     
     
-    def set_holdsales(self, widget, layout):
-        layout.setCurrentWidget(widget)
+    # def set_holdsales(self, widget, layout):
+    #     layout.setCurrentWidget(widget)
     
  
     # Function to toggle sidebar visibility
@@ -649,10 +632,10 @@ class MainWindow(QMainWindow):
         
         sidebar.show()
 
-        # if button.isChecked():
-        #     sidebar.show()
-        # else: 
-        #     sidebar.hide()
+        if button.isChecked():
+            sidebar.show()
+        else: 
+            sidebar.hide()
 
 
 

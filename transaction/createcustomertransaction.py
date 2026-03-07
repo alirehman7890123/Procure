@@ -1,6 +1,10 @@
-from PySide6.QtWidgets import QWidget, QPushButton, QGridLayout, QLabel, QLineEdit, QComboBox, QMessageBox, QVBoxLayout, QTableWidget, QTableWidgetItem, QSpacerItem, QSizePolicy
+from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QFrame, QLabel, QLineEdit, QComboBox, QMessageBox, QVBoxLayout, QTableWidget, QTableWidgetItem, QSpacerItem, QSizePolicy
 from PySide6.QtCore import QFile, Qt,QDate
 from PySide6.QtSql import  QSqlQuery
+from PySide6.QtSql import QSqlDatabase
+from PySide6.QtGui import QKeySequence, QShortcut
+
+
 from utilities.stylus import load_stylesheets
 
 
@@ -9,104 +13,307 @@ from utilities.stylus import load_stylesheets
 
 class CreateCustomerTransactionWidget(QWidget):
 
+    # def __init__(self, parent=None):
+
+    #     super().__init__(parent)
+
+    #     self.layout = QVBoxLayout(self)
+    #     self.layout.setContentsMargins(40, 40, 40, 40)
+    #     self.layout.setSpacing(20)
+        
+    #     # === Header Row ===
+    #     header_layout = QHBoxLayout()
+    #     heading = QLabel("Pay / Receive Payment by Customer", objectName="SectionTitle")
+    #     self.transactionlist = QPushButton("Transactions List", objectName="TopRightButton")
+    #     self.transactionlist.setCursor(Qt.PointingHandCursor)
+    #     self.transactionlist.setFixedWidth(200)
+    #     header_layout.setContentsMargins(0, 0, 0, 10)
+    #     header_layout.addWidget(heading)
+    #     header_layout.addWidget(self.transactionlist)
+
+    #     self.layout.addLayout(header_layout)
+
+
+
+    #     line = QFrame()
+    #     line.setObjectName("lineSeparator")
+
+    #     line.setFrameShape(QFrame.HLine)
+    #     line.setFrameShadow(QFrame.Sunken)
+    #     line.setStyleSheet("""
+    #             QFrame#lineSeparator {
+    #                 border: none;
+    #                 border-top: 2px solid #333;
+    #             }
+    #         """)
+
+    #     self.layout.addWidget(line)
+    #     self.layout.addSpacing(20)
+
+
+
+    #     # customer Transactions Section
+        
+    #     customer_heading_layout = QHBoxLayout()
+    #     customer_heading = QLabel("Customer Information", objectName="SubHeading")
+    #     customer_heading_layout.addWidget(customer_heading)
+
+    #     self.layout.addLayout(customer_heading_layout)
+        
+        
+    #     customer_row = QHBoxLayout()
+        
+    #     customer_label = QLabel("Customer")
+    #     customer_label.setFixedWidth(300)
+        
+    #     self.customername = QLabel()
+    #     customer_row.addWidget(customer_label, 1)
+    #     customer_row.addWidget(self.customername, 2)
+        
+    #     self.layout.addLayout(customer_row)
+        
+        
+        
+        
+    #     self.customername = QLabel()
+    #     self.customeraddress = QLabel()
+        
+    #     layout.addWidget(customer_label, 2, 1)
+    #     layout.addWidget(self.customername, 2, 3)
+    #     layout.addWidget(self.customeraddress, 3, 3)
+        
+    #     salesman_label = QLabel("Sales Man")
+    #     self.salesman = QComboBox()
+        
+    #     makepayment = QLabel("Make Payment", objectName='myheading')
+    #     layout.addWidget(makepayment, 5,1)
+
+    #     payable_label = QLabel("Payable Amount")
+    #     self.payable = QLabel()
+        
+    #     receiveable_label = QLabel("Receiveable Amount")
+    #     self.receiveable = QLabel()
+        
+    #     paid_label = QLabel("Paid Amount")
+    #     self.paid= QLineEdit()
+    #     self.paid.setText("0")
+        
+        
+    #     received_label = QLabel("Received Amount")
+    #     self.received= QLineEdit()
+    #     self.received.setText("0")
+        
+        
+        
+    #     layout.addWidget(salesman_label, 6, 1)
+    #     layout.addWidget(self.salesman, 6, 3)
+        
+    #     layout.addWidget(payable_label, 7, 1)
+    #     layout.addWidget(self.payable, 7, 3)
+        
+    #     layout.addWidget(receiveable_label, 8, 1)
+    #     layout.addWidget(self.receiveable, 8, 3)
+        
+    #     layout.addWidget(paid_label, 9, 1)
+    #     layout.addWidget(self.paid, 9, 3)
+        
+    #     layout.addWidget(received_label, 10, 1)
+    #     layout.addWidget(self.received, 10, 3)
+        
+        
+    #     note_label = QLabel("Note")
+        
+    #     self.note = QLineEdit()
+    #     self.note.setPlaceholderText("Note")
+        
+        
+    #     layout.addWidget(note_label, 13, 1)
+    #     layout.addWidget(self.note, 13, 3)
+        
+        
+    #     savepayment = QPushButton('Save Payment', objectName="supplierlist")
+    #     savepayment.clicked.connect(self.save_payment)       
+        
+    #     layout.addWidget(savepayment, 16, 1) 
+
+
+    #     spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+    #     layout.addItem(spacer, 17, 0, 1, 3)
+        
+        
+    #     self.setStyleSheet(load_stylesheets())
+
+    #     self.setLayout(layout)
+
+
+    
     def __init__(self, parent=None):
 
         super().__init__(parent)
 
-        layout = QGridLayout()
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(40, 40, 40, 40)
+        self.layout.setSpacing(20)
 
-        layout.setContentsMargins(0,0,0,0)
-        layout.setSpacing(0)
-
-        heading = QLabel("Pay / Receive Payment by customer", objectName='myheading')
-        self.transactionlist = QPushButton('Transactions List', objectName='supplierlist')
+        # === Header Row ===
+        header_layout = QHBoxLayout()
+        heading = QLabel("Receive / Refund Payment by Customer", objectName="SectionTitle")
+        self.transactionlist = QPushButton("All Transactions", objectName="TopRightButton")
         self.transactionlist.setCursor(Qt.PointingHandCursor)
+        self.transactionlist.setFixedWidth(200)
 
-        layout.addWidget(heading, 0, 0, 1, 12)
-        layout.addWidget(self.transactionlist, 0,2)
+        header_layout.setContentsMargins(0, 0, 0, 10)
+        header_layout.addWidget(heading)
+        header_layout.addWidget(self.transactionlist)
 
+        self.layout.addLayout(header_layout)
 
+        line = QFrame()
+        line.setObjectName("lineSeparator")
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        line.setStyleSheet("""
+            QFrame#lineSeparator {
+                border: none;
+                border-top: 2px solid #333;
+            }
+        """)
 
-        # customer Transactions Section
-        
-        customer_label = QLabel("customer Information")
-        
+        self.layout.addWidget(line)
+        self.layout.addSpacing(20)
+
+        # === Customer Information Section ===
+        customer_heading_layout = QHBoxLayout()
+        customer_heading = QLabel("Customer Information", objectName="SubHeading")
+        customer_heading_layout.addWidget(customer_heading)
+        self.layout.addLayout(customer_heading_layout)
+
+        customer_row = QHBoxLayout()
+
+        customer_label = QLabel("Customer")
+        customer_label.setFixedWidth(300)
+
         self.customername = QLabel()
-        self.customeraddress = QLabel()
-        
-        layout.addWidget(customer_label, 2, 1)
-        layout.addWidget(self.customername, 2, 3)
-        layout.addWidget(self.customeraddress, 3, 3)
-        
-        salesman_label = QLabel("Sales Man")
+
+        customer_row.addWidget(customer_label, 1)
+        customer_row.addWidget(self.customername, 2)
+
+        self.layout.addLayout(customer_row)
+
+        contact_row = QHBoxLayout()
+
+        contact_label = QLabel("Contact")
+        contact_label.setFixedWidth(300)
+
+        self.customercontact = QLabel()
+
+        contact_row.addWidget(contact_label, 1)
+        contact_row.addWidget(self.customercontact, 2)
+
+        self.layout.addLayout(contact_row)
+
+        self.layout.addSpacing(20)
+
+        # === Payment Section ===
+        payment_heading_layout = QHBoxLayout()
+        payment_heading = QLabel("Process Payment", objectName="SubHeading")
+        payment_heading_layout.addWidget(payment_heading)
+        self.layout.addLayout(payment_heading_layout)
+
+        salesman_row = QHBoxLayout()
+
+        salesman_label = QLabel("Salesman")
+        salesman_label.setFixedWidth(300)
+
         self.salesman = QComboBox()
-        
-        makepayment = QLabel("Make Payment", objectName='myheading')
-        layout.addWidget(makepayment, 5,1)
+
+        salesman_row.addWidget(salesman_label, 1)
+        salesman_row.addWidget(self.salesman, 2)
+
+        self.layout.addLayout(salesman_row)
+
+        payable_row = QHBoxLayout()
 
         payable_label = QLabel("Payable Amount")
+        payable_label.setFixedWidth(300)
+
         self.payable = QLabel()
-        
-        receiveable_label = QLabel("Receiveable Amount")
+
+        payable_row.addWidget(payable_label, 1)
+        payable_row.addWidget(self.payable, 2)
+
+        self.layout.addLayout(payable_row)
+
+        receiveable_row = QHBoxLayout()
+
+        receiveable_label = QLabel("Receivable Amount")
+        receiveable_label.setFixedWidth(300)
+
         self.receiveable = QLabel()
-        
-        paid_label = QLabel("Paid Amount")
-        self.paid= QLineEdit()
+
+        receiveable_row.addWidget(receiveable_label, 1)
+        receiveable_row.addWidget(self.receiveable, 2)
+
+        self.layout.addLayout(receiveable_row)
+
+        # === Amount Inputs ===
+
+        paid_row = QHBoxLayout()
+
+        paid_label = QLabel("Refund Amount (You Pay)")
+        paid_label.setFixedWidth(300)
+
+        self.paid = QLineEdit()
         self.paid.setText("0")
-        
-        
-        received_label = QLabel("Received Amount")
-        self.received= QLineEdit()
+
+        paid_row.addWidget(paid_label, 1)
+        paid_row.addWidget(self.paid, 2)
+
+        self.layout.addLayout(paid_row)
+
+        received_row = QHBoxLayout()
+
+        received_label = QLabel("Received Amount (Customer Pays)")
+        received_label.setFixedWidth(300)
+
+        self.received = QLineEdit()
         self.received.setText("0")
-        
-        
-        
-        layout.addWidget(salesman_label, 6, 1)
-        layout.addWidget(self.salesman, 6, 3)
-        
-        layout.addWidget(payable_label, 7, 1)
-        layout.addWidget(self.payable, 7, 3)
-        
-        layout.addWidget(receiveable_label, 8, 1)
-        layout.addWidget(self.receiveable, 8, 3)
-        
-        layout.addWidget(paid_label, 9, 1)
-        layout.addWidget(self.paid, 9, 3)
-        
-        layout.addWidget(received_label, 10, 1)
-        layout.addWidget(self.received, 10, 3)
-        
-        
+
+        received_row.addWidget(received_label, 1)
+        received_row.addWidget(self.received, 2)
+
+        self.layout.addLayout(received_row)
+
+        note_row = QHBoxLayout()
+
         note_label = QLabel("Note")
-        
+        note_label.setFixedWidth(300)
+
         self.note = QLineEdit()
         self.note.setPlaceholderText("Note")
-        
-        
-        layout.addWidget(note_label, 13, 1)
-        layout.addWidget(self.note, 13, 3)
-        
-        
-        savepayment = QPushButton('Save Payment', objectName="supplierlist")
-        savepayment.clicked.connect(self.save_payment)       
-        
-        layout.addWidget(savepayment, 16, 1) 
 
+        note_row.addWidget(note_label, 1)
+        note_row.addWidget(self.note, 2)
 
-        spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
-        layout.addItem(spacer, 17, 0, 1, 3)
-        
-        
+        self.layout.addLayout(note_row)
+
+        savepayment = QPushButton("Save Payment", objectName="SaveButton")
+        savepayment.setCursor(Qt.PointingHandCursor)
+        savepayment.clicked.connect(self.save_payment)
+
+        self.layout.addWidget(savepayment)
+
+        shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
+        shortcut.activated.connect(self.save_payment)
+
+        self.layout.addStretch()
+
         self.setStyleSheet(load_stylesheets())
-
-        self.setLayout(layout)
-
 
     
     def showEvent(self, event):
         
         super().showEvent(event)
-        print("Widget shown — refreshing data")
         
     
     
@@ -127,7 +334,7 @@ class CreateCustomerTransactionWidget(QWidget):
      
             self.cust_id = int(query.value(0))    
             self.customername.setText(f"{ query.value(0)} - {query.value(1)}" )
-            self.customeraddress.setText(query.value(2))
+            self.customercontact.setText(query.value(2))
             self.payable.setText(str(query.value(3)))
             self.receiveable.setText(str(query.value(4)))
             
@@ -153,149 +360,167 @@ class CreateCustomerTransactionWidget(QWidget):
                 self.salesman.addItem(name, emp_id)
         
     
-
+    
+    
     def save_payment(self):
-        
-        # Get Data to Insert into supplier transaction table
-        
-        salesman = self.salesman
-        
-        customer = self.cust_id
-        customer = int(customer)
-        
-        customer_query = QSqlQuery()
-        customer_query.prepare("SELECT payable, receiveable FROM customer where id = ?")
-        customer_query.addBindValue(customer)
-        
-        if customer_query.exec() and customer_query.next():
-            
-            payable_before = customer_query.value(0)
-            receiveable_before = customer_query.value(1)
-            payable = float(payable_before)
-            receiveable = float(receiveable_before)
-            
-        else:
-            
-            print("Error ", customer_query.lastError().text())
-            QMessageBox.critical(self, "Error", "Customer not found or database error.")
-            raise Exception 
-        
-        
-        paid_amount = self.paid.text()
-        paid_amount = float(paid_amount)  
-        
-        received_amount = self.received.text()
-        received_amount = float(received_amount)  
 
-        transaction_type = 'payment'
-        ref_no = None
-        return_ref = None        
-        payable_before = payable
-        due_amount = payable
-        paid = paid_amount
-        remaining_due = payable - paid_amount
-        payable_after = remaining_due
-        
-        receiveable_before = receiveable
-        receiveable_now = receiveable
-        received = received_amount
-        remaining_now = receiveable_now - received
-        receiveable_after = remaining_now 
-        
-    
-    
-    
-        # insert transaction
-        query = QSqlQuery()
-        query.prepare("""
-                        INSERT INTO customer_transaction 
-                        (customer, transaction_type, ref, return_ref,
-                        payable_before, due_amount, paid, remaining_due, payable_after,
-                        receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
-                        salesman) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        
-                        """)
-        
-        query.addBindValue(customer)
-        query.addBindValue(transaction_type)
-        query.addBindValue(ref_no)
-        query.addBindValue(return_ref)
-        query.addBindValue(payable_before)
-        query.addBindValue(due_amount)
-        query.addBindValue(paid)
-        query.addBindValue(remaining_due)
-        query.addBindValue(payable_after)
-        query.addBindValue(receiveable_before)
-        query.addBindValue(receiveable_now)
-        query.addBindValue(received)
-        query.addBindValue(remaining_now)
-        query.addBindValue(receiveable_after)
-        query.addBindValue(salesman)
-        
-        
-        if query.exec():
-            
-            insert_id = query.lastInsertId()
-            print("Transaction is saved ...")
-            QMessageBox.information(None, "Success", "Customer Transaction Stored Successfully with ID: " + str(insert_id) )
-            
-            
-        else:
-            
-            QMessageBox.critical(None, "Error", query.lastError().text())
-            print("Query error:", query.lastError().text())
-            raise Exception 
-        
-        
-        
-        customer_query = QSqlQuery()
-        customer_query.prepare("SELECT payable, receiveable FROM customer where id = ?")
-        customer_query.addBindValue(customer)
-        
-        if customer_query.exec() and customer_query.next():
-            
-            customer_payable = customer_query.value(0)
-            customer_receiveable = customer_query.value(1)
+        db = QSqlDatabase.database()
+        db.transaction()
 
-            customer_payable = float(customer_payable)
-            customer_receiveable = float(customer_receiveable)
-                            
-        else:
-            
-            print("Error ", customer_query.lastError().text())
-            QMessageBox.critical(self, "Error", "customer not found or database error.")
-            raise Exception
+        try:
+
+            salesman = self.salesman.currentData()
+            customer = int(self.cust_id)
+
+            # --- Fetch Customer Balance ---
+            balance_query = QSqlQuery()
+            balance_query.prepare("SELECT payable, receiveable FROM customer WHERE id = ?")
+            balance_query.addBindValue(customer)
+
+            if not balance_query.exec() or not balance_query.next():
+                raise Exception("Customer not found.")
+
+            payable_before = float(balance_query.value(0) or 0.0)
+            receiveable_before = float(balance_query.value(1) or 0.0)
+
+            paid_amount = float(self.paid.text() or 0)
+            received_amount = float(self.received.text() or 0)
+
+            if paid_amount > 0 and received_amount > 0:
+                raise Exception("Cannot process both Paid and Received together.")
+
+            if paid_amount < 0 or received_amount < 0:
+                raise Exception("Amounts cannot be negative.")
+
+            transaction_type = None
+
+            payable_after = payable_before
+            receiveable_after = receiveable_before
+
+            # ====================================
+            # CUSTOMER PAYMENT (Customer pays you)
+            # ====================================
+            if received_amount > 0:
+
+                transaction_type = "RECEIPT"
+
+                if received_amount <= receiveable_before:
+                    receiveable_after = receiveable_before - received_amount
+
+                else:
+                    excess = received_amount - receiveable_before
+
+                    reply = QMessageBox.question(
+                        self,
+                        "Excess Receipt",
+                        "Received exceeds receivable.\n"
+                        "Excess will be moved to Payable.\n\nContinue?",
+                        QMessageBox.Yes | QMessageBox.No
+                    )
+
+                    if reply == QMessageBox.No:
+                        raise Exception("Transaction cancelled.")
+
+                    receiveable_after = 0
+                    payable_after = payable_before + excess
+
+            # ====================================
+            # REFUND (You pay customer)
+            # ====================================
+            elif paid_amount > 0:
+
+                transaction_type = "REFUND"
+
+                if paid_amount <= payable_before:
+                    payable_after = payable_before - paid_amount
+
+                else:
+                    excess = paid_amount - payable_before
+
+                    reply = QMessageBox.question(
+                        self,
+                        "Excess Refund",
+                        "Refund exceeds payable.\n"
+                        "Excess will be moved to Receivable.\n\nContinue?",
+                        QMessageBox.Yes | QMessageBox.No
+                    )
+
+                    if reply == QMessageBox.No:
+                        raise Exception("Transaction cancelled.")
+
+                    payable_after = 0
+                    receiveable_after = receiveable_before + excess
+
+            else:
+                raise Exception("Enter Paid or Received amount.")
+
+            # --- Insert Transaction ---
+            query = QSqlQuery()
+            query.prepare("""
+                INSERT INTO customer_transaction
+                (customer, transaction_type,
+                payable_before, paid, payable_after,
+                receiveable_before, received, receiveable_after,
+                salesman)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """)
+
+            query.addBindValue(customer)
+            query.addBindValue(transaction_type)
+
+            query.addBindValue(payable_before)
+            query.addBindValue(paid_amount)
+            query.addBindValue(payable_after)
+
+            query.addBindValue(receiveable_before)
+            query.addBindValue(received_amount)
+            query.addBindValue(receiveable_after)
+
+            query.addBindValue(salesman)
+
+            if not query.exec():
+                raise Exception(query.lastError().text())
+
+            # --- Update Customer Master ---
+            update_query = QSqlQuery()
+            update_query.prepare("""
+                UPDATE customer
+                SET payable = ?, receiveable = ?
+                WHERE id = ?
+            """)
+
+            update_query.addBindValue(payable_after)
+            update_query.addBindValue(receiveable_after)
+            update_query.addBindValue(customer)
+
+            if not update_query.exec():
+                raise Exception(update_query.lastError().text())
+
+            db.commit()
+
+            QMessageBox.information(self, "Success", "Customer Transaction Saved Successfully.")
+
+            self.load_data(self.cust_id)
+            self.paid.setText("0")
+            self.received.setText("0")
+            self.note.clear()
+
+        except Exception as e:
+            db.rollback()
+            QMessageBox.critical(self, "Error", str(e))
+
+    
+    
+
         
-        print("Payable and Receiveable are : ", customer_payable, customer_receiveable)
         
-        
-        update_customer = QSqlQuery()
-        update_customer.prepare("UPDATE customer SET payable = ? , receiveable = ? WHERE id = ?")
-        
-        update_customer.addBindValue(remaining_due)
-        update_customer.addBindValue(remaining_now)
-        update_customer.addBindValue(customer)
-        
-        print("New Payable and Receiveable are : ", remaining_due, remaining_now)
-        
-        if update_customer.exec(): 
-            
-            print("customer Balance updated successfully")
-        
-        else:
-            QMessageBox.critical(self, "Error", update_customer.lastError().text())
-            raise Exception
-        
-        
-        
-        
+         
         
         
     def clear_fields(self):
         
         self.customername.clear()
-        self.customeraddress.clear()
+        self.customercontact.clear()
         self.payable.clear()
         self.receiveable().clear()
         self.paid.clear() 

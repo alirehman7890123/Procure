@@ -249,21 +249,22 @@ class AuthWindow(QMainWindow):
                 
                 self.create_supplier_table()
                 self.create_rep_table()
+                
                 self.create_product_table()
-                self.create_stock_table()
                 self.create_batch_table()
-                self.create_batch_resolve_table()
+                self.create_price_pack_table()
+                
+                self.create_inventory_adjustment_table()
+                self.create_accounting_settings_table()
+                
                 self.create_business_table()
-                self.create_stockcost_table()
                 self.create_purchase_table()
                 self.create_purchaseitem_table()
                 self.create_sales_table()
                 self.create_salesitem_table()
+                self.create_sold_batch_table()
                 self.create_employee_table()
                 self.create_customer_table()
-                self.create_bank_table()
-                self.create_jazzcash_table()
-                self.create_easypaisa_table()
                 self.create_supplier_transaction_table()
                 self.create_customer_transaction_table()
                 self.create_purchase_return_table()
@@ -409,6 +410,38 @@ class AuthWindow(QMainWindow):
             
     
     
+    def create_accounting_settings_table(self):
+
+        query = QSqlQuery()
+        print("Creating Accounting Settings Table")
+
+        if not query.exec("""
+            CREATE TABLE IF NOT EXISTS accounting_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+
+                opening_inventory_value REAL DEFAULT 0,
+                opening_inventory_set_at TIMESTAMP,
+
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP
+            );
+        """):
+            QMessageBox.critical(
+                None,
+                "Error",
+                f"Table creation failed: {query.lastError().text()}"
+            )
+            return False
+
+        print("Table 'Accounting Settings' ready.")
+        return True
+            
+        
+
+    
+    
+    
+    
     def ensure_additional_charges_column(self):
         
         check_query = QSqlQuery()
@@ -487,93 +520,8 @@ class AuthWindow(QMainWindow):
         return True
  
         
-        
-    # turn pragma on for foreign key
-    def create_bank_table(self):
-        
-        query = QSqlQuery()
-        print("Creating Bank Table")
-
-        # Create table if it doesn't exist
-        if not query.exec("""
-            CREATE TABLE IF NOT EXISTS bank (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                supplier INTEGER,  -- Foreign key to supplier table
-                customer INTEGER,  -- Foreign key to customer table
-                bank TEXT,
-                title TEXT,
-                account TEXT,
-                iban TEXT UNIQUE,
-                status TEXT DEFAULT 'active',
-                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (supplier) REFERENCES supplier(id) ON DELETE RESTRICT,
-                FOREIGN KEY (customer) REFERENCES customer(id) ON DELETE RESTRICT
-            );
-        """):
-            QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
-            return False
-
-        print("Table 'bank' ready.")
-        return True
-
-    
-    
-    
-    def create_jazzcash_table(self):
-        query = QSqlQuery()
-        print("Creating JazzCash Table")
-
-        # Create table if it doesn't exist
-        if not query.exec("""
-            CREATE TABLE IF NOT EXISTS jazzcash (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                supplier INTEGER,  -- Foreign key to supplier table
-                customer INTEGER,  -- Foreign key to customer table
-                title TEXT,
-                mobile TEXT UNIQUE,
-                cnic TEXT UNIQUE,
-                status TEXT DEFAULT 'active',
-                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (supplier) REFERENCES supplier(id) ON DELETE RESTRICT,
-                FOREIGN KEY (customer) REFERENCES customer(id) ON DELETE RESTRICT
-            );
-        """):
-            QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
-            return False
-
-        print("Table 'jazzcash' ready.")
-        return True
 
 
-
-    
-    def create_easypaisa_table(self):
-        
-        query = QSqlQuery()
-        print("Creating Easypaisa Table")
-
-        # Create table if it doesn't exist
-        if not query.exec("""
-            CREATE TABLE IF NOT EXISTS easypaisa (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                supplier INTEGER,  -- Foreign key to supplier table
-                customer INTEGER,  -- Foreign key to customer table
-                account TEXT,
-                mobile TEXT UNIQUE,
-                cnic TEXT UNIQUE,
-                status TEXT DEFAULT 'active',
-                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (supplier) REFERENCES supplier(id) ON DELETE RESTRICT,
-                FOREIGN KEY (customer) REFERENCES customer(id) ON DELETE RESTRICT
-            );
-        """):
-            QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
-            return False
-
-        print("Table 'easypaisa' ready.")
-        return True
-
-    
     
     
     def create_employee_table(self):
@@ -701,15 +649,12 @@ class AuthWindow(QMainWindow):
         if not query.exec("""
             CREATE TABLE IF NOT EXISTS product (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                code TEXT UNIQUE NULL,
-                category TEXT,
+                display_name TEXT NOT NULL,          -- "Paracetamol 500mg Tablet (10)"
+                code TEXT UNIQUE,                    -- optional, barcode / internal
+                generic_name TEXT,                   -- optional
                 brand TEXT,
-                formula TEXT,
-                form TEXT,
-                strength TEXT,
                 status TEXT DEFAULT 'active',
-                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """):
             QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
@@ -720,7 +665,7 @@ class AuthWindow(QMainWindow):
         print("Table 'product' created successfully.")
         # Create indexes for faster search
         indexes = [
-            "CREATE INDEX IF NOT EXISTS idx_product_name   ON product(name)",
+            "CREATE INDEX IF NOT EXISTS idx_product_name   ON product(display_name)",
             "CREATE INDEX IF NOT EXISTS idx_product_code   ON product(code)",
             "CREATE INDEX IF NOT EXISTS idx_product_brand  ON product(brand)"
         ]
@@ -729,33 +674,33 @@ class AuthWindow(QMainWindow):
             if not query.exec(index_query):
                 QMessageBox.critical(None, "Error", f"Index creation failed: {query.lastError().text()}")
 
-        print("Indexes created successfully (name, code, brand).")
+        print("Indexes created successfully (display_name, code, brand).")
 
         
 
 
-    def create_stock_table(self):
+    def create_price_pack_table(self):
         
         query = QSqlQuery()
-        print("Creating Stock Table")
+        print("Creating price_pack Table")
 
         # Create table if it doesn't exist
         if not query.exec("""
-            CREATE TABLE IF NOT EXISTS stock (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                product INTEGER NOT NULL,
-                packsize INTEGER NOT NULL,
-                units INTEGER NOT NULL,
-                reorder INTEGER NOT NULL,
-                saleprice REAL,
-                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (product) REFERENCES product(id) ON DELETE RESTRICT
+           
+            CREATE TABLE IF NOT EXISTS price_pack (
+                id INTEGER PRIMARY KEY,
+                product_id INTEGER NOT NULL,
+                pack_size INTEGER NOT NULL,      -- e.g. 5 tablets
+                pack_price REAL NOT NULL,        -- e.g. 50
+                unit_price REAL GENERATED ALWAYS AS (pack_price / pack_size),
+                is_default BOOLEAN DEFAULT 1
             );
+
         """):
             QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
             return False
 
-        print("Table 'stock' created successfully.")
+        print("Table 'price_pack' created successfully.")
         return True
 
         
@@ -768,18 +713,22 @@ class AuthWindow(QMainWindow):
 
         # Create table if it doesn't exist
         if not query.exec("""
+            
             CREATE TABLE IF NOT EXISTS batch (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                purchaseitem INTEGER,
-                product INTEGER NOT NULL,
-                batch TEXT(50) NOT NULL,
-                expiry DATE,
-                status TEXT(20) DEFAULT 'valid',
-                resolved BOOLEAN DEFAULT 0,
-                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (product) REFERENCES product(id) ON DELETE RESTRICT,
-                FOREIGN KEY (purchaseitem) REFERENCES purchaseitem(id) ON DELETE RESTRICT
+                batch_no TEXT,                       -- optional (manufacturer lot)
+                expiry_date DATE,                    -- optional
+                product_id INTEGER NOT NULL,
+                total_received INTEGER NOT NULL,
+                paid_qty INTEGER NOT NULL,
+                quantity_remaining INTEGER NOT NULL,
+                unit_cost REAL,                      -- NULL allowed (opening stock)
+                source TEXT,                         -- 'opening', 'purchase'
+                received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                FOREIGN KEY (product_id) REFERENCES product(id)
             );
+
         """):
             QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
             return False
@@ -790,62 +739,32 @@ class AuthWindow(QMainWindow):
         
     
     
-    def create_batch_resolve_table(self):
+    def create_inventory_adjustment_table(self):
         
         query = QSqlQuery()
-        print("Creating Batch Resolve Table")
+        print("Creating inventory_adjustment Table")
 
         # Create table if it doesn't exist
         if not query.exec("""
-            CREATE TABLE IF NOT EXISTS batch_resolve (
+            CREATE TABLE IF NOT EXISTS inventory_adjustment (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                batch INTEGER,
-                expiry DATE,
-                batch_status TEXT(20),
-                sold BOOLEAN DEFAULT 0,
-                returned BOOLEAN DEFAULT 0,
-                disposed BOOLEAN DEFAULT 0,
-                note TEXT(200),
-                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (batch) REFERENCES batch(id) ON DELETE RESTRICT
+                batch_id INTEGER NOT NULL,
+                qty INTEGER NOT NULL,         -- always positive
+                reason TEXT NOT NULL,         -- 'expired', 'damaged', 'lost', etc.
+                note TEXT,                    -- optional human explanation
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                FOREIGN KEY (batch_id) REFERENCES batch(id)
             );
         """):
             QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
             return False
 
-        print("Table 'batch_resolve' created successfully.")
+        print("Table 'inventory_adjustment' created successfully.")
         return True
 
         
         
-    
-    def create_stockcost_table(self):
-        
-        query = QSqlQuery()
-        print("Creating stockcost Table")
-
-        # Create table if it doesn't exist
-        if not query.exec("""
-            CREATE TABLE IF NOT EXISTS stockcost (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                product INTEGER NOT NULL,
-                qty INTEGER NOT NULL,
-                totalcost DECIMAL(10,2) NOT NULL,
-                stocktype TEXT(50),
-                stock_adjusted BOOLEAN DEFAULT FALSE,
-                cost_adjusted BOOLEAN DEFAULT FALSE,
-                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (product) REFERENCES product(id) ON DELETE RESTRICT
-            );
-        """):
-            QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
-            return False
-
-        print("Table 'stockcost' created successfully.")
-        return True
-
-        
-    
     
     def create_purchase_table(self):
         
@@ -856,23 +775,29 @@ class AuthWindow(QMainWindow):
         if not query.exec("""
             CREATE TABLE IF NOT EXISTS purchase (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                
                 supplier INTEGER NOT NULL,
-                rep INTEGER NOT NULL,
+                rep INTEGER,
                 sellerinvoice TEXT(100) NOT NULL,
+                
                 subtotal DECIMAL(10,2) NOT NULL,
                 discount DECIMAL(10,2) NOT NULL,
-                discamount DECIMAL(10,2) NOT NULL,
+                
+                tax_236g DECIMAL(10,2) NOT NULL,
+                tax_236h DECIMAL(10,2) NOT NULL,
+                salestax DECIMAL(10,2) NOT NULL,
+                
                 netamount DECIMAL(10,2) NOT NULL,
-                tax DECIMAL(10,2) NOT NULL,
-                taxamount DECIMAL(10,2) NOT NULL,
-                totalaftertax DECIMAL(10,2) NOT NULL,
-                roundoff DECIMAL(10,2) NOT NULL,
+                cn_adjustment DECIMAL(10,2) NOT NULL,
+                
                 total DECIMAL(10,2) NOT NULL,
                 paid DECIMAL(10,2) NOT NULL,
                 remaining DECIMAL(10,2) NOT NULL,
                 writeoff DECIMAL(10,2) NOT NULL,
+                
                 payable DECIMAL(10,2) NOT NULL,
                 receiveable DECIMAL(10,2) NOT NULL,
+                
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (supplier) REFERENCES supplier(id) ON DELETE RESTRICT,
                 FOREIGN KEY (rep) REFERENCES rep(id) ON DELETE RESTRICT
@@ -888,12 +813,14 @@ class AuthWindow(QMainWindow):
 
      
     def create_supplier_transaction_table(self):
+        
         query = QSqlQuery()
         print("Creating Supplier Transaction Table")
 
         # Create table if it doesn't exist
         if not query.exec("""
             CREATE TABLE IF NOT EXISTS supplier_transaction (
+                
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 supplier INTEGER NOT NULL,
                 transaction_type TEXT(50) NOT NULL,
@@ -990,9 +917,7 @@ class AuthWindow(QMainWindow):
                 bonus INTEGER NOT NULL,
                 rate DECIMAL(10,2) NOT NULL,
                 discount DECIMAL(10,2) NOT NULL,
-                discountamount DECIMAL(10,2) NOT NULL,
                 tax DECIMAL(10,2) NOT NULL,
-                taxamount DECIMAL(10,2) NOT NULL,
                 total DECIMAL(10,2) NOT NULL,
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -1016,6 +941,7 @@ class AuthWindow(QMainWindow):
         # Create table if it doesn't exist
         if not query.exec("""
             CREATE TABLE IF NOT EXISTS purchase_return (
+                
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 supplier INTEGER NOT NULL,
                 rep INTEGER NOT NULL,
@@ -1051,20 +977,14 @@ class AuthWindow(QMainWindow):
             CREATE TABLE IF NOT EXISTS purchase_return_item (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 purchase_return INTEGER NOT NULL,
-                po_ref INTEGER NOT NULL,
                 product INTEGER NOT NULL,
                 batch TEXT NOT NULL,
                 purchased INTEGER NOT NULL,
                 returned INTEGER NOT NULL,
                 rate REAL NOT NULL,
-                discount REAL NOT NULL,
-                tax REAL NOT NULL,
-                po_discount REAL NOT NULL,
-                po_tax REAL NOT NULL,
                 total REAL NOT NULL,
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (purchase_return) REFERENCES purchase_return(id) ON DELETE RESTRICT,
-                FOREIGN KEY (po_ref) REFERENCES purchase(id) ON DELETE RESTRICT,
                 FOREIGN KEY (product) REFERENCES product(id) ON DELETE RESTRICT
             );
         """):
@@ -1090,13 +1010,10 @@ class AuthWindow(QMainWindow):
                 salesman INTEGER NOT NULL,
                 subtotal REAL NOT NULL,
                 discount REAL NOT NULL,
-                discamount REAL NOT NULL,
-                netamount REAL NOT NULL,
+                taxable REAL NOT NULL,
                 tax REAL NOT NULL,
-                taxamount REAL NOT NULL,
-                totalaftertax REAL NOT NULL,
+                net_amount REAL NOT NULL,
                 additional_charges REAL NOT NULL,
-                roundoff REAL NOT NULL,
                 total REAL NOT NULL,
                 received REAL NOT NULL,
                 remaining REAL NOT NULL,
@@ -1124,26 +1041,63 @@ class AuthWindow(QMainWindow):
         # Create table if it doesn't exist
         if not query.exec("""
             CREATE TABLE IF NOT EXISTS salesitem (
+                
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sales INTEGER NOT NULL,
-                product INTEGER NOT NULL,
-                qty INTEGER NOT NULL,
-                free INTEGER DEFAULT 0,
-                unitrate REAL NOT NULL,
+                sales_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
+                qty_sold INTEGER NOT NULL,
+                unit_price REAL NOT NULL,
                 discount REAL NOT NULL,
-                discountamount REAL NOT NULL,
-                total REAL NOT NULL,
+                tax REAL NOT NULL,
+                line_total REAL NOT NULL,
+                
+                line_weight DECIMAL(10,2) NOT NULL,
+                effective_line_total DECIMAL(10,2) NOT NULL,
+                
+                
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (sales) REFERENCES sales(id) ON DELETE RESTRICT,
-                FOREIGN KEY (product) REFERENCES product(id) ON DELETE RESTRICT
+                FOREIGN KEY (sales_id) REFERENCES sales(id) ON DELETE RESTRICT,
+                FOREIGN KEY (product_id) REFERENCES product(id) ON DELETE RESTRICT
             );
         """):
+            
             QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
             return False
 
         print("Table 'salesitem' created successfully.")
         return True
  
+    
+    
+    def create_sold_batch_table(self):
+        
+        query = QSqlQuery()
+        print("Creating Sold Batch Table")
+
+        # Create table if it doesn't exist
+        if not query.exec("""
+            
+            CREATE TABLE IF NOT EXISTS sold_batch (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sale_item_id INTEGER NOT NULL, 
+                batch_id INTEGER NOT NULL, 
+                qty_taken INTEGER NOT NULL,
+                qty_returned INTEGER DEFAULT 0,
+                unit_cost REAL,                      -- NULL allowed
+                line_cost REAL,
+                
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                FOREIGN KEY (sale_item_id) REFERENCES salesitem(id)
+            );
+
+        """):
+            QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
+            return False
+
+        print("Table 'sold_batch' created successfully.")
+        return True
+    
     
     
     
@@ -1244,14 +1198,16 @@ class AuthWindow(QMainWindow):
             CREATE TABLE IF NOT EXISTS salesreturn_item (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 salesreturn INTEGER NOT NULL,
+                salesitem_id INTEGER NOT NULL,
                 product INTEGER NOT NULL,
                 sold INTEGER NOT NULL,
                 returned INTEGER NOT NULL,
                 rate DECIMAL(10,2) NOT NULL,
-                discount DECIMAL(10,2) NOT NULL,
                 total DECIMAL(10,2) NOT NULL,
+                
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (salesreturn) REFERENCES salesreturn(id) ON DELETE RESTRICT,
+                FOREIGN KEY (salesitem_id) REFERENCES salesitem(id) ON DELETE RESTRICT,
                 FOREIGN KEY (product) REFERENCES product(id) ON DELETE RESTRICT
             );
         """):

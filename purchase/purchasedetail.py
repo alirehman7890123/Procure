@@ -87,8 +87,8 @@ class PurchaseDetailWidget(QWidget):
         
         self.row_height = 40
 
-        self.table = MyTable(column_ratios=[0.05, 0.25, 0.15, 0.20, 0.15, 0.10, 0.10, 0.10, 0.10])
-        headers = ["Product", "Company", "Qty", "Rate", "Disc (%)", "Disc", "Tax (%)",  "Tax", "Total"]
+        self.table = MyTable(column_ratios=[0.05, 0.25, 0.15, 0.20, 0.15, 0.10, 0.10, 0.10])
+        headers = ["Product", "Brand", "Qty", "Bonus", "Rate", "Disc", "Tax", "Total"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         
@@ -172,8 +172,10 @@ class PurchaseDetailWidget(QWidget):
         
         print("Loading purchase ID:", id)
         query = QSqlQuery()
-        query.prepare("SELECT id, supplier, sellerinvoice, creation_date, subtotal, discamount, taxamount, roundoff, total, paid, remaining  FROM purchase WHERE id = ?")
+        query.prepare("SELECT id, supplier, sellerinvoice, creation_date, subtotal, discount, netamount, cn_adjustment, total, paid, remaining, writeoff FROM purchase WHERE id = ?")
         query.addBindValue(id)
+        
+        
         
         if query.exec() and query.next():
             
@@ -185,9 +187,14 @@ class PurchaseDetailWidget(QWidget):
             
             subtotal = query.value(4)
             discount = query.value(5)
-            tax = query.value(6)
-            roundoff = query.value(7)
+            net_amount = query.value(6)
+            cn_adjustment = query.value(7)
             total = query.value(8)
+            paid = query.value(9)
+            remaining = query.value(10)
+            writeoff = query.value(11)
+            
+            print("Received Data is: ", orderid, supplierid, sellerinvoice, invoicedate, subtotal, discount, net_amount, cn_adjustment, total, paid, remaining, writeoff)
             
             joining_date = invoicedate
             if isinstance(joining_date, QDateTime):
@@ -204,8 +211,8 @@ class PurchaseDetailWidget(QWidget):
             
             self.subtotal.setText(str(subtotal))
             self.discount.setText(str(discount))
-            self.tax.setText(str(tax))
-            self.roundoff.setText(str(roundoff))
+            self.tax.setText(str(net_amount))
+            self.roundoff.setText(str(cn_adjustment))
             self.finalamount.setText(str(total))
         
             
@@ -223,6 +230,8 @@ class PurchaseDetailWidget(QWidget):
             
             
         else:
+            print("Purchase not found for ID:", id)
+            print("Query error:", query.lastError().text())
             self.supplier_data.setText("Purchase not found.")
 
 
@@ -255,20 +264,18 @@ class PurchaseDetailWidget(QWidget):
                 
                 med = int(query.value(2))
                 quantity = str(query.value(3))
+                bonus = str(query.value(4))
                 rate = str(query.value(5))
                 
                 print("Product is: ", med)
                 
                 discount = str(query.value(6))
-                discountamount = str(query.value(7))
+                tax = str(query.value(7))
                 
-                tax = str(query.value(8))
-                taxamount = str(query.value(9))
-                
-                total = str(query.value(10))
+                total = str(query.value(8))
                 
                 query2 = QSqlQuery()
-                query2.prepare("SELECT name, brand FROM product WHERE id = ?")
+                query2.prepare("SELECT display_name, brand FROM product WHERE id = ?")
                 query2.addBindValue(med)
                 
                 if query2.exec() and query2.next():
@@ -282,22 +289,20 @@ class PurchaseDetailWidget(QWidget):
                 name = QTableWidgetItem(name)
                 maker = QTableWidgetItem(maker)
                 quantity = QTableWidgetItem(quantity)
+                bonus = QTableWidgetItem(bonus)
                 rate = QTableWidgetItem(rate)
                 discount = QTableWidgetItem(discount)
-                discountamount = QTableWidgetItem(discountamount)
                 tax = QTableWidgetItem(tax)
-                taxamount = QTableWidgetItem(taxamount)
                 total = QTableWidgetItem(total)
                 
                 self.table.setItem(row, 0, name)
                 self.table.setItem(row, 1, maker)
                 self.table.setItem(row, 2, quantity)
-                self.table.setItem(row, 3, rate)
-                self.table.setItem(row, 4, discount)
-                self.table.setItem(row, 5, discountamount)
+                self.table.setItem(row, 3, bonus)
+                self.table.setItem(row, 4, rate)
+                self.table.setItem(row, 5, discount)
                 self.table.setItem(row, 6, tax)
-                self.table.setItem(row, 7, taxamount)
-                self.table.setItem(row, 8, total)
+                self.table.setItem(row, 7, total)
                 
 
                 row += 1

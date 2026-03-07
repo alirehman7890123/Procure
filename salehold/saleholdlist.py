@@ -26,7 +26,7 @@ class SaleHoldListWidget(QWidget):
         grid_widget.setLayout(grid_layout)
 
 
-        heading = QLabel("On-Hold Sales Order", objectName='myheading')
+        heading = QLabel("On-Hold Sales Order", objectName='SectionTitle')
 
         grid_layout.addWidget(heading, 0,0)
 
@@ -57,24 +57,6 @@ class SaleHoldListWidget(QWidget):
             
         """)
 
-        combo = QComboBox()
-        combo.setEditable(True)
-        combo.addItems(['option 1', 'option 2', 'option 3'])
-
-        combo.setStyleSheet("""
-                                QComboBox {
-                                    background-color: lightgray;
-                                    color: #333;
-                                    padding: 5px;
-                                }
-                                QComboBox QAbstractItemView {
-                                    background-color: white;
-                                    color: black;
-                                    selection-background-color: lightblue;
-                                    selection-color: black;
-                                }
-                            """)
-        layout.addWidget(combo)
         
         layout.addWidget(self.supplier_table)
         self.setLayout(layout)

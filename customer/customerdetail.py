@@ -71,18 +71,6 @@ class CustomerDetailWidget(QWidget):
         self.payabledata = QLabel()
         self.receiveabledata = QLabel()
         
-        self.banknamedata = QLabel() ; self.banknameedit = QLineEdit()
-        self.accounttitledata = QLabel() ; self.accounttitleedit = QLineEdit()
-        self.accountnumberdata = QLabel() ; self.accountnumberedit = QLineEdit()
-        self.ibandata = QLabel() ; self.ibanedit = QLineEdit()
-        
-        self.jazzcashtitledata = QLabel() ; self.jazzcashtitleedit = QLineEdit()
-        self.jazzcashnumberdata = QLabel() ; self.jazzcashnumberedit = QLineEdit()
-        self.jazzcashcnicdata = QLabel() ; self.jazzcashcnicedit = QLineEdit()
-
-        self.easypaisatitledata = QLabel() ; self.easypaisatitleedit = QLineEdit()
-        self.easypaisanumberdata = QLabel() ; self.easypaisanumberedit = QLineEdit()
-        self.easypaisacnicdata = QLabel() ; self.easypaisacnicedit = QLineEdit()
 
         self.field_pairs = [
             (self.namedata, self.nameedit),
@@ -93,18 +81,6 @@ class CustomerDetailWidget(QWidget):
             (self.payabledata, None),
             (self.receiveabledata, None),
             
-            (self.banknamedata, self.banknameedit),
-            (self.accounttitledata, self.accounttitleedit),
-            (self.accountnumberdata, self.accountnumberedit),
-            (self.ibandata, self.ibanedit),
-            
-            (self.jazzcashtitledata, self.jazzcashtitleedit),
-            (self.jazzcashnumberdata, self.jazzcashnumberedit),
-            (self.jazzcashcnicdata, self.jazzcashcnicedit),
-            
-            (self.easypaisatitledata, self.easypaisatitleedit),
-            (self.easypaisanumberdata, self.easypaisanumberedit),
-            (self.easypaisacnicdata, self.easypaisacnicedit)
             
         ]
 
@@ -216,119 +192,6 @@ class CustomerDetailWidget(QWidget):
     
 
       
-    
-    def load_banking_info(self, customer):
-        
-        # Check if banking info exists
-        bank_check_query = QSqlQuery()
-        bank_check_query.prepare("SELECT COUNT(*) FROM bank WHERE customer = ?")
-        bank_check_query.addBindValue(customer)
-
-        if not bank_check_query.exec() or not bank_check_query.next():
-            print("Error checking banking info:", bank_check_query.lastError().text())
-            return
-
-        bank_info_exists = bank_check_query.value(0) > 0
-        
-        if not bank_info_exists:
-            # Clear fields if no banking info
-            self.banknamedata.setText("")
-            self.accounttitledata.setText("")
-            self.accountnumberdata.setText("")
-            self.ibandata.setText("")
-            return
-        
-        customer = int(customer)
-        query = QSqlQuery()
-        query.prepare("SELECT bank, title, account, iban FROM bank WHERE customer = ?")
-        query.addBindValue(customer)
-
-        if not query.exec():
-            QMessageBox.critical(self, "Error", "Failed to load banking information: " + query.lastError().text())
-            print("Error executing query:", query.lastError().text())
-            return
-
-        if query.next():
-            self.banknamedata.setText(query.value(0))
-            self.accounttitledata.setText(query.value(1))
-            self.accountnumberdata.setText(query.value(2))
-            self.ibandata.setText(query.value(3))
-
-
-    def load_jazzcash_info(self, customer):
-        
-        # Check if JazzCash info exists
-        jazzcash_check_query = QSqlQuery()
-        jazzcash_check_query.prepare("SELECT COUNT(*) FROM jazzcash WHERE customer = ?")
-        jazzcash_check_query.addBindValue(customer)
-
-        if not jazzcash_check_query.exec() or not jazzcash_check_query.next():
-            print("Error checking JazzCash info:", jazzcash_check_query.lastError().text())
-            return
-
-        jazzcash_info_exists = jazzcash_check_query.value(0) > 0
-
-        if not jazzcash_info_exists:
-            # Clear fields if no JazzCash info
-            self.jazzcashtitledata.setText("")
-            self.jazzcashnumberdata.setText("")
-            self.jazzcashcnicdata.setText("")
-            return
-        
-        
-        customer = int(customer)
-        query = QSqlQuery()
-        query.prepare("SELECT title, mobile, cnic FROM jazzcash WHERE customer = ?")
-        query.addBindValue(customer)
-
-        if not query.exec():
-            QMessageBox.critical(self, "Error", "Failed to load JazzCash information: " + query.lastError().text())
-            print("Error executing query:", query.lastError().text())
-            return
-
-        if query.next():
-            self.jazzcashtitledata.setText(query.value(0))
-            self.jazzcashnumberdata.setText(query.value(1))
-            self.jazzcashcnicdata.setText(query.value(2))
-            
-            
-    def load_easypaisa_info(self, customer):
-        
-        # Check if EasyPaisa info exists
-        easypaisa_check_query = QSqlQuery()
-        easypaisa_check_query.prepare("SELECT COUNT(*) FROM easypaisa WHERE customer = ?")
-        easypaisa_check_query.addBindValue(customer)    
-        if not easypaisa_check_query.exec() or not easypaisa_check_query.next():
-            print("Error checking EasyPaisa info:", easypaisa_check_query.lastError().text())
-            return
-
-        easypaisa_info_exists = easypaisa_check_query.value(0) > 0
-
-        if not easypaisa_info_exists:
-            # Clear fields if no EasyPaisa info
-            self.easypaisatitledata.setText("")
-            self.easypaisanumberdata.setText("")
-            self.easypaisacnicdata.setText("")
-            return
-
-        customer = int(customer)
-        query = QSqlQuery()
-        query.prepare("SELECT account, mobile, cnic FROM easypaisa WHERE customer = ?")
-        query.addBindValue(customer)
-
-        if not query.exec():
-            QMessageBox.critical(self, "Error", "Failed to load EasyPaisa information: " + query.lastError().text())
-            print("Error executing query:", query.lastError().text())
-            return
-
-        if query.next():
-            self.easypaisatitledata.setText(query.value(0))
-            self.easypaisanumberdata.setText(query.value(1))
-            self.easypaisacnicdata.setText(query.value(2))
-            
-            
-
-            
     # === Save Changes ===
     def save_changes(self):
         
@@ -354,205 +217,7 @@ class CustomerDetailWidget(QWidget):
         else:
             print("Customer updated successfully.")
             
-            
-        self.update_or_insert_banking_info()    
-        self.update_or_insert_jazzcash_info()
-        self.update_or_insert_easypaisa_info()    
-        
-            
-        
-        
-    def update_or_insert_banking_info(self):
-        
-        customer = int(self.customer_id)
-        supplier = None
-        bankname = self.banknameedit.text().strip() if self.banknameedit.text().strip() else None
-        accounttitle = self.accounttitleedit.text().strip() if self.accounttitleedit.text().strip() else None
-        accountnumber = self.accountnumberedit.text().strip() if self.accountnumberedit.text().strip() else None
-        iban = self.ibanedit.text().strip() if self.ibanedit.text().strip() else None
-        
-        # Check if Bank info exists
-        bank_check_query = QSqlQuery()
-        bank_check_query.prepare("SELECT COUNT(*) FROM bank WHERE customer = ?")
-        bank_check_query.addBindValue(customer)
 
-        if not bank_check_query.exec() or not bank_check_query.next():
-            print("Error checking bank info:", bank_check_query.lastError().text())
-            return
-
-        bank_info_exists = bank_check_query.value(0) > 0
-        
-        if not bank_info_exists: 
-            # Insert new bank info
-            insert_bank_query = QSqlQuery()
-            insert_bank_query.prepare("""
-                INSERT INTO bank (supplier, customer, bank, title, account, iban)
-                VALUES (?, ?, ?, ?, ?)
-            """)
-
-            insert_bank_query.addBindValue(supplier)
-            insert_bank_query.addBindValue(customer)
-            insert_bank_query.addBindValue(bankname)
-            insert_bank_query.addBindValue(accounttitle)
-            insert_bank_query.addBindValue(accountnumber)
-            insert_bank_query.addBindValue(iban)
-
-            if not insert_bank_query.exec():
-                print("Error inserting bank info:", insert_bank_query.lastError().text())
-            else:
-                print("Bank info inserted successfully.")
-            
-            return
-        
-        else:
-            
-            # Update Bank Info
-            bank_query = QSqlQuery()
-            bank_query.prepare("""
-                UPDATE bank
-                SET bank=?, title=?, account=?, iban=?
-                WHERE customer=?
-            """)
-
-            bank_query.addBindValue(bankname)
-            bank_query.addBindValue(accounttitle)
-            bank_query.addBindValue(accountnumber)
-            bank_query.addBindValue(iban)
-            bank_query.addBindValue(self.customer_id)
-
-            if not bank_query.exec():
-                print("Error updating bank info:", bank_query.lastError().text())
-            else:
-                print("Bank info updated successfully.")      
-
-            
-    
-    
-    def update_or_insert_jazzcash_info(self):
-        
-        supplier = None
-        
-        
-        jazzcashtitle = self.jazzcashtitleedit.text().strip() if self.jazzcashtitleedit.text().strip() else None
-        jazzcashnumber = self.jazzcashnumberedit.text().strip() if self.jazzcashnumberedit.text().strip() else None
-        jazzcashcnic = self.jazzcashcnicedit.text().strip() if self.jazzcashcnicedit.text().strip() else None
-        
-        
-        # Check if JazzCash info exists
-        jazzcash_check_query = QSqlQuery()
-        jazzcash_check_query.prepare("SELECT COUNT(*) FROM jazzcash WHERE customer = ?")
-        jazzcash_check_query.addBindValue(self.customer_id)
-
-        if not jazzcash_check_query.exec() or not jazzcash_check_query.next():
-            print("Error checking JazzCash info:", jazzcash_check_query.lastError().text())
-            return
-
-        jazzcash_info_exists = jazzcash_check_query.value(0) > 0
-        
-        if not jazzcash_info_exists:
-            # Insert new JazzCash info
-            insert_jazzcash_query = QSqlQuery()
-            insert_jazzcash_query.prepare("""
-                INSERT INTO jazzcash (supplier, customer, title, mobile, cnic)
-                VALUES (?, ?, ?, ?, ?)
-            """)
-            
-            insert_jazzcash_query.addBindValue(supplier)
-            insert_jazzcash_query.addBindValue(self.customer_id)
-            insert_jazzcash_query.addBindValue(jazzcashtitle)
-            insert_jazzcash_query.addBindValue(jazzcashnumber)
-            insert_jazzcash_query.addBindValue(jazzcashcnic)
-
-            if not insert_jazzcash_query.exec():
-                print("Error inserting JazzCash info:", insert_jazzcash_query.lastError().text())
-            else:
-                print("JazzCash info inserted successfully.")
-            
-            return
-        
-        else:
-            
-            # Update JazzCash Info
-            jazzcash_query = QSqlQuery()
-            jazzcash_query.prepare("""
-                UPDATE jazzcash
-                SET title=?, mobile=?, cnic=?
-                WHERE customer=?
-            """)
-
-            jazzcash_query.addBindValue(jazzcashtitle)
-            jazzcash_query.addBindValue(jazzcashnumber)
-            jazzcash_query.addBindValue(jazzcashcnic)
-            jazzcash_query.addBindValue(self.customer_id)
-
-            if not jazzcash_query.exec():
-                print("Error updating JazzCash info:", jazzcash_query.lastError().text())
-            else:
-                print("JazzCash info updated successfully.")        
-            
-             
-            
-    def update_or_insert_easypaisa_info(self):
-        
-        supplier = None
-        
-
-        easypaisatitle = self.easypaisatitleedit.text().strip() if self.easypaisatitleedit.text().strip() else None
-        easypaisanumber = self.easypaisanumberedit.text().strip() if self.easypaisanumberedit.text().strip() else None
-        easypaisacnic = self.easypaisacnicedit.text().strip() if self.easypaisacnicedit.text().strip() else None
-
-        # Check if EasyPaisa info exists
-        easypaisa_check_query = QSqlQuery()
-        easypaisa_check_query.prepare("SELECT COUNT(*) FROM easypaisa WHERE customer = ?")
-        easypaisa_check_query.addBindValue(self.customer_id)
-
-        if not easypaisa_check_query.exec() or not easypaisa_check_query.next():
-            print("Error checking EasyPaisa info:", easypaisa_check_query.lastError().text())
-            return
-
-        easypaisa_info_exists = easypaisa_check_query.value(0) > 0
-        
-        if not easypaisa_info_exists:
-            # Insert new EasyPaisa info
-            insert_easypaisa_query = QSqlQuery()
-            insert_easypaisa_query.prepare("""
-                INSERT INTO easypaisa (supplier, customer, account, mobile, cnic)
-                VALUES (?, ?, ?, ?, ?)
-            """)
-            insert_easypaisa_query.addBindValue(supplier)
-            insert_easypaisa_query.addBindValue(self.customer_id)
-            insert_easypaisa_query.addBindValue(easypaisatitle)
-            insert_easypaisa_query.addBindValue(easypaisanumber)
-            insert_easypaisa_query.addBindValue(easypaisacnic)
-
-            if not insert_easypaisa_query.exec():
-                print("Error inserting EasyPaisa info:", insert_easypaisa_query.lastError().text())
-            else:
-                print("EasyPaisa info inserted successfully.")
-            
-            return
-        
-        else:
-            
-            # Update EasyPaisa Info
-            easypaisa_query = QSqlQuery()
-            easypaisa_query.prepare("""
-                UPDATE easypaisa
-                SET account=?, mobile=?, cnic=?
-                WHERE customer=?
-            """)
-
-            easypaisa_query.addBindValue(easypaisatitle)
-            easypaisa_query.addBindValue(easypaisanumber)
-            easypaisa_query.addBindValue(easypaisacnic)
-            easypaisa_query.addBindValue(self.customer_id)
-
-            if not easypaisa_query.exec():
-                print("Error updating EasyPaisa info:", easypaisa_query.lastError().text())
-            else:
-                print("EasyPaisa info updated successfully.")       
-            
-            
             
 
     def load_customer_transactions(self, customer_id):
@@ -584,11 +249,7 @@ class CustomerDetailWidget(QWidget):
             self.receiveabledata.setText(str(customer_query.value(7)))
             
             
-            self.load_banking_info(self.customer_id)
-            self.load_jazzcash_info(self.customer_id)
-            self.load_easypaisa_info(self.customer_id)
-            
-            
+           
         print("Loading Customer Transaction")
         query = QSqlQuery()
         query.prepare("""SELECT 
@@ -635,24 +296,7 @@ class CustomerDetailWidget(QWidget):
                 receiveable_after = str(query.value(8))
                 transaction_id = int(query.value(9))
 
-                # creation_date = creation_date.toString("yyyy-MM-dd HH:mm:ss")
-
-                # # Get Supplier
-                # # Get Supplier name from database
-                # customer_query = QSqlQuery()
-                # customer_query.prepare("SELECT name FROM customer WHERE id = ?")
-                # customer_query.addBindValue(id)
-                
-                # customer_name = ""
-                
-                # if customer_query.exec() and customer_query.next():
-                    
-                #     customer_name = customer_query.value(0)    
-
-
-                # Create table items
-                # counter = QTableWidgetItem(str(row + 1))
-                # customer = QTableWidgetItem(customer_name)
+               
                 
                 date_item = QTableWidgetItem(str(creation_date))
                 transaction_type = QTableWidgetItem(transaction_type)
@@ -679,17 +323,6 @@ class CustomerDetailWidget(QWidget):
                 self.table.setItem(row, 8, payable_after) 
                 self.table.setItem(row, 9, receiveable_after) 
                             
-                
-                # detail = QPushButton('Details')
-                # detail.setStyleSheet("""
-                #         background-color: #333;
-                #         color: #fff;
-                #         font-weight: 600;
-                    
-                # """)
-                
-                # self.table.setCellWidget(row, 6, detail)
-                # detail.clicked.connect(lambda _, tid=transaction_id: self.transaction_detail_signal.emit(tid))
                 
                 row += 1
         

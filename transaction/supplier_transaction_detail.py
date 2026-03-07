@@ -20,8 +20,8 @@ class SupplierTransactionDetailWidget(QWidget):
         layout.setContentsMargins(0,0,0,0)
         layout.setSpacing(0)
 
-        heading = QLabel("Transaction Detail", objectName='myheading')
-        self.transactionlist = QPushButton('Show Suppliers Transactions', objectName='supplierlist')
+        heading = QLabel("Transaction Detail", objectName='SectionTitle')
+        self.transactionlist = QPushButton('Show Suppliers Transactions', objectName='TopRightButton')
         self.transactionlist.setCursor(Qt.PointingHandCursor)
 
         layout.addWidget(heading, 0, 0, 1, 12)
@@ -176,7 +176,7 @@ class SupplierTransactionDetailWidget(QWidget):
         self.paid.setText(str(paid))
         self.received.setText(str(received))
         self.after_balance.setText(str(after))
-        self.creation_date.setText(creation.toString("dd-MM-yyyy"))
+        self.creation_date.setText(creation)
         self.note.setText(note)
         
         

@@ -1,11 +1,11 @@
-from PySide6.QtWidgets import QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QDateEdit, QPushButton, QLabel, QFrame, QComboBox
+from PySide6.QtWidgets import QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QDateEdit, QPushButton, QLabel, QFrame, QComboBox, QSpacerItem
 from PySide6.QtCore import Qt, QFile, QDate, Signal
 import sys, os
 from PySide6.QtSql import QSqlQuery, QSqlDatabase
 from PySide6.QtCore import QDate
 from functools import partial
 from utilities import mylogin
-
+import pyqtgraph as pg
 
 
 import os
@@ -97,275 +97,108 @@ class DashboardWidget(QWidget):
         self.layout.addSpacing(10)
 
         
-        filter_row = QHBoxLayout()
-        
-        select_label = QLabel('Select Duration for Insights')
-        select_label.setStyleSheet("padding-left: 0px;")
-        filter_row.addWidget(select_label, 0, Qt.AlignLeft)
-        
-        select_duration = QComboBox()
-        select_duration.addItems(['Today', 'Past Week', 'Past Month', 'Past Year', 'All']) 
-        select_duration.setFixedWidth(200)
-        
-        filter_row.addWidget(select_duration, 1, Qt.AlignLeft)
-        
-        select_duration.currentIndexChanged.connect(self.on_duration_changed)
-        
-        self.date_from = QDateEdit()
-        self.date_from.setCalendarPopup(True)
-        self.date_from.setDisplayFormat("dd/MM/yyyy")
-        self.date_from.setDate(QDate.currentDate())
-        
-        
-        self.date_to = QDateEdit()
-        self.date_to.setCalendarPopup(True)
-        self.date_from.setDisplayFormat("dd/MM/yyyy")
-        self.date_to.setDate(QDate.currentDate()) 
-        
-        get_data_btn = QPushButton("Get Data", objectName="TopRightButton")
-        get_data_btn.setCursor(Qt.PointingHandCursor)
-        get_data_btn.setFixedWidth(100)
-        
-        self.date_from.dateChanged.connect(self.get_duration_data)
-        self.date_to.dateChanged.connect(self.get_duration_data)
-        get_data_btn.clicked.connect(self.get_duration_data)
-        
-        filter_row.addWidget(self.date_from)
-        filter_row.addWidget(self.date_to)
-        # filter_row.addWidget(get_data_btn)
 
-        self.layout.addLayout(filter_row)
+        today_sale_label = QLabel("Today's Sale - By Hour")
+        self.layout.addWidget(today_sale_label)
         
-        
-        card_row = QHBoxLayout()
-        policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # Plot widget
+        plot_widget = pg.PlotWidget()
+        self.layout.setContentsMargins(30, 30, 30, 30)  # left, top, right, bottom margins around all widgets in the layout
+        self.layout.setSpacing(20)  # space between widgets
 
-        card1 = QWidget()
-        card1.setObjectName("card")
-        card1.setMinimumWidth(250)
-        card1.setFixedHeight(150)
-        card1.setStyleSheet("background-color: #47034E; border-radius: 5px; color: #fff;")
-        
-        card1.setSizePolicy(policy)
-        
-        card1_layout = QVBoxLayout(card1)
-        
-        
-        
-        card1_title = QLabel("Total Sales")
-        card1_title.setObjectName("cardTitle")
-        card1_title.setStyleSheet("font-size: 16px;")
-        
-        self.card1_data = QLabel("0.00")
-        self.card1_data.setObjectName("cardData")
-        self.card1_data.setAlignment(Qt.AlignCenter)
-        self.card1_data.setStyleSheet("font-size: 40px;")
-        
-        self.card1_bottom = QLabel("Invoice(s)")
-        self.card1_bottom.setObjectName("cardBottom")
-        self.card1_bottom.setAlignment(Qt.AlignCenter)
-        self.card1_bottom.setStyleSheet("font-size: 12px;")
-        
-        card1_layout.addWidget(card1_title)
-        card1_layout.addWidget(self.card1_data)
-        card1_layout.addWidget(self.card1_bottom)
+        plot_widget.setStyleSheet("""
+            background-color: #f0f0f0;      /* light gray background */
+            border: 2px solid #3498db;     /* blue border */
+        """)
 
 
-        card2 = QWidget()
-        
-        card2.setObjectName("card")
-        card2.setMinimumWidth(250)
-        card2.setFixedHeight(150)
-        card2.setStyleSheet("background-color: #47034E; border-radius: 5px; color: #fff;")
-        card2.setSizePolicy(policy)
-        
-        card2_layout = QVBoxLayout(card2)
-        
-        card2_title = QLabel("Purchase Info")
-        card2_title.setObjectName("cardTitle")
-        card2_title.setStyleSheet("font-size: 16px;")
-        
-        self.card2_data = QLabel("0.00")
-        self.card2_data.setObjectName("cardData")
-        self.card2_data.setAlignment(Qt.AlignCenter)
-        self.card2_data.setStyleSheet("font-size: 40px;")
-        
-        self.card2_bottom = QLabel("No of invoice")
-        self.card2_bottom.setObjectName("cardBottom")
-        self.card2_bottom.setAlignment(Qt.AlignCenter)
-        self.card2_bottom.setStyleSheet("font-size: 12px;")
-        
-        card2_layout.addWidget(card2_title)
-        card2_layout.addWidget(self.card2_data)
-        card2_layout.addWidget(self.card2_bottom)
-        
-        
-        
-        card3 = QWidget()
-        
-        card3.setObjectName("card")
-        card3.setMinimumWidth(250)
-        card3.setFixedHeight(150)
-        card3.setStyleSheet("background-color: #47034E; border-radius: 5px; color: #fff;")
-        card3.setSizePolicy(policy)
-        
-        card3_layout = QVBoxLayout(card3)
-        
-        card3_title = QLabel("Expenses")
-        card3_title.setObjectName("cardTitle")
-        card3_title.setStyleSheet("font-size: 16px;")
-        
-        self.card3_data = QLabel("0.00")
-        self.card3_data.setObjectName("cardData")
-        self.card3_data.setAlignment(Qt.AlignCenter)
-        self.card3_data.setStyleSheet("font-size: 40px;")
-        
-        self.card3_bottom = QLabel("No of invoice")
-        self.card3_bottom.setObjectName("cardBottom")
-        self.card3_bottom.setAlignment(Qt.AlignCenter)
-        self.card3_bottom.setStyleSheet("font-size: 12px;")
-        
-        card3_layout.addWidget(card3_title)
-        card3_layout.addWidget(self.card3_data)
-        card3_layout.addWidget(self.card3_bottom)
-        
-        card_row.addWidget(card1, 1)
-        card_row.addWidget(card2, 1)
-        card_row.addWidget(card3, 1)
-        
-        card_row.setAlignment(Qt.AlignLeft)
-        self.layout.addLayout(card_row)
-        
-        self.layout.addSpacing(20)
-        
-        
-        
-        
-        
-        stock_row = QHBoxLayout()
-        
-        
-        card4 = QWidget()
-        
-        card4.setObjectName("card")
-        card4.setMinimumWidth(330)
-        card4.setFixedHeight(150)
-        card4.setStyleSheet("background-color: #47034E; border-radius: 5px; color: #fff;")
-        card4.setSizePolicy(policy)
-        
-        card4_layout = QVBoxLayout(card4)
-        
-        card4_title = QLabel("Stock")
-        card4_title.setObjectName("cardTitle")
-        card4_title.setStyleSheet("font-size: 16px;")
-        
-        # total Products row
-        total_products_row = QHBoxLayout()
-        
-        total_products_label = QLabel('Total Products: ')
-        self.total_products_data = QLabel('')
-        
-        total_products_row.addWidget(total_products_label, 1)
-        total_products_row.addWidget(self.total_products_data, 1)
-        
-        card4_layout.addLayout(total_products_row)
-        
-        # low stock row
-        
-        low_stock_row = QHBoxLayout()
-        
-        low_stock_label = QLabel('Low Stock Products: ')
-        self.low_stock_data = QLabel('')
-        
-        low_stock_row.addWidget(low_stock_label, 1)
-        low_stock_row.addWidget(self.low_stock_data, 1)
-        
-        card4_layout.addLayout(low_stock_row)
-        
-        
-        
-        
-        
-        
-        
-        card5 = QWidget()
-        
-        card5.setObjectName("card")
-        card5.setMinimumWidth(330)
-        card5.setFixedHeight(150)
-        card5.setStyleSheet("background-color: #47034E; border-radius: 5px; color: #fff;")
-        card5.setSizePolicy(policy)
-        
-        card5_layout = QVBoxLayout(card5)
-        
-        card4_title = QLabel("OutStanding Dues")
-        card4_title.setObjectName("cardTitle")
-        card4_title.setStyleSheet("font-size: 16px;")
-        
-        supplier_row = QHBoxLayout()
-        
-        supplier_label = QLabel('Supplier Dues: ')
-        self.supplier_payable = QLabel('0.00')
-        self.supplier_receiveable = QLabel('0.00')
-        
-        supplier_row.addWidget(supplier_label, 1)
-        supplier_row.addWidget(self.supplier_payable, 1)
-        supplier_row.addWidget(self.supplier_receiveable, 1)
-        
-        card5_layout.addLayout(supplier_row)
-        
-        # low stock row
-        
-        customer_row = QHBoxLayout()
-        
-        customer_label = QLabel('Customer Dues: ')
-        self.customer_payable = QLabel('0.00')
-        self.customer_receiveable = QLabel('0.00')
-        
-        customer_row.addWidget(customer_label, 1)
-        customer_row.addWidget(self.customer_payable, 1)
-        customer_row.addWidget(self.customer_receiveable, 1)
-        
-        card5_layout.addLayout(customer_row)
-        
-        
-        
-        stock_row.addWidget(card4)
-        stock_row.addWidget(card5)
+        self.layout.addWidget(plot_widget)
 
-        self.layout.addLayout(stock_row)
+        # Get sales data and plot
+        hourly_sales = self.get_hourly_sales_data()
+        hours = list(range(24))
+        hour_sales = [hourly_sales.get(h, 0) for h in hours]
+        
+
+        # bg = pg.BarGraphItem(x=hours, height=sales, width=0.6, brush='skyblue')
+        from datetime import datetime
+        # Create a PlotDataItem (line plot) with markers
+        plot_widget.plot(hours, hour_sales,  pen=pg.mkPen('#e74c3c', width=2), symbol='o', symbolSize=8, symbolBrush='b')
+        hour_labels = []
+        for i in range(24):
+            if i == 0:
+                label = "12am"
+            elif i == 12:
+                label = "12pm"
+            else:
+                label = str(i % 12)
+            hour_labels.append((i, label))
+
+        plot_widget.getAxis('bottom').setTicks([hour_labels])
+        plot_widget.setXRange(0, 23)
+        
+        # plot_widget.addItem(bg)
+
+        plot_widget.setLabel('left', 'Total Sales')
+        plot_widget.setLabel('bottom', 'Hour of Day')
+        plot_widget.setTitle("Hourly Sales Today")
+        plot_widget.setBackground("w")
+        plot_widget.showGrid(x=True, y=True)
         
         
+        #################################################
+        ####            Monthly Sales         ###########
         
-        # add label and hbox to main layout
-        self.layout.addStretch()
+        monthly_sale_label = QLabel("Monthly Sale - By Day")
+        self.layout.addWidget(monthly_sale_label)
+
         
-        total_sales, total_invoices = self.get_sales_summary('today')
+        days = list(range(1, 32))  # Days 1 to 31
+        monthly_sales = self.get_monthly_sales_data()
+        month_sales = [monthly_sales[day - 1] for day in range(1, 32)]
         
-        self.card1_data.setText(f"{total_sales:.2f}")
-        self.card1_bottom.setText(f"{total_invoices} Invoice(s) ")
+        print("Days:", len(days))
+        print("Sales:", len(month_sales))
+
         
-        total_expense, num_records = self.get_total_expenses('today')
-        self.card3_data.setText(f"{total_expense:.2f}")
-        self.card3_bottom.setText(f"{num_records} Expense(s) ")
-        
-        # Card 2 = Purchase Invoices
-        total_purchase, invoice_count = self.get_purchase_summary('today')
-        
-        self.card2_data.setText(f"{total_purchase:.2f}")
-        self.card2_bottom.setText(f"{invoice_count} Invoice(s) ")
-        
-        
+        # Plot widget
+        monthly_plot = pg.PlotWidget()
+        monthly_plot.setStyleSheet("""
+            background-color: #f0f0f0;      /* light gray background */
+            border: 2px solid #3498db;     /* blue border */
+        """)
         
         
-        self.get_stock_summary()
-        self.get_supplier_summary()
-        self.get_customer_summary()
+        # Create a PlotDataItem (line plot) with markers
+        monthly_plot.plot(days, month_sales,  pen=pg.mkPen("#000000", width=2), symbol='o', symbolSize=8, symbolBrush='b')
+        monthly_plot.getAxis('bottom').setTicks([[(i, str(i)) for i in range(1, 32)]])
+        monthly_plot.setXRange(0, 31)
+
+    
+        # monthly_plot.addItem(bg)
+
+        monthly_plot.setLabel('left', 'Daily Sales')
+        monthly_plot.setLabel('bottom', 'Day')
+        monthly_plot.setTitle("Monthly Sales")
+        monthly_plot.setBackground("w")
+        monthly_plot.showGrid(x=True, y=True)
         
+        self.layout.addWidget(monthly_plot)
+        
+
+        # Spacer and CSS
+        spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        self.layout.addItem(spacer)
+
+        
+        
+       
         
         # set stylesheets
         self.setStyleSheet(load_stylesheets())
         
+
+
 
 
     def showEvent(self, event):
@@ -374,384 +207,125 @@ class DashboardWidget(QWidget):
         
         super().showEvent(event)
         
-        total_sales, total_invoices = self.get_sales_summary('today')
         
-        self.card1_data.setText(f"{total_sales:.2f}")
-        self.card1_bottom.setText(f"{total_invoices} Invoice(s) ")
-        
-        total_expense, num_records = self.get_total_expenses('today')
-        self.card3_data.setText(f"{total_expense:.2f}")
-        self.card3_bottom.setText(f"{num_records} Expense(s) ")
-        
-        # Card 2 = Purchase Invoices
-        total_purchase, invoice_count = self.get_purchase_summary('today')
-        
-        self.card2_data.setText(f"{total_purchase:.2f}")
-        self.card2_bottom.setText(f"{invoice_count} Invoice(s) ")
-        
-        self.get_stock_summary()
-        self.get_supplier_summary()
-        self.get_customer_summary()
         
 
     
     
     
-    
-    
-    def get_duration_data(self):
-        
-        print("Get Data button clicked")
-        date_from = self.date_from.date().toString("yyyy-MM-dd")
-        date_to = self.date_to.date().toString("yyyy-MM-dd")
-        
-        
-        print("Fetching data from", date_from, "to", date_to)
+ 
 
-        # get sales summary
+
+
+        
+        
+        
+    
+    
+    def get_hourly_sales_data(self):
+        
+        
+        from zoneinfo import ZoneInfo
+        from datetime import datetime
+
+        
+        local_offset = datetime.now().astimezone().utcoffset()
+        offset_hours = int(local_offset.total_seconds() // 3600)
+        offset_str = f"{offset_hours:+d} hours"  # e.g. '+5 hours' or '-4 hours'
+
+        print("Local offset:", offset_str)
+
+        # Get today's date
+        today = datetime.now().strftime('%Y-%m-%d')
+
+        # Initialize hourly sales dictionary
+        hourly_sales = {i: 0 for i in range(24)}
+
         query = QSqlQuery()
-        sql = f"""
-            SELECT IFNULL(SUM(received),0), COUNT(*)
+        
+        query.prepare("""
+            SELECT 
+                strftime('%H', datetime(creation_date, :offset)) AS hour,
+                COALESCE(SUM(total), 0) AS total_sales
             FROM sales
-            WHERE DATE(creation_date) BETWEEN '{date_from}' AND '{date_to}'
-        """
-        if not query.exec(sql):
+            WHERE 
+                date(datetime(creation_date, :offset)) = date(:today)
+            GROUP BY hour
+            ORDER BY hour
+        """)
+
+        query.bindValue(":offset", offset_str)
+        query.bindValue(":today", today)
+
+        print("Today = ", today)
+
+        if query.exec():
+            while query.next():
+                hour = int(query.value(0))  # '09' → 9
+                total = float(query.value(1))
+                hourly_sales[hour] = total
+                print(f"Hour: {hour}, Total: {total}")
+        else:
             print("Query failed:", query.lastError().text())
-            return 0, 0
 
-        total_sales = 0
-        total_invoices = 0
-        if query.next():
-            total_sales = query.value(0) or 0
-            total_invoices = query.value(1) or 0
-
-        
-        self.card1_data.setText(f"{total_sales:.2f}")
-        self.card1_bottom.setText(f"{total_invoices} Invoice(s) ")
-    
-    
-        
-        
-        # get purchase summary
-        
-        date_from_str = self.date_from.date().toString("yyyy-MM-dd") + " 00:00:00"
-        date_to_str   = self.date_to.date().toString("yyyy-MM-dd") + " 23:59:59"
-        
-        sql = f"""
-            SELECT IFNULL(SUM(paid), 0), COUNT(*)
-            FROM purchase
-            WHERE creation_date BETWEEN '{date_from_str}' AND '{date_to_str}'
-        """
-        
-        if not query.exec(sql):
-            print("Query failed:", query.lastError().text())
-            return 0.0, 0
-
-        total_purchase = 0.0
-        total_invoices = 0
-        if query.next():
-            total_purchase = query.value(0) or 0.0
-            total_invoices = query.value(1) or 0
-
-        self.card2_data.setText(f"{total_purchase:.2f}")
-        self.card2_bottom.setText(f"{total_invoices} Invoice(s) ")
-        
-        
-
-
-    def get_sales_summary(self, duration="today"):
-        print("Fetching sales summary for duration:", duration)
-        
-        # db = QSqlDatabase.database()
-        # if not db.isValid() or not db.isOpen():
-        #     print("Database is not open")
-        #     return 0, 0
-
-        # Build WHERE clause using date ranges
-        
-        duration = duration.lower()
-        if duration == "today":
-            where_clause = "DATE(creation_date) = DATE('now')"
-        elif duration == "week":
-            # Last 7 days including today
-            where_clause = "DATE(creation_date) >= DATE('now','-6 days')"
-        elif duration == "month":
-            # Last 30 days including today
-            where_clause = "DATE(creation_date) >= DATE('now','-29 days')"
-        elif duration == "year":
-            # Last 1 year including today
-            where_clause = "DATE(creation_date) >= DATE('now','-1 year')"
-        elif duration == "all":
-            where_clause = "1=1"
-        else:
-            print("Invalid duration. Use: today, week, month, year, all.")
-            return 0, 0
-
-        # Query total sales and invoice count
-        query = QSqlQuery()
-        sql = f"""
-            SELECT IFNULL(SUM(received),0), COUNT(*)
-            FROM sales
-            WHERE {where_clause}
-        """
-        if not query.exec(sql):
-            print("Query failed:", query.lastError().text())
-            return 0, 0
-
-        total_sales = 0
-        total_invoices = 0
-        if query.next():
-            total_sales = query.value(0) or 0
-            total_invoices = query.value(1) or 0
-
-        return total_sales, total_invoices
-
-
-
-    def get_purchase_summary(self, duration="today"):
-      
-      
-        db = QSqlDatabase.database()
-        if not db.isValid() or not db.isOpen():
-            print("Database is not open")
-            return 0.0, 0
-
-        # Build WHERE clause using date ranges
-        duration = duration.lower()
-        if duration == "today":
-            where_clause = "DATE(creation_date) = DATE('now')"
-        elif duration == "week":
-            where_clause = "DATE(creation_date) >= DATE('now','-6 days')"
-        elif duration == "month":
-            where_clause = "DATE(creation_date) >= DATE('now','-29 days')"
-        elif duration == "year":
-            where_clause = "DATE(creation_date) >= DATE('now','-1 year')"
-        elif duration == "all":
-            where_clause = "1=1"
-        else:
-            print("Invalid duration. Use: today, week, month, year, all.")
-            return 0.0, 0
-
-        # Query total purchases and invoice count
-        query = QSqlQuery()
-        sql = f"""
-            SELECT IFNULL(SUM(total),0), COUNT(*)
-            FROM purchase
-            WHERE {where_clause}
-        """
-        if not query.exec(sql):
-            print("Query failed:", query.lastError().text())
-            return 0.0, 0
-
-        total_purchase = 0.0
-        total_invoices = 0
-        if query.next():
-            total_purchase = query.value(0) or 0.0
-            total_invoices = query.value(1) or 0
-
-        return total_purchase, total_invoices
-
-
-
-
-
-    from PySide6.QtSql import QSqlQuery
-
-    def get_total_expenses(self, duration="today"):
-        """
-        Fetch total expenses and number of expense records for a given duration.
-
-        duration: str
-            "today", "week", "month", "year", "all"
-        Returns:
-            total_expenses (float), num_records (int)
-        """
-        db = QSqlDatabase.database()
-        if not db.isValid() or not db.isOpen():
-            print("Database is not open")
-            return 0.0, 0
-
-        # Build WHERE clause using date ranges
-        duration = duration.lower()
-        if duration == "today":
-            where_clause = "DATE(creation_date) = DATE('now')"
-        elif duration == "week":
-            where_clause = "DATE(creation_date) >= DATE('now','-6 days')"
-        elif duration == "month":
-            where_clause = "DATE(creation_date) >= DATE('now','-29 days')"
-        elif duration == "year":
-            where_clause = "DATE(creation_date) >= DATE('now','-1 year')"
-        elif duration == "all":
-            where_clause = "1=1"
-        else:
-            print("Invalid duration. Use: today, week, month, year, all.")
-            return 0.0, 0
-
-        # Query total expenses and count of records
-        query = QSqlQuery()
-        sql = f"""
-            SELECT IFNULL(SUM(amount),0), COUNT(*)
-            FROM expense
-            WHERE {where_clause}
-        """
-        if not query.exec(sql):
-            print("Query failed:", query.lastError().text())
-            return 0.0, 0
-
-        total_expenses = 0.0
-        num_records = 0
-        if query.next():
-            total_expenses = query.value(0) or 0.0
-            num_records = query.value(1) or 0
-
-        return total_expenses, num_records
-
-
-
-    def get_stock_summary(self):
-        """
-        Fetch total products and low stock products.
-
-        Returns:
-            total_products (int), low_stock_products (int)
-        """
-        db = QSqlDatabase.database()
-        if not db.isValid() or not db.isOpen():
-            print("Database is not open")
-            return 0, 0
-
-        # 1. Total products
-        total_products = 0
-        query = QSqlQuery()
-        if query.exec("SELECT COUNT(*) FROM product"):
-            if query.next():
-                total_products = query.value(0) or 0
-        else:
-            print("Query failed for total products:", query.lastError().text())
-
-        # 2. Low stock products
-        low_stock_products = 0
-        query2 = QSqlQuery()
-        sql = "SELECT COUNT(*) FROM stock WHERE units <= reorder"
-        if query2.exec(sql):
-            if query2.next():
-                low_stock_products = query2.value(0) or 0
-        else:
-            print("Query failed for low stock products:", query2.lastError().text())
-            
-        
-        self.total_products_data.setText(f"{total_products}")
-        self.low_stock_data.setText(f"{low_stock_products}")    
-        
-
-        return total_products, low_stock_products
-
-
-
-    def get_supplier_summary(self):
-        """
-        Fetch total payable and total receivable for suppliers.
-
-        Returns:
-            total_payable (float), total_receivable (float)
-        """
-        db = QSqlDatabase.database()
-        if not db.isValid() or not db.isOpen():
-            print("Database is not open")
-            return 0.0, 0.0
-
-        total_payable = 0.0
-        total_receivable = 0.0
-
-        query = QSqlQuery()
-        sql = """
-            SELECT IFNULL(SUM(payable_after),0), IFNULL(SUM(receiveable_after),0)
-            FROM supplier_transaction
-        """
-        if query.exec(sql):
-            if query.next():
-                total_payable = query.value(0) or 0.0
-                total_receivable = query.value(1) or 0.0
-        else:
-            print("Query failed for supplier summary:", query.lastError().text())
-            
-            
-            
-        self.supplier_payable.setText(f"{abs(total_payable)} ---payable")
-        self.supplier_receiveable.setText(f"{abs(total_receivable)} ---receivables")
+        return hourly_sales
 
 
 
     
-
-    def get_customer_summary(self):
-        """
-        Fetch total payable and total receivable for customers.
-
-        Returns:
-            total_payable (float), total_receivable (float)
-        """
-        db = QSqlDatabase.database()
-        if not db.isValid() or not db.isOpen():
-            print("Database is not open")
-            return 0.0, 0.0
-
-        total_payable = 0.0       # Customers owe you
-        total_receivable = 0.0    # You owe customers
+    def get_monthly_sales_data(self):
+        
+        monthly_sales = {day: 0 for day in range(1, 32)}
 
         query = QSqlQuery()
-        sql = """
-            SELECT IFNULL(SUM(payable_after),0), IFNULL(SUM(receiveable_after),0)
-            FROM customer_transaction
-        """
-        if query.exec(sql):
-            if query.next():
-                total_payable = query.value(0) or 0.0
-                total_receivable = query.value(1) or 0.0
+        # query.prepare("""
+        #     SELECT
+        #         day::int,
+        #         COALESCE(SUM(total), 0) AS total_sales
+        #     FROM
+        #         generate_series(1, 31) AS day
+        #     LEFT JOIN
+        #         sales ON EXTRACT(DAY FROM creation_date) = day
+        #             AND date_trunc('month', creation_date) = date_trunc('month', CURRENT_DATE)
+        #     GROUP BY day
+        #     ORDER BY day;
+        # """)
+        
+        query.prepare("""
+            WITH RECURSIVE days(day) AS (
+                SELECT 1
+                UNION ALL
+                SELECT day + 1 FROM days WHERE day < 31
+            )
+            SELECT
+                days.day,
+                COALESCE(SUM(s.total), 0) AS total_sales
+            FROM
+                days
+            LEFT JOIN
+                sales s
+                ON CAST(STRFTIME('%d', s.creation_date) AS INTEGER) = days.day
+                AND STRFTIME('%Y-%m', s.creation_date) = STRFTIME('%Y-%m', 'now')
+            GROUP BY
+                days.day
+            ORDER BY
+                days.day;
+        """)
+
+
+        if query.exec():
+            while query.next():
+                day = int(query.value(0))
+                total = float(query.value(1))
+                monthly_sales[day] = total
         else:
-            print("Query failed for customer summary:", query.lastError().text())
-            
-            
-        self.customer_payable.setText(f"{abs(total_payable)} ---payable")
-        self.customer_receiveable.setText(f"{abs(total_receivable)} ----receivables")
-        
-        
+            print("Query failed:", query.lastError().text())
+
+        # Return a list for days 1 to 31
+        return [monthly_sales[day] for day in range(1, 32)]
 
 
 
-    def on_duration_changed(self, index):
-        # Map combo box selection to your method's duration parameter
-        duration_map = {
-            0: "today",
-            1: "week",
-            2: "month",
-            3: "year",
-            4: "all",
-        }
-        duration_key = duration_map.get(index, "today")
-
-        # Card 1 = Sales Invoices
-        total_sales, total_invoices = self.get_sales_summary(duration_key)
-        self.card1_data.setText(f"{total_sales:.2f}")
-        self.card1_bottom.setText(f"{total_invoices} Sales Invoice(s) ")
-        
-        
-        # Card 2 = Purchase Invoices
-        total_purchase, invoice_count = self.get_purchase_summary(duration_key)
-        self.card2_data.setText(f"{total_purchase:.2f}")
-        self.card2_bottom.setText(f"{invoice_count} Purchase Invoice(s) ")
-        
-        
-        # Card 3 = Expenses
-        total_expenses, num_records = self.get_total_expenses(duration_key)
-        self.card3_data.setText(f"{total_expenses:.2f}")
-        self.card3_bottom.setText(f"{num_records} Expense(s) ")
-        
-        
-        
-        
-        
-        
         
         
         

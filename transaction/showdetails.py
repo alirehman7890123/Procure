@@ -19,12 +19,12 @@ class MainTransactionWidget(QWidget):
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Transactions", objectName="SectionTitle")
-        self.transactionlist = QPushButton("Transaction List", objectName="TopRightButton")
-        self.transactionlist.setCursor(Qt.PointingHandCursor)
-        self.transactionlist.setFixedWidth(200)
+        # self.transactionlist = QPushButton("Transaction List", objectName="TopRightButton")
+        # self.transactionlist.setCursor(Qt.PointingHandCursor)
+        # self.transactionlist.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
-        header_layout.addWidget(self.transactionlist)
+        # header_layout.addWidget(self.transactionlist)
 
         self.layout.addLayout(header_layout)
         

@@ -53,9 +53,9 @@ class PurchaseReturnDetailWidget(QWidget):
         
         self.supplier_table = MyTable()
         
-        self.supplier_table.setColumnCount(9)
+        self.supplier_table.setColumnCount(7)
         self.supplier_table.setHorizontalHeaderLabels([
-            "#", "Product", "Batch", "Purchased", "Return", "Rate", "Disc (%)", "Tax (%)", "Total"
+            "Product", "Brand", "Batch", "Purchased", "Return", "Rate", "Total"
         ])
         self.supplier_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.supplier_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -164,130 +164,188 @@ class PurchaseReturnDetailWidget(QWidget):
 
 
 
-    def load_purchase_data(self, id):
+    # def load_purchase_data(self, id):
         
-        print("Loading purchase ID:", id)
-        query = QSqlQuery()
-        query.prepare("SELECT * FROM purchase_return WHERE id = ?")
-        query.addBindValue(id)
+    #     print("Loading purchase ID:", id)
+    #     query = QSqlQuery()
+    #     query.prepare("SELECT * FROM purchase_return WHERE id = ?")
+    #     query.addBindValue(id)
         
-        if query.exec() and query.next():
+    #     if query.exec() and query.next():
             
-            orderid = query.value(0)
-            supplierid = query.value(1)
-            invoicedate = query.value(3)
+    #         orderid = query.value(0)
+    #         supplierid = query.value(1)
+    #         invoicedate = query.value(3)
             
-            subtotal = query.value(4)
-            roundoff = query.value(7)
-            total = query.value(8)
+    #         subtotal = query.value(4)
+    #         roundoff = query.value(7)
+    #         total = query.value(8)
             
             
+    #         # get supplier name
+    #         supplier_query = QSqlQuery()
+    #         supplier_query.prepare("SELECT name FROM supplier WHERE id = ?")
+    #         supplier_query.addBindValue(supplierid)
+            
+    #         if query.exec() and supplier_query.next():
+    #             supplier_name = supplier_query.value(0)
+    #             self.supplier.setText(supplier_name)
+                
+                
+    #         if isinstance(invoicedate, QDate):  # or QDateTime
+    #             invoicedate = invoicedate.toString("dd-MM-yyyy")  # or "yyyy-MM-dd"
+    #         else:
+    #             invoicedate = str(invoicedate)
+            
+    #         self.orderid.setText(str(orderid))
+    #         self.dateandtime.setText(str(invoicedate))
+            
+    #         self.subtotal.setText(str(subtotal))
+    #         self.roundoff.setText(str(roundoff))
+    #         self.finalamount.setText(str(total))
+        
+            
+    #         query2 = QSqlQuery()
+    #         query2.prepare("SELECT name FROM supplier WHERE id = ?")
+    #         query2.addBindValue(supplierid)
+            
+    #         if query2.exec() and query2.next():
+                
+    #             supplier = query2.value(0)
+    #             self.supplier.setText(supplier)
+                
+            
+    #         self.load_items_into_table(orderid)
+            
+            
+    #     else:
+    #         self.supplier.setText("Purchase not found.")
 
-            
-            if isinstance(invoicedate, QDate):  # or QDateTime
-                invoicedate = invoicedate.toString("dd-MM-yyyy")  # or "yyyy-MM-dd"
-            else:
-                invoicedate = str(invoicedate)
-            
-            self.orderid.setText(str(orderid))
-            self.dateandtime.setText(str(invoicedate))
-            
-            self.subtotal.setText(str(subtotal))
-            self.roundoff.setText(str(roundoff))
-            self.finalamount.setText(str(total))
-        
-            
-            query2 = QSqlQuery()
-            query2.prepare("SELECT name FROM supplier WHERE id = ?")
-            query2.addBindValue(supplierid)
-            
-            if query2.exec() and query2.next():
-                
-                supplier = query2.value(0)
-                self.supplier.setText(supplier)
-                
-            
-            self.load_items_into_table(orderid)
-            
-            
-        else:
+
+    def load_purchase_data(self, purchase_return_id: int) -> None:
+        """
+        Load purchase return header data and populate UI fields.
+        """
+
+        print(f"Loading Purchase Return ID: {purchase_return_id}")
+
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT 
+                id,
+                supplier,
+                creation_date,
+                subtotal,
+                roundoff,
+                total
+            FROM purchase_return
+            WHERE id = ?
+        """)
+        query.addBindValue(purchase_return_id)
+
+        if not query.exec() or not query.next():
             self.supplier.setText("Purchase not found.")
+            return
 
+        order_id     = query.value(0)
+        supplier_id  = query.value(1)
+        invoice_date = query.value(2)
+        subtotal     = query.value(3)
+        roundoff     = query.value(4)
+        total        = query.value(5)
 
-
-    def load_items_into_table(self, id):
-        
-        print("Loading items into table")
-        
-        query = QSqlQuery()
-        query.prepare("SELECT * FROM purchase_return_item where purchase_return = ?")
-        query.addBindValue(id)
-
-        self.supplier_table.setRowCount(0)  # Clear existing rows
-
-        row = 0
-        
-       
-        
-        if query.exec():
-            
-            print("Loading items into table")
-            
-            while query.next():
-                
-                self.supplier_table.insertRow(row)
-                
-                med = int(query.value(2))
-                quantity = str(query.value(3))
-                rate = str(query.value(4))
-                
-                print("med is: ", med)
-                
-                discount = str(query.value(5))
-                discountamount = str(query.value(6))
-                
-                tax = str(query.value(7))
-                taxamount = str(query.value(8))
-                
-                total = str(query.value(9))
-                
-                query2 = QSqlQuery()
-                query2.prepare("SELECT name, maker FROM med WHERE id = ?")
-                query2.addBindValue(med)
-                
-                if query2.exec() and query2.next():
-                    
-                    name = query2.value(0)
-                    maker = query2.value(1)
-                    
-                
-                quantity = QTableWidgetItem(quantity)
-                rate = QTableWidgetItem(rate)
-                discount = QTableWidgetItem(discount)
-                discountamount = QTableWidgetItem(discountamount)
-                tax = QTableWidgetItem(tax)
-                taxamount = QTableWidgetItem(taxamount)
-                total = QTableWidgetItem(total)
-                
-                self.supplier_table.setItem(row, 0, name)
-                self.supplier_table.setItem(row, 1, maker)
-                self.supplier_table.setItem(row, 2, quantity)
-                self.supplier_table.setItem(row, 3, rate)
-                self.supplier_table.setItem(row, 4, discount)
-                self.supplier_table.setItem(row, 5, discountamount)
-                self.supplier_table.setItem(row, 6, tax)
-                self.supplier_table.setItem(row, 7, taxamount)
-                self.supplier_table.setItem(row, 8, total)
-                
-
-                row += 1
-        
-
+        # Format date safely
+        if isinstance(invoice_date, QDate):
+            invoice_date = invoice_date.toString("dd-MM-yyyy")
         else:
-            print("Insert failed:", query.lastError().text())
-            
-            
+            invoice_date = str(invoice_date)
 
+        # Set header fields
+        self.orderid.setText(str(order_id))
+        self.dateandtime.setText(invoice_date)
+        self.subtotal.setText(str(subtotal))
+        self.roundoff.setText(str(roundoff))
+        self.finalamount.setText(str(total))
+
+        # Load supplier name (single query, properly executed)
+        supplier_name = "Unknown Supplier"
+
+        if supplier_id:
+            supplier_query = QSqlQuery()
+            supplier_query.prepare("SELECT name FROM supplier WHERE id = ?")
+            supplier_query.addBindValue(supplier_id)
+
+            if supplier_query.exec() and supplier_query.next():
+                supplier_name = supplier_query.value(0)
+
+        self.supplier.setText(supplier_name)
+
+        # Load associated items
+        self.load_items_into_table(purchase_return_id)
+
+
+         
+    
+    def load_items_into_table(self, purchase_return_id: int) -> None:
+        
+
+        print(f"Loading Purchase Return Items for ID: {purchase_return_id}")
+
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT
+                pri.product,
+                p.display_name,
+                p.brand,
+                pri.batch,
+                pri.purchased,
+                pri.returned,
+                pri.rate,
+                pri.total
+            FROM purchase_return_item pri
+            LEFT JOIN product p ON pri.product = p.id
+            WHERE pri.purchase_return = ?
+        """)
+        query.addBindValue(purchase_return_id)
+
+        if not query.exec():
+            print("Query failed:", query.lastError().text())
+            return
+
+        rows = []
+
+        while query.next():
+            rows.append({
+                "name": query.value(1) or "Unknown",
+                "brand": query.value(2) or "",
+                "batch": query.value(3),
+                "purchased": query.value(4),
+                "returned": query.value(5),
+                "rate": query.value(6),
+                "total": query.value(7),
+            })
+
+        # Disable UI updates for performance
+        self.supplier_table.setUpdatesEnabled(False)
+        self.supplier_table.setRowCount(len(rows))
+
+        for row_index, data in enumerate(rows):
+
+            self.supplier_table.setItem(row_index, 0, QTableWidgetItem(str(data["name"])))
+            self.supplier_table.setItem(row_index, 1, QTableWidgetItem(str(data["brand"])))
+            self.supplier_table.setItem(row_index, 2, QTableWidgetItem(str(data["batch"])))
+            self.supplier_table.setItem(row_index, 3, QTableWidgetItem(str(data["purchased"])))
+            self.supplier_table.setItem(row_index, 4, QTableWidgetItem(str(data["returned"])))
+            self.supplier_table.setItem(row_index, 5, QTableWidgetItem(str(data["rate"])))
+            self.supplier_table.setItem(row_index, 6, QTableWidgetItem(str(data["total"])))
+
+        self.supplier_table.setUpdatesEnabled(True)
+
+        print(f"Loaded {len(rows)} items successfully.")
+
+     
+     
+            
 
 class MyTable(QTableWidget):
     
@@ -296,15 +354,12 @@ class MyTable(QTableWidget):
         total_width = self.viewport().width()
         
         self.setColumnWidth(0, int(total_width * 0.30))  
-        self.setColumnWidth(1, int(total_width * 0.15))  
         self.setColumnWidth(2, int(total_width * 0.10))  
         self.setColumnWidth(3, int(total_width * 0.10))  
         self.setColumnWidth(4, int(total_width * 0.10))  
-        self.setColumnWidth(5, int(total_width * 0.05)) 
-        self.setColumnWidth(6, int(total_width * 0.05))
-        self.setColumnWidth(7, int(total_width * 0.05)) 
-        self.setColumnWidth(8, int(total_width * 0.05)) 
-        self.setColumnWidth(9, int(total_width * 0.05)) 
+        self.setColumnWidth(5, int(total_width * 0.10)) 
+        self.setColumnWidth(6, int(total_width * 0.10))
+        self.setColumnWidth(7, int(total_width * 0.10))
         
         super().resizeEvent(event)
         

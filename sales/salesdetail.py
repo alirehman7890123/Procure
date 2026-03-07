@@ -166,7 +166,7 @@ class SalesDetailWidget(QWidget):
         
         print("Loading Sales ID:", id)
         query = QSqlQuery()
-        query.prepare("SELECT customer,salesman,creation_date,subtotal,discamount,taxamount,totalaftertax,roundoff,total FROM sales WHERE id = ?")
+        query.prepare("SELECT customer,salesman,creation_date,subtotal,discount,taxable, tax,net_amount, additional_charges,total, received, remaining, writeoff FROM sales WHERE id = ?")
         query.addBindValue(id)
         
         if query.exec() and query.next():
@@ -199,10 +199,16 @@ class SalesDetailWidget(QWidget):
             
             subtotal = float(query.value(3))
             discount = float(query.value(4))
-            tax = float(query.value(5))
-            totalaftertax = float(query.value(6))
-            roundoff = float(query.value(7))
-            total = float(query.value(8))
+            taxable = float(query.value(5))
+            tax = float(query.value(6))
+            
+            net_amount = float(query.value(7))
+            additional_charges = float(query.value(8))
+            total = float(query.value(9))
+            received = float(query.value(10))
+            remaining = float(query.value(11))
+            writeoff = float(query.value(12))
+            
 
 
             if isinstance(invoicedate, QDate):  # or QDateTime
@@ -230,8 +236,8 @@ class SalesDetailWidget(QWidget):
             self.subtotal.setText(str(subtotal))
             self.discount.setText(str(discount))
             self.tax.setText(str(tax))
-            self.total.setText(str(totalaftertax))
-            self.roundoff.setText(str(roundoff))
+            self.total.setText(str(net_amount))
+            self.roundoff.setText(str(additional_charges))
             self.finalamount.setText(str(total))
         
             print("Sales data loaded successfully for ID:", id)
@@ -251,9 +257,9 @@ class SalesDetailWidget(QWidget):
 
         query = QSqlQuery()
         query.prepare("""
-            SELECT product, qty, unitrate, discount, discountamount, total
+            SELECT product_id, qty_sold, unit_price, discount, tax, line_total
             FROM salesitem 
-            WHERE sales = ?
+            WHERE sales_id = ?
         """)
         query.addBindValue(sale_id)
 
@@ -268,13 +274,13 @@ class SalesDetailWidget(QWidget):
                 qty = str(query.value(1))
                 rate = str(query.value(2))
                 discount = str(query.value(3))
-                discount_amount = str(query.value(4))
+                tax = str(query.value(4))
                 total = str(query.value(5))
 
                 # Get product name
                 product_name = ""
                 query2 = QSqlQuery()
-                query2.prepare("SELECT name FROM product WHERE id = ?")
+                query2.prepare("SELECT display_name FROM product WHERE id = ?")
                 query2.addBindValue(product_id)
 
                 if query2.exec() and query2.next():
@@ -286,7 +292,7 @@ class SalesDetailWidget(QWidget):
                 qty_item = QTableWidgetItem(qty)
                 rate_item = QTableWidgetItem(rate)
                 discount_item = QTableWidgetItem(discount)
-                discount_amount_item = QTableWidgetItem(discount_amount)
+                tax_item = QTableWidgetItem(tax)
                 total_item = QTableWidgetItem(total)
 
                 # Set into table
@@ -295,7 +301,7 @@ class SalesDetailWidget(QWidget):
                 self.table.setItem(row, 2, qty_item)
                 self.table.setItem(row, 3, rate_item)
                 self.table.setItem(row, 4, discount_item)
-                self.table.setItem(row, 5, discount_amount_item)
+                self.table.setItem(row, 5, tax_item)
                 self.table.setItem(row, 6, total_item)
 
                 row += 1
