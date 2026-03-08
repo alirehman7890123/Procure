@@ -1616,13 +1616,13 @@ class AddPurchaseWidget(QWidget):
             
             print("New Product is: ", new_product)
             
-            code = dialog.code_input.text()
             
-            if code == '':
-                code = None
-                
+            item_name = dialog.name_input.text()
+            item_form = dialog.form_input.currentText()
+            item_packing = dialog.packing_input.text()
             
-            display_name = dialog.name_input.text()
+            display_name = f"{item_name} {item_form} {item_packing}"
+            
             brand = dialog.brand_input.text()
             packsize = dialog.packsize_input.text()
             saleprice = dialog.saleprice_input.text()
@@ -1631,12 +1631,11 @@ class AddPurchaseWidget(QWidget):
             
             query = QSqlQuery()
             query.prepare("""
-                INSERT INTO product (display_name, code, brand )
-                VALUES (?, ?, ?)
+                INSERT INTO product (display_name, brand )
+                VALUES (?, ?)
             """)
             
             query.addBindValue(display_name)
-            query.addBindValue(code)
             query.addBindValue(brand)
             
             if not query.exec():
@@ -1757,30 +1756,72 @@ class ImportDialog(QDialog):
         item_layout.addItem(spacer)
 
         # Name input with stretch factor 3
-        name_input = QLineEdit()
-        item_layout.addWidget(name_input, stretch=3)
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText('name')
+        item_layout.addWidget(self.name_input, stretch=3)
 
         # Form input with stretch factor 1
-        form_input = QLineEdit()
-        item_layout.addWidget(form_input, stretch=1)
+        self.form_input = QComboBox()
+        self.form_input.addItems(['Tabs', 'Caps', 'Syrup', 'Inj'])
+        item_layout.addWidget(self.form_input, stretch=1)
 
         # Packing input with stretch factor 1
-        packing_input = QLineEdit()
-        item_layout.addWidget(packing_input, stretch=1)
+        self.packing_input = QLineEdit()
+        self.packing_input.setPlaceholderText('packing')
+        item_layout.addWidget(self.packing_input, stretch=1)
         
         
         self.layout.addLayout(item_layout)
         
         
         
+        # brand line
         
+        brand_layout = QHBoxLayout()
         
-        
-        self.name_input = QLineEdit()
+        brand_label = QLabel("Brand")
+        spacer = QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.brand_input = QLineEdit()
-        self.code_input = QLineEdit()
+        
+        brand_layout.addWidget(brand_label, 2)
+        brand_layout.addItem(spacer)
+        brand_layout.addWidget(self.brand_input, 5)
+        
+        self.layout.addLayout(brand_layout)
+        
+        
+        
+        # pack size - line
+        
+        size_layout = QHBoxLayout()
+        
+        size_label = QLabel("Pack Size")
+        spacer = QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.packsize_input = QLineEdit()
+        
+        size_layout.addWidget(size_label, 2)
+        size_layout.addItem(spacer)
+        size_layout.addWidget(self.packsize_input, 5)
+        
+        self.layout.addLayout(size_layout)
+        
+        
+        
+        # pack size - line
+        
+        price_layout = QHBoxLayout()
+        
+        size_label = QLabel("Pack Sale Price")
+        spacer = QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.saleprice_input = QLineEdit()
+        
+        price_layout.addWidget(size_label, 2)
+        price_layout.addItem(spacer)
+        price_layout.addWidget(self.saleprice_input, 5)
+        
+        self.layout.addLayout(price_layout)
+        
+        
         
         
          
