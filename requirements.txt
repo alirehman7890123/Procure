@@ -22,6 +22,11 @@ psycopg2==2.9.10
 pyinstaller==6.16.0
 pyinstaller-hooks-contrib==2025.9
 pyqt-tools==1.0.0
+<<<<<<< HEAD
+=======
+PyQt5-Qt5==5.15.16
+PyQt5_sip==12.17.0
+>>>>>>> 2c760af8cbda25af1eda51d8bf8f2ce1f13b6e05
 pyqtgraph==0.13.7
 PySide6==6.9.0
 PySide6_Addons==6.9.0
