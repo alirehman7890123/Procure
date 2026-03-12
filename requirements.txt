@@ -3,6 +3,7 @@ bcrypt==4.3.0
 certifi==2025.4.26
 charset-normalizer==3.4.2
 cx_Freeze==8.4.1
+defusedxml==0.7.1
 et_xmlfile==2.0.0
 filelock==3.19.1
 fpdf==1.7.2
@@ -11,12 +12,13 @@ guiqwt==4.4.4
 h5py==3.13.0
 idna==3.10
 numpy==2.2.5
+odfpy==1.4.1
 openpyxl==3.1.5
 packaging==25.0
 pandas==2.3.1
 patchelf==0.17.2.4
 pillow==11.2.1
-psycopg2-binary==2.9.10
+psycopg2==2.9.10
 pyinstaller==6.16.0
 pyinstaller-hooks-contrib==2025.9
 pyqt-tools==1.0.0
@@ -36,6 +38,7 @@ scipy==1.15.3
 setuptools==80.9.0
 shiboken6==6.9.0
 six==1.17.0
+tabulate==0.10.0
 tomli==2.2.1
 tzdata==2025.2
 urllib3==2.4.0
