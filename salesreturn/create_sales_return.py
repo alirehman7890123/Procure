@@ -555,13 +555,6 @@ class AddSalesReturnWidget(QWidget):
         
         try: 
         
-            # salesman = self.salesman.currentData()
-            
-            # if salesman is None :
-                
-            #     QMessageBox.warning(self, "Error", "Please select a salesman")
-            #     return
-            
             print('Starting to save sales return!')
             
             subtotal = self.subtotal.text()
@@ -802,6 +795,9 @@ class AddSalesReturnWidget(QWidget):
                     returned = int(self.table.cellWidget(row, 4).text() or 0)
                     rate = float(self.table.item(row, 5).text())
                     line_total = float(self.table.item(row, 6).text())
+                    
+                    if returned <= 0:
+                        raise Exception("Return quantity must be greater than zero")
 
                 except Exception as e:
                     print("Row Error:", str(e))
@@ -829,7 +825,7 @@ class AddSalesReturnWidget(QWidget):
                     insert_id = item_query.lastInsertId()
                     print("last INSERTED ID IS ", insert_id)
 
-            
+                print("Passing salesitem_id to reverse_inventory_for_return:", salesitem_id)
                 # Reverse Inventory for Return
                 self.reverse_inventory_for_return(salesitem_id, returned, db)
 
@@ -857,6 +853,7 @@ class AddSalesReturnWidget(QWidget):
     
     def reverse_inventory_for_return(self, sales_item_id: int, return_qty: int, db=None):
         
+        print("Passing salesitem_id to reverse_inventory_for_return:", sales_item_id)
 
         try:
             # --------------------------------------------------
@@ -864,20 +861,16 @@ class AddSalesReturnWidget(QWidget):
             # --------------------------------------------------
             query = QSqlQuery()
             query.prepare("""
-                SELECT qty_sold, cogs_amount, revenue_amount
-                FROM salesitem
-                WHERE id = ?
+                SELECT qty_sold FROM salesitem WHERE id = ?
             """)
             query.addBindValue(sales_item_id)
             
-            print("Sales Id is ", sales_item_id)
+            print("Sales Item id is ", sales_item_id)
 
             if not query.exec() or not query.next():
                 raise Exception("Invalid sales_item_id")
 
             qty_sold = query.value(0)
-            current_cogs = query.value(1) or 0
-            revenue_amount = query.value(2) or 0
             
             print("Checking if already returned or not")
 
@@ -916,7 +909,6 @@ class AddSalesReturnWidget(QWidget):
                 raise Exception(batch_query.lastError().text())
 
             remaining = return_qty
-            total_cogs_reversal = 0
 
             # --------------------------------------------------
             # 3️⃣ Restore inventory per batch
@@ -961,42 +953,14 @@ class AddSalesReturnWidget(QWidget):
                 if not update_sold_batch.exec():
                     raise Exception(update_sold_batch.lastError().text())
 
-                # --- Accumulate COGS reversal ---
-                total_cogs_reversal += qty_to_restore * unit_cost
-
                 remaining -= qty_to_restore
 
             if remaining > 0:
                 raise Exception("Not enough batch quantity to restore")
 
-            # --------------------------------------------------
-            # 4️⃣ Reverse COGS in salesitem
-            # --------------------------------------------------
-            new_cogs = current_cogs - total_cogs_reversal
-            new_gross_profit = revenue_amount - new_cogs
-
-            update_salesitem = QSqlQuery()
-            update_salesitem.prepare("""
-                UPDATE salesitem
-                SET cogs_amount = ?,
-                    gross_profit = ?
-                WHERE id = ?
-            """)
-            update_salesitem.addBindValue(new_cogs)
-            update_salesitem.addBindValue(new_gross_profit)
-            update_salesitem.addBindValue(sales_item_id)
-
-            if not update_salesitem.exec():
-                raise Exception(update_salesitem.lastError().text())
-
-            # --------------------------------------------------
-            # 5️⃣ Commit transaction
-            # --------------------------------------------------
-            if not db.commit():
-                raise Exception("Commit failed")
+            
 
         except Exception as e:
-            db.rollback()
             raise Exception(f"Sales return inventory reversal failed: {str(e)}")
 
 

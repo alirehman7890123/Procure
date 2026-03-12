@@ -1,113 +1,217 @@
 
+# from functools import wraps
+# from PySide6.QtWidgets import QApplication, QMessageBox
+
+# class Permissions:
+    
+    
+
+    
+    
+#     @staticmethod
+#     def require_permission(page_name):
+#         """Decorator to check if the current user has access to a given page."""
+        
+#         PERMISSIONS = {
+#                     # Dashboard
+#                     "dashboard": {"admin", "manager"},
+                    
+#                     # Business
+#                     "business.view": {"admin", "manager", "regular"},
+#                     "business.update": {"admin"},
+
+#                     # Profile
+#                     "profile.view": {"admin", "manager", "regular"},
+#                     "profile.update": {"admin", "manager", "regular"},
+
+#                     # Users (system-level, so stricter)
+#                     "users.view": {"admin", "manager"},
+#                     "users.create": {"admin", "manager"},
+#                     "users.update": {"admin", "manager"},
+#                     "users.delete": {"admin"},
+
+#                     # Supplier
+#                     "supplier.view": {"admin", "manager", "regular"},
+#                     "supplier.create": {"admin", "manager"},
+#                     "supplier.update": {"admin", "manager"},
+#                     "supplier.delete": {"admin"},
+
+#                     # Sales Representatives
+#                     "rep.view": {"admin", "manager"},
+#                     "rep.create": {"admin", "manager"},
+#                     "rep.update": {"admin", "manager"},
+#                     "rep.delete": {"admin"},
+
+#                     # Customers
+#                     "customer.view": {"admin", "manager", "regular"},
+#                     "customer.create": {"admin", "manager", "regular"},
+#                     "customer.update": {"admin", "manager"},
+#                     "customer.delete": {"admin"},
+
+#                     # Employees
+#                     "employee.view": {"admin", "manager"},
+#                     "employee.create": {"admin", "manager"},
+#                     "employee.update": {"admin"},
+#                     "employee.delete": {"admin"},
+
+#                     # Purchases
+#                     "purchase.view": {"admin", "manager", "regular"},
+#                     "purchase.create": {"admin", "manager"},
+#                     "purchase.update": {"admin", "manager"},
+#                     "purchase.delete": {"admin"},
+
+#                     # Purchase Returns
+#                     "purchasereturn.view": {"admin", "manager"},
+#                     "purchasereturn.create": {"admin"},
+#                     "purchasereturn.update": {"admin"},
+#                     "purchasereturn.delete": {"admin"},
+
+#                     # Sales
+#                     "sales.view": {"admin", "manager", "regular"},
+#                     "sales.create": {"admin", "manager", "regular"},
+#                     "sales.update": {"admin", "manager"},
+#                     "sales.delete": {"admin"},
+
+#                     # Sales Returns
+#                     "salesreturn.view": {"admin", "manager", "regular"},
+#                     "salesreturn.create": {"admin", "manager", "regular"},
+#                     "salesreturn.update": {"admin", "manager"},
+#                     "salesreturn.delete": {"admin"},
+
+#                     # Transactions (financial, very restricted)
+#                     "transactions.view": {"admin", "manager"},
+#                     "transactions.create": {"admin", "manager"},
+#                     "transactions.update": {"admin", "manager"},
+#                     "transactions.delete": {"admin"},
+
+#                     # Reports
+#                     "reports.view": {"admin", "manager"},
+#                 }
+        
+        
+#         def decorator(func):
+#             @wraps(func)
+#             def wrapper(obj, *args, **kwargs):  # use obj instead of self to avoid confusion
+#                 role = QApplication.instance().property("user_role")
+#                 allowed_roles = PERMISSIONS.get(page_name, set())
+
+#                 if role not in allowed_roles:
+#                     QMessageBox.critical(
+#                         obj,
+#                         "Not Authorized",
+#                         f"Your role '{role}' does not have permission to access '{page_name}'."
+#                     )
+#                     return None  # explicit return
+                
+#                 return func(obj, *args, **kwargs)
+            
+#             return wrapper
+        
+#         return decorator
+
+
+
 from functools import wraps
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+
 class Permissions:
-    
-    
+    ROLE_PERMISSIONS = {
+        "admin": {
+            "dashboard",
 
-    
-    
-    @staticmethod
-    def require_permission(page_name):
-        """Decorator to check if the current user has access to a given page."""
-        
-        PERMISSIONS = {
-                    # Dashboard
-                    "dashboard": {"admin", "manager"},
-                    
-                    # Business
-                    "business.view": {"admin", "manager", "regular"},
-                    "business.update": {"admin"},
+            "business.view", "business.update",
 
-                    # Profile
-                    "profile.view": {"admin", "manager", "regular"},
-                    "profile.update": {"admin", "manager", "regular"},
+            "profile.view", "profile.update",
 
-                    # Users (system-level, so stricter)
-                    "users.view": {"admin", "manager"},
-                    "users.create": {"admin", "manager"},
-                    "users.update": {"admin", "manager"},
-                    "users.delete": {"admin"},
+            "users.view", "users.create", "users.update", "users.delete",
 
-                    # Supplier
-                    "supplier.view": {"admin", "manager", "regular"},
-                    "supplier.create": {"admin", "manager"},
-                    "supplier.update": {"admin", "manager"},
-                    "supplier.delete": {"admin"},
+            "supplier.view", "supplier.create", "supplier.update", "supplier.delete",
 
-                    # Sales Representatives
-                    "rep.view": {"admin", "manager"},
-                    "rep.create": {"admin", "manager"},
-                    "rep.update": {"admin", "manager"},
-                    "rep.delete": {"admin"},
+            "rep.view", "rep.create", "rep.update", "rep.delete",
+            
+            "product.view", "product.create", "product.update", "product.delete",
 
-                    # Customers
-                    "customer.view": {"admin", "manager", "regular"},
-                    "customer.create": {"admin", "manager", "regular"},
-                    "customer.update": {"admin", "manager"},
-                    "customer.delete": {"admin"},
+            "customer.view", "customer.create", "customer.update", "customer.delete",
 
-                    # Employees
-                    "employee.view": {"admin", "manager"},
-                    "employee.create": {"admin", "manager"},
-                    "employee.update": {"admin"},
-                    "employee.delete": {"admin"},
+            "employee.view", "employee.create", "employee.update", "employee.delete",
 
-                    # Purchases
-                    "purchase.view": {"admin", "manager", "regular"},
-                    "purchase.create": {"admin", "manager"},
-                    "purchase.update": {"admin", "manager"},
-                    "purchase.delete": {"admin"},
+            "purchase.view", "purchase.create", "purchase.update", "purchase.delete",
 
-                    # Purchase Returns
-                    "purchasereturn.view": {"admin", "manager"},
-                    "purchasereturn.create": {"admin"},
-                    "purchasereturn.update": {"admin"},
-                    "purchasereturn.delete": {"admin"},
+            "purchasereturn.view", "purchasereturn.create", "purchasereturn.update", "purchasereturn.delete",
 
-                    # Sales
-                    "sales.view": {"admin", "manager", "regular"},
-                    "sales.create": {"admin", "manager", "regular"},
-                    "sales.update": {"admin", "manager"},
-                    "sales.delete": {"admin"},
+            "sales.view", "sales.create", "sales.update", "sales.delete",
 
-                    # Sales Returns
-                    "salesreturn.view": {"admin", "manager", "regular"},
-                    "salesreturn.create": {"admin", "manager", "regular"},
-                    "salesreturn.update": {"admin", "manager"},
-                    "salesreturn.delete": {"admin"},
+            "salesreturn.view", "salesreturn.create", "salesreturn.update", "salesreturn.delete",
 
-                    # Transactions (financial, very restricted)
-                    "transactions.view": {"admin", "manager"},
-                    "transactions.create": {"admin", "manager"},
-                    "transactions.update": {"admin", "manager"},
-                    "transactions.delete": {"admin"},
+            "transactions.view", "transactions.create", "transactions.update", "transactions.delete",
 
-                    # Reports
-                    "reports.view": {"admin", "manager"},
-                }
-        
-        
+            "reports.view",
+        },
+
+        "manager": {
+            "dashboard",
+
+            "business.view",
+
+            "profile.view", "profile.update",
+
+            "users.view", "users.create", "users.update",
+
+            "supplier.view", "supplier.create", "supplier.update",
+
+            "rep.view", "rep.create", "rep.update",
+            
+            "product.view", "product.create", "product.update", "product.delete",
+
+            "customer.view", "customer.create", "customer.update",
+
+            "employee.view", "employee.create",
+
+            "purchase.view", "purchase.create", "purchase.update",
+
+            "purchasereturn.view",
+
+            "sales.view", "sales.create", "sales.update",
+
+            "salesreturn.view", "salesreturn.create", "salesreturn.update",
+
+            "transactions.view", "transactions.create", "transactions.update",
+
+            "reports.view",
+        },
+
+        "regular": {
+            "sales.create",
+            "profile.view", "profile.update",
+        },
+    }
+
+    @classmethod
+    def get_role(cls):
+        app = QApplication.instance()
+        return app.property("user_role") if app else None
+
+    @classmethod
+    def has_permission(cls, permission_name):
+        role = cls.get_role()
+        allowed_permissions = cls.ROLE_PERMISSIONS.get(role, set())
+        return permission_name in allowed_permissions
+
+    @classmethod
+    def require_permission(cls, permission_name):
         def decorator(func):
             @wraps(func)
-            def wrapper(obj, *args, **kwargs):  # use obj instead of self to avoid confusion
-                role = QApplication.instance().property("user_role")
-                allowed_roles = PERMISSIONS.get(page_name, set())
-
-                if role not in allowed_roles:
+            def wrapper(obj, *args, **kwargs):
+                if not cls.has_permission(permission_name):
+                    role = cls.get_role()
                     QMessageBox.critical(
                         obj,
                         "Not Authorized",
-                        f"Your role '{role}' does not have permission to access '{page_name}'."
+                        f"Your role '{role}' does not have permission to access '{permission_name}'."
                     )
-                    return None  # explicit return
-                
+                    return None
+
                 return func(obj, *args, **kwargs)
-            
             return wrapper
-        
         return decorator
-
-
-

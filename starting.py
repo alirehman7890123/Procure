@@ -1,5 +1,7 @@
 
 import os
+import csv
+
 
 # Fix Wayland compositor issue (especially on Chromebooks / Crostini)
 if os.environ.get("WAYLAND_DISPLAY"):
@@ -250,6 +252,8 @@ class AuthWindow(QMainWindow):
                 self.create_supplier_table()
                 self.create_rep_table()
                 
+                self.create_manufacturer_table()
+                
                 self.create_product_table()
                 self.create_batch_table()
                 self.create_price_pack_table()
@@ -348,7 +352,70 @@ class AuthWindow(QMainWindow):
         
         return False
 
-            
+    
+    
+    
+
+    def seed_manufacturer_table(self):
+        
+        file_path = os.path.join(os.path.dirname(__file__), "manufacturers.csv")
+
+        if not os.path.exists(file_path):
+            print("manufacturers.csv not found - skipping manufacturer seed.")
+            return True
+
+        # Skip if data already exists
+        check_query = QSqlQuery()
+        if not check_query.exec("SELECT COUNT(*) FROM manufacturer"):
+            QMessageBox.critical(None, "Error", f"Manufacturer count check failed: {check_query.lastError().text()}")
+            return False
+
+        check_query.next()
+        if int(check_query.value(0) or 0) > 0:
+            print("Manufacturer table already has data - skipping seed.")
+            return True
+
+        db = QSqlDatabase.database()
+        if not db.transaction():
+            QMessageBox.critical(None, "Error", "Could not start manufacturer seed transaction.")
+            return False
+
+        query = QSqlQuery()
+
+        try:
+            with open(file_path, newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+
+                for row in reader:
+                    manufacturer_id = row.get("Manufacturer_ID", "").strip()
+                    manufacturer_name = row.get("Manufacturer_Name", "").strip()
+
+                    if not manufacturer_name:
+                        continue
+
+                    query.prepare("""
+                        INSERT INTO manufacturer (id, name)
+                        VALUES (?, ?)
+                    """)
+                    query.addBindValue(int(manufacturer_id) if manufacturer_id else None)
+                    query.addBindValue(manufacturer_name)
+
+                    if not query.exec():
+                        raise Exception(query.lastError().text())
+
+            if not db.commit():
+                raise Exception("Failed to commit manufacturer seed.")
+
+            print("Manufacturer table seeded successfully.")
+            return True
+
+        except Exception as e:
+            db.rollback()
+            QMessageBox.critical(None, "Error", f"Manufacturer seed failed: {str(e)}")
+            return False
+        
+    
+           
     
     
     def create_auth_table(self):
@@ -618,21 +685,215 @@ class AuthWindow(QMainWindow):
         print("Table 'rep' created successfully.")
         return True
  
-      
+    
+    
+    
+    
+    def create_manufacturer_table(self):
+
+        query = QSqlQuery()
+        print("Creating Manufacturer Table")
+
+        # Check if table exists
+        if not query.exec("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM sqlite_master
+                WHERE type='table'
+                AND name='manufacturer'
+            );
+        """):
+            QMessageBox.critical(None, "Error", f"Table check failed: {query.lastError().text()}")
+            return False
+
+        query.next()
+        table_exists = query.value(0)
+
+        if table_exists:
+            print("Table 'manufacturer' already exists - skipping creation.")
+            return True
+
+        # Create table
+        if not query.exec("""
+            CREATE TABLE IF NOT EXISTS manufacturer (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                status TEXT DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """):
+            QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
+            return False
+
+        print("Table 'manufacturer' created successfully.")
+
+        # Create index for faster search
+        if not query.exec("""
+            CREATE INDEX IF NOT EXISTS idx_manufacturer_name
+            ON manufacturer(name);
+        """):
+            QMessageBox.critical(None, "Error", f"Index creation failed: {query.lastError().text()}")
+            return False
+
+        print("Index created successfully (manufacturer name).")
+
+        return self.populate_manufacturers_from_csv()
         
 
-    def create_product_table(self):
+
+
+    def populate_manufacturers_from_csv(self, file_path: str = "manufacturers.csv"):
         
+        if not os.path.exists(file_path):
+            print(f"Manufacturer file not found: {file_path}")
+            return
+
+        db = QSqlDatabase.database()
+
+        if not db.transaction():
+            print("Failed to start manufacturer transaction.")
+            return
+
+        query = QSqlQuery(db)
+        query.prepare("""
+            INSERT OR IGNORE INTO manufacturer (name)
+            VALUES (?)
+        """)
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    name = line.strip()
+
+                    if not name:
+                        continue
+
+                    query.addBindValue(name)
+
+                    if not query.exec():
+                        raise Exception(query.lastError().text())
+
+            if not db.commit():
+                raise Exception("Failed to commit manufacturer transaction.")
+
+            print("Manufacturers imported successfully.")
+
+        except Exception as e:
+            db.rollback()
+            print("Manufacturer import failed:", str(e))   
+        
+        
+       
+        import csv
+
+
+
+
+    def build_display_name(self, brand: str, form: str, strength: str) -> str:
+        
+        parts = []
+
+        if brand:
+            parts.append(str(brand).strip())
+
+        if form:
+            parts.append(str(form).strip())
+
+        if strength:
+            parts.append(str(strength).strip())
+
+        return " ".join(parts)
+
+
+    def populate_products_from_csv(self, file_path: str = "master_products.csv"):
+        
+        if not os.path.exists(file_path):
+            print(f"Product file not found: {file_path}")
+            return
+
+        db = QSqlDatabase.database()
+
+        if not db.transaction():
+            print("Failed to start product transaction.")
+            return
+
+        query = QSqlQuery(db)
+        query.prepare("""
+            INSERT INTO product (
+                display_name,
+                code,
+                reg_no,
+                generic_name,
+                brand,
+                form,
+                strength,
+                packing,
+                pack_size,
+                manufacturer_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """)
+
+        try:
+            with open(file_path, "r", newline="", encoding="utf-8") as f:
+                reader = csv.reader(f)
+
+                next(reader, None)  # skip header
+
+                for row in reader:
+                    if not row or len(row) < 8:
+                        continue
+
+                    reg_no = row[0].strip()
+                    brand = row[1].strip()
+                    generic_name = row[2].strip()
+                    form = row[3].strip()
+                    strength = row[4].strip()
+                    packing = row[5].strip()
+                    size = row[6].strip()
+                    manufacturer_id = row[7].strip()
+
+                    display_name = self.build_display_name(brand, form, strength)
+
+                    pack_size = int(size) if size else 1
+                    manufacturer_id = int(manufacturer_id) if manufacturer_id else None
+
+                    query.addBindValue(display_name)
+                    query.addBindValue(None)  # code
+                    query.addBindValue(reg_no)
+                    query.addBindValue(generic_name)
+                    query.addBindValue(brand)
+                    query.addBindValue(form)
+                    query.addBindValue(strength)
+                    query.addBindValue(packing)
+                    query.addBindValue(pack_size)
+                    query.addBindValue(manufacturer_id)
+
+                    if not query.exec():
+                        raise Exception(query.lastError().text())
+
+            if not db.commit():
+                raise Exception("Failed to commit product transaction.")
+
+            print("Products imported successfully.")
+
+        except Exception as e:
+            db.rollback()
+            print("Product import failed:", str(e))
+        
+    
+    def create_product_table(self):
+    
         query = QSqlQuery()
         print("Creating Product Table")
 
         # Check if table exists
         if not query.exec("""
             SELECT EXISTS (
-                SELECT 1 
-                FROM sqlite_master 
-                WHERE type='table' 
-                AND name='product'
+                SELECT 1
+                FROM sqlite_master
+                WHERE type = 'table'
+                AND name = 'product'
             );
         """):
             QMessageBox.critical(None, "Error", f"Table check failed: {query.lastError().text()}")
@@ -645,38 +906,53 @@ class AuthWindow(QMainWindow):
             print("Table 'product' already exists - skipping creation.")
             return True
 
-        # Create table if it doesn't exist
+        # Create table
         if not query.exec("""
             CREATE TABLE IF NOT EXISTS product (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                display_name TEXT NOT NULL,          -- "Paracetamol 500mg Tablet (10)"
-                code TEXT UNIQUE,                    -- optional, barcode / internal
-                generic_name TEXT,                   -- optional
-                brand TEXT,
+                display_name TEXT NOT NULL,              -- e.g. "Panadol Tab 10mg"
+                code TEXT UNIQUE,                        -- barcode / internal code
+                reg_no TEXT,                             -- optional registration number
+                generic_name TEXT,                       -- e.g. Paracetamol
+                brand TEXT NOT NULL,                     -- e.g. Panadol
+                form TEXT,                               -- e.g. Tab
+                strength TEXT,                           -- e.g. 10mg
+                packing TEXT,                            -- e.g. 10x10s
+                pack_size INTEGER DEFAULT 1,             -- numeric extracted size
+                manufacturer_id INTEGER,                 -- FK to manufacturer table
                 status TEXT DEFAULT 'active',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (manufacturer_id) REFERENCES manufacturer(id)
             );
         """):
             QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
             return False
-        
-        
 
         print("Table 'product' created successfully.")
-        # Create indexes for faster search
+
+        # Create indexes
         indexes = [
-            "CREATE INDEX IF NOT EXISTS idx_product_name   ON product(display_name)",
-            "CREATE INDEX IF NOT EXISTS idx_product_code   ON product(code)",
-            "CREATE INDEX IF NOT EXISTS idx_product_brand  ON product(brand)"
+            "CREATE INDEX IF NOT EXISTS idx_product_display_name   ON product(display_name)",
+            "CREATE INDEX IF NOT EXISTS idx_product_code           ON product(code)",
+            "CREATE INDEX IF NOT EXISTS idx_product_brand          ON product(brand)",
+            "CREATE INDEX IF NOT EXISTS idx_product_generic_name   ON product(generic_name)",
+            "CREATE INDEX IF NOT EXISTS idx_product_form           ON product(form)",
+            "CREATE INDEX IF NOT EXISTS idx_product_strength       ON product(strength)",
+            "CREATE INDEX IF NOT EXISTS idx_product_manufacturer   ON product(manufacturer_id)"
         ]
 
         for index_query in indexes:
             if not query.exec(index_query):
                 QMessageBox.critical(None, "Error", f"Index creation failed: {query.lastError().text()}")
+                return False
 
-        print("Indexes created successfully (display_name, code, brand).")
-
+        print("Indexes created successfully.")
         
+        
+        return self.populate_products_from_csv()
+        
+        
+            
 
 
     def create_price_pack_table(self):

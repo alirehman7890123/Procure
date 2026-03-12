@@ -677,6 +677,8 @@ class AddPurchaseReturnWidget(QWidget):
         
         
     
+    
+    
     def return_items(self, return_id):
 
         db = QSqlDatabase.database()

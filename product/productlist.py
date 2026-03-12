@@ -520,19 +520,7 @@ class ProductListWidget(QWidget):
 
 
         try:
-            # self.table.clearContents()
-            # rows = model.rowCount()
-            # cols = model.columnCount()
-            # self.table.setRowCount(rows)
-            # self.table.setColumnCount(cols)
-            # # set headers if available
-            # headers = [model.headerData(c, 1) for c in range(cols)]
-            # self.table.setHorizontalHeaderLabels([str(h) if h is not None else "" for h in headers])
-            # for r in range(rows):
-            #     for c in range(cols):
-            #         value = model.data(model.index(r, c))
-            #         item = QTableWidgetItem(str(value) if value is not None else "")
-            #         self.table.setItem(r, c, item)
+            
             
             self.table.setRowCount(0)  # Clear existing rows
             row = 0

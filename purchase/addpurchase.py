@@ -25,7 +25,21 @@ class KeyUpLineEdit(QLineEdit):
         self.keyReleased.emit(event)
 
 
+class SelectAllLineEdit(QLineEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._select_on_release = False
 
+    def mousePressEvent(self, event):
+        if not self.hasFocus():
+            self._select_on_release = True
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        if self._select_on_release:
+            self._select_on_release = False
+            self.selectAll()
 
 
 class AddPurchaseWidget(QWidget):
@@ -462,8 +476,6 @@ class AddPurchaseWidget(QWidget):
         
         
 
-
-
         entry_line = QHBoxLayout()
         
         
@@ -471,13 +483,18 @@ class AddPurchaseWidget(QWidget):
         self.item.wheelEvent = lambda event: event.ignore()
         self.item.setPlaceholderText("select product")
         self.item.setEditable(True)
-        
+
+        line_edit = SelectAllLineEdit()
+        self.item.setLineEdit(line_edit)
+
         self.item.lineEdit().editingFinished.connect(lambda c=self.item: self.handle_editing_finished(c))
-        
+
         completer = QCompleter()
         self.item.setCompleter(completer)
         completer.setCompletionMode(QCompleter.PopupCompletion)
-        
+
+        completer.activated[str].connect(lambda text, c=self.item: self.on_completer_selected(text, c))
+
         self.item.lineEdit().completer().popup().setStyleSheet("""
             QListView {
                 padding: 5px;
@@ -494,10 +511,9 @@ class AddPurchaseWidget(QWidget):
             }
         """)
 
-
-        self.item.lineEdit().textEdited.connect(lambda: self.load_product_suggestions(self.item, completer))
-        
-        
+        self.item.lineEdit().textEdited.connect(
+            lambda text: self.load_product_suggestions(self.item, completer)
+        )
         
         
         self.item.setStyleSheet(label_style)
@@ -593,11 +609,28 @@ class AddPurchaseWidget(QWidget):
         info_layout.addLayout(entry_line)
         
         
+        self.qty_edit.returnPressed.connect(lambda: self.focus_next_field(self.bonus_edit))
+        self.bonus_edit.returnPressed.connect(lambda: self.focus_next_field(self.rate_edit))
+        self.rate_edit.returnPressed.connect(lambda: self.focus_next_field(self.batch_edit))
+        self.batch_edit.returnPressed.connect(lambda: self.focus_next_field(self.expiry_edit))
+        self.discount_edit.returnPressed.connect(lambda: self.focus_next_field(self.tax_edit))
+        self.tax_edit.returnPressed.connect(lambda: self.focus_next_field(add_button))
+        
+        self.batch_edit.returnPressed.connect(lambda: self.focus_next_field(self.expiry_edit))
+        self.expiry_edit.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.discount_edit))
+        
         
         self.layout.addLayout(info_layout)
 
         
-    
+        
+    def focus_next_field(self, widget):
+        widget.setFocus()
+
+        if hasattr(widget, "selectAll"):
+            widget.selectAll()
+        
+        
     
         
     def update_total_amount(self):
@@ -665,25 +698,48 @@ class AddPurchaseWidget(QWidget):
         
     
 
-       
+
+    
     def handle_editing_finished(self, combo):
         
         print("Handling Editing Finished")
+
+        text = combo.currentText().strip()
+        if not text:
+            return
+
+        index = combo.findText(text, Qt.MatchFixedString)
+
+        print(f"Editing finished text: {text}, matched index: {index}")
+
+        if index >= 0:
+            combo.setCurrentIndex(index)
+            return
+
+        self.new_product = text
+        self.add_new_product_dialog(combo, new_product=text)
+    
+    
+
+       
+    # def handle_editing_finished(self, combo):
         
-        product = combo
-        index = self.table.indexAt(product.pos())
-        row = index.row()
-        col = index.column()
-        data = product.currentData()
-        text = product.currentText()
+    #     print("Handling Editing Finished")
         
-        print(f"Current data is {data} and text is {text} at row {row}, col {col}")
+    #     product = combo
+    #     index = self.table.indexAt(product.pos())
+    #     row = index.row()
+    #     col = index.column()
+    #     data = product.currentData()
+    #     text = product.currentText()
         
-        if data is None:
-            self.new_product = product.currentText()
+    #     print(f"Current data is {data} and text is {text} at row {row}, col {col}")
+        
+    #     if data is None:
+    #         self.new_product = product.currentText()
             
-            if self.new_product.strip() != "":
-                self.add_new_product_dialog(combo, new_product=self.new_product)
+    #         if self.new_product.strip() != "":
+    #             self.add_new_product_dialog(combo, new_product=self.new_product)
 
         
     
@@ -943,7 +999,7 @@ class AddPurchaseWidget(QWidget):
                         )
         
         
-        if confirmation:
+        if confirmation == QMessageBox.Yes:
             
             db = QSqlDatabase.database()
             db.transaction()
@@ -1441,99 +1497,86 @@ class AddPurchaseWidget(QWidget):
             finally:
                 print("Database connection closed")
         
-      
         
-        
+        elif confirmation == QMessageBox.No:
+            return
+    
+    
+    
+    
     def load_product_suggestions(self, item, completer):
         
-        item = item
-        completer = completer
-        current_text = item.currentText() 
-        print("Current Text is: ", current_text)
-        
-        if current_text == '':
+        current_text = item.lineEdit().text().strip()
+        print("Current Text is:", current_text)
+
+        if not current_text:
+            item.blockSignals(True)
+            item.clear()
             item.setCurrentIndex(-1)
-            return 
-        
-        query = QSqlQuery()
-        query.prepare("SELECT id, display_name FROM product WHERE display_name LIKE ? LIMIT 10")
-        print("Current Text is: ", current_text)
-        query.addBindValue(f"%{current_text}%")
-        
-        products = []
-        
-        if not query.exec():
-            
-            print("Something wrong happened...")
-        
-        else:
-        
-            while query.next():
-                
-                product_id = query.value(0)
-                name = query.value(1)
-                
-                label = f"{name}".strip()
-                products.append(label)
-                item.addItem(label, product_id)
-                
-        print(products)
+            item.blockSignals(False)
+            return
 
-        
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        
-        data = products
-        model = QStringListModel()
-        model.setStringList(data)
-        
-        
-        completer.setModel(model)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        item.setCompleter(completer)
-        
-        completer.highlighted[str].connect(partial(self.on_completer_highlighted, item=item))
-
-        print("Setting Current Text")
-        item.lineEdit().setText(current_text)        
-        
-
-    def on_completer_highlighted(self, text, item):
-        
-        index = item.findText(text, Qt.MatchFixedString)
-        if index >= 0:
-            item.setCurrentIndex(index) 
-        
-        
-
-    def on_item_selected(self, item):
-        
-        text = item.currentText()
-        data = item.currentData()
-
-        
-        print("Selected text is: ",text, data)
-        data = int(data)
-        
-        
-        print("Data is: ", data)
-        
         query = QSqlQuery()
         query.prepare("""
-            SELECT * FROM product
-            WHERE id = ? """)
-        
-        query.addBindValue(data)
-        
-        if not query.exec():
-            
-            print("Cannot Get the product")
-            
-        else:
-            
-            print("Got the product")
-                
-                
+            SELECT id, display_name
+            FROM product
+            WHERE display_name LIKE ?
+            LIMIT 10
+        """)
+        query.addBindValue(f"%{current_text}%")
 
+        products = []
+        product_data = []
+
+        if not query.exec():
+            print("Something wrong happened...", query.lastError().text())
+            return
+
+        while query.next():
+            product_id = query.value(0)
+            name = str(query.value(1)).strip()
+
+            products.append(name)
+            product_data.append((name, product_id))
+
+        item.blockSignals(True)
+        item.clear()
+
+        for name, product_id in product_data:
+            item.addItem(name, product_id)
+
+        item.setCurrentIndex(-1)
+        item.lineEdit().setText(current_text)
+        item.blockSignals(False)
+
+        model = QStringListModel(products)
+        completer.setModel(model)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+
+        # force popup to appear
+        completer.complete()
+        
+    
+    
+      
+    def on_completer_selected(self, text, item):
+        
+        text = text.strip()
+
+        index = item.findText(text, Qt.MatchFixedString)
+        if index < 0:
+            return
+
+        item.setCurrentIndex(index)
+        item.lineEdit().setText(text)
+        
+        # move to next field
+        self.qty_edit.setFocus()
+        self.qty_edit.selectAll()
+    
+    
+    
+    
 
 
     def on_cell_focus(self, row, column):
@@ -1581,31 +1624,6 @@ class AddPurchaseWidget(QWidget):
        
 
 
-    def pay_method_change(self):
-        """
-        This method is called when the payment method is changed.
-        It checks if payment method is available for that supplier.
-        """
-        # Get the selected payment method
-        payment_method = self.payment_method_combo.currentText()
-        
-        # get the supplier_id
-        supplier_id = self.supplier_edit.currentData()
-        supplier_id = int(supplier_id)
-        
-        
-        # Check if payment method is available for that supplier
-        if payment_method == 'Bank Transfer':
-            self.check_bank_transfer(supplier_id)
-            
-        if payment_method == 'JazzCash':
-            self.check_jazzcash(supplier_id)
-
-        if payment_method == "EasyPaisa":
-            self.check_easypaisa(supplier_id)
-            
-
-
     def add_new_product_dialog(self, combo, new_product=None):
         
         dialog = ImportDialog(self)
@@ -1622,31 +1640,59 @@ class AddPurchaseWidget(QWidget):
             item_packing = dialog.packing_input.text()
             
             display_name = f"{item_name} {item_form} {item_packing}"
+            print("The display name is: ", display_name)
             
-            brand = dialog.brand_input.text()
+            manufacturer = dialog.brand_input.currentData()
             packsize = dialog.packsize_input.text()
             saleprice = dialog.saleprice_input.text()
             
             # Insert Data into Database
             
-            query = QSqlQuery()
-            query.prepare("""
-                INSERT INTO product (display_name, brand )
-                VALUES (?, ?)
+            brand_name = item_name.strip() if item_name.strip() else None
+            if brand_name is None:
+                raise Exception("Brand is required for a new product.")
+
+            product_query = QSqlQuery()
+            product_query.prepare("""
+                INSERT INTO product (
+                    display_name,
+                    code,
+                    reg_no,
+                    generic_name,
+                    brand,
+                    form,
+                    strength,
+                    packing,
+                    pack_size,
+                    manufacturer_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
             
-            query.addBindValue(display_name)
-            query.addBindValue(brand)
+            code = ''
+            reg_no = ''
+            generic_name = ''
+            packing = ''
             
-            if not query.exec():
-                
-                QMessageBox.critical(None, "Error", query.lastError().text())
-                print("Error inserting product:", query.lastError().text())
-                
+            packsize = int(packsize)
+            product_query.addBindValue(display_name)
+            product_query.addBindValue(code)
+            product_query.addBindValue(reg_no)
+            product_query.addBindValue(generic_name)
+            product_query.addBindValue(brand_name)
+            product_query.addBindValue(item_form)
+            product_query.addBindValue(item_packing)
+            product_query.addBindValue(packing)
+            product_query.addBindValue(packsize)
+            product_query.addBindValue(manufacturer)
+
+            if not product_query.exec():
+                raise Exception(product_query.lastError().text())
+
             else:
                 
                 QMessageBox.information(None, "Success", "Product added successfully")
-                product_id = query.lastInsertId()
+                product_id = product_query.lastInsertId()
                 print("New Product ID is: ", product_id)
                 
                 # Create Empty Stock Record
@@ -1761,13 +1807,27 @@ class ImportDialog(QDialog):
         item_layout.addWidget(self.name_input, stretch=3)
 
         # Form input with stretch factor 1
+        forms = [
+            "AEROSOL","BALM","BUBBLE GUM","CAP","CAPLET","CAPS SR","CREAM","DRAGEES","DROPS",
+            "DRY SUSP","E AND E DROPS","EAR DROPS","ELIXIR","EMUL","ENEMA","EXPC","EYE DROPS",
+            "EYE GEL","EYE OINT","EYE SUSP","FORM","GEL","GRANULES","INF","INHALER","INJ",
+            "INJ CS","INJ DS","INJ IM/IV","INJ SC","INJ SR","INJ-IM","INJ-IV","LINCTUS",
+            "LINIMENT","LIQUID","LOTION","LOZENGES","MIXTURE","MOUTH SPRAY","MOUTH WASH",
+            "NASAL DROPS","NASAL SPRAY","NEBULISER","OIL","OINT","ORAL SOLN","PAINT",
+            "PASTE","PATCHES","PELLETS","POULTICE","POWDER","ROTA CAPS","SACHET","SCRUB",
+            "SHAMPOO","SOAP","SOFT CAPS","SOLN","SPRAY","SUPPOSITORIES","SUSP","SUSP DS",
+            "SYP","SYRINGE","TAB","TAB ENTERIC COATED","TABS CHEWABLE","TABS DS","TABS EFR",
+            "TABS SL","TABS SR","TINC","TOOTH PASTE","VAG CREAM","VAG OVULE","VAG PESSARIES","VAG TABS"
+        ]
+
+        forms = sorted([f.title() for f in forms])
         self.form_input = QComboBox()
-        self.form_input.addItems(['Tabs', 'Caps', 'Syrup', 'Inj'])
+        self.form_input.addItems(forms)
         item_layout.addWidget(self.form_input, stretch=1)
 
         # Packing input with stretch factor 1
         self.packing_input = QLineEdit()
-        self.packing_input.setPlaceholderText('packing')
+        self.packing_input.setPlaceholderText('dose')
         item_layout.addWidget(self.packing_input, stretch=1)
         
         
@@ -1781,7 +1841,8 @@ class ImportDialog(QDialog):
         
         brand_label = QLabel("Brand")
         spacer = QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-        self.brand_input = QLineEdit()
+        self.brand_input = QComboBox()
+        self.setup_manufacturer_combobox(self.brand_input)
         
         brand_layout.addWidget(brand_label, 2)
         brand_layout.addItem(spacer)
@@ -1822,11 +1883,77 @@ class ImportDialog(QDialog):
         self.layout.addLayout(price_layout)
         
         
+    def populate_manufacturer_combobox(self, combo: QComboBox):
         
+        combo.clear()
+
+        query = QSqlQuery("""
+            SELECT id, name
+            FROM manufacturer
+            WHERE status = 'active'
+            ORDER BY name
+        """)
+
+        while query.next():
+            manufacturer_id = query.value(0)
+            manufacturer_name = query.value(1)
+            combo.addItem(manufacturer_name, manufacturer_id)
+    
         
          
-    
+    def setup_manufacturer_combobox(self, combo: QComboBox):
+        
+        combo.setEditable(True)
+        combo.lineEdit().focusInEvent = lambda event, le=combo.lineEdit(): (
+            le.selectAll(),
+            QLineEdit.focusInEvent(le, event)
+        )
+        combo.setInsertPolicy(QComboBox.NoInsert)
 
+        self.populate_manufacturer_combobox(combo)
+
+        # avoid duplicate connections if method is called again
+        try:
+            combo.lineEdit().editingFinished.disconnect()
+        except:
+            pass
+
+        combo.lineEdit().editingFinished.connect(
+            lambda: self.handle_new_manufacturer_entry(combo)
+        )
+
+
+    def handle_new_manufacturer_entry(self, combo: QComboBox):
+        
+        name = combo.currentText().strip()
+
+        if not name:
+            return
+
+        # check if already exists in combobox
+        for i in range(combo.count()):
+            if combo.itemText(i).strip().lower() == name.lower():
+                combo.setCurrentIndex(i)
+                return
+
+        # insert new manufacturer
+        query = QSqlQuery()
+        query.prepare("""
+            INSERT INTO manufacturer (name)
+            VALUES (?)
+        """)
+        query.addBindValue(name)
+
+        if not query.exec():
+            print("Failed to insert manufacturer:", query.lastError().text())
+            return
+
+        new_id = query.lastInsertId()
+
+        # add directly instead of reloading everything
+        combo.addItem(name, new_id)
+        combo.setCurrentIndex(combo.count() - 1)
+        print("New Manufacturer added .. right about now...")
 
 
 

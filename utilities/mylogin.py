@@ -359,7 +359,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.addStretch()  # Push buttons to the top
 
     
-
+        self.apply_role_permissions()
 
 
 
@@ -615,7 +615,6 @@ class MainWindow(QMainWindow):
     
         
     def set_reports(self, widget, layout):
-        print("Setting Reports apge by clikcing")
         layout.setCurrentWidget(widget)
     
     
@@ -626,6 +625,55 @@ class MainWindow(QMainWindow):
     # Function to toggle sidebar visibility
     # This function is called when the hamburger button is toggled
     # It shows the sidebar when the button is checked and hides it when unchecked   
+    
+    
+    
+    def apply_role_permissions(self):
+
+        if not Permissions.has_permission("dashboard"):
+            self.dashboard_button.hide()
+
+        if not Permissions.has_permission("supplier.view"):
+            self.supplier_button.hide()
+
+        if not Permissions.has_permission("rep.view"):
+            self.salesrep_button.hide()
+
+        if not Permissions.has_permission("purchase.view"):
+            self.purchase_button.hide()
+
+        if not Permissions.has_permission("customer.view"):
+            self.customer_button.hide()
+
+        if not Permissions.has_permission("employee.view"):
+            self.employee_button.hide()
+
+        if not Permissions.has_permission("transactions.view"):
+            self.transaction_button.hide()
+
+        if not Permissions.has_permission("purchasereturn.view"):
+            self.purchase_return.hide()
+
+        if not Permissions.has_permission("salesreturn.view"):
+            self.sales_return.hide()
+
+        if not Permissions.has_permission("reports.view"):
+            self.reports_button.hide()
+
+        if not Permissions.has_permission("sales.create"):
+            self.sales_button.hide()
+            
+        if not Permissions.has_permission("product.create"):
+            self.product_button.hide()
+            
+        if not Permissions.has_permission("expense.create"):
+            self.expense_button.hide()
+            
+        if not Permissions.has_permission("business.view"):
+            self.business_button.hide()
+            
+            
+
 
 
     def toggle_sidebar(self, sidebar, button):
