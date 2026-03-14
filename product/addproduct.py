@@ -283,6 +283,25 @@ class AddProductWidget(QWidget):
         self.name_input = QComboBox()
         self.name_input.setEditable(True)
         
+        self.name_input.setStyleSheet("""
+            QComboBox QAbstractItemView {
+                background-color: white;
+                color: black;
+                selection-background-color: #0078d7;
+                selection-color: white;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 0px;
+            }
+
+            QComboBox::down-arrow {
+                image: none;
+            }
+            """)
+        
+        line_edit = self.name_input.lineEdit()
+        line_edit.textEdited.connect(self.force_uppercase)
         
         
         self.completer = QCompleter()
@@ -327,6 +346,22 @@ class AddProductWidget(QWidget):
         self.form = QComboBox()
         self.form.clear()
         self.form.addItems(forms)
+        self.form.setStyleSheet("""
+            QComboBox QAbstractItemView {
+                background-color: white;
+                color: black;
+                selection-background-color: #0078d7;
+                selection-color: white;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 0px;
+            }
+
+            QComboBox::down-arrow {
+                image: none;
+            }
+            """)
         
         
         self.form.setEditable(True)
@@ -334,6 +369,22 @@ class AddProductWidget(QWidget):
         
         self.brand_input = QComboBox()
         self.setup_manufacturer_combobox(self.brand_input)
+        self.brand_input.setStyleSheet("""
+            QComboBox QAbstractItemView {
+                background-color: white;
+                color: black;
+                selection-background-color: #0078d7;
+                selection-color: white;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 0px;
+            }
+
+            QComboBox::down-arrow {
+                image: none;
+            }
+            """)
         
         self.formula_input = QLineEdit()
         self.code_input = QLineEdit()
@@ -367,7 +418,7 @@ class AddProductWidget(QWidget):
         
         formula_label = QLabel("Formula")
         formula_code_row.addWidget(formula_label, 1)
-        formula_code_row.addWidget(self.formula_input, 5)
+        formula_code_row.addWidget(self.formula_input, 6)
         
         code_label = QLabel("Code")
         code_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -409,7 +460,7 @@ class AddProductWidget(QWidget):
         batch_row.addWidget(quantity_label, 1)
         batch_row.addWidget(self.quantity_input, 2)
         
-        unit_cost_label = QLabel("Total Cost")
+        unit_cost_label = QLabel("Unit Cost")
         unit_cost_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.unit_cost_input = QLineEdit()
         batch_row.addWidget(unit_cost_label, 1)
@@ -477,7 +528,11 @@ class AddProductWidget(QWidget):
         self.layout.addSpacing(20)
         
         
-
+    def force_uppercase(self, text):
+        line_edit = self.name_input.lineEdit()
+        line_edit.blockSignals(True)
+        line_edit.setText(text.upper())
+        line_edit.blockSignals(False)
 
     
     def populate_manufacturer_combobox(self, combo: QComboBox):
@@ -538,7 +593,7 @@ class AddProductWidget(QWidget):
         # --- Pack Price, Pack Size, Unit Price on same row ---
         pricing_row = QHBoxLayout()
         
-        pack_price_label = QLabel("Pack Price")
+        pack_price_label = QLabel("Pack Sale Price")
         self.pack_price_input = QLineEdit()
         pricing_row.addWidget(pack_price_label, 1)
         pricing_row.addWidget(self.pack_price_input, 2)
@@ -547,7 +602,7 @@ class AddProductWidget(QWidget):
         self.pack_size_input.setPlaceholderText("Pack Size")
         pricing_row.addWidget(self.pack_size_input, 1)
         
-        unit_price_label = QLabel("Unit Price:")
+        unit_price_label = QLabel("Unit Sale Price:")
         unit_price_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.unit_price_input = QLabel()
         
@@ -603,6 +658,10 @@ class AddProductWidget(QWidget):
 
         data = self.name_input.itemData(index)
         print("Selected text is:", text, data)
+        
+        
+        # move the cursor to qty field
+        self.qty_input.setFocus()
     
     
     
@@ -725,7 +784,7 @@ class AddProductWidget(QWidget):
                 form = self.form.currentText().strip() or None
                 strength = self.dosage.text()
                 packing = ''
-                
+                display_name = f"{brand_name} {form} {strength}"
                 product_query.addBindValue(display_name)
                 product_query.addBindValue(code)
                 product_query.addBindValue(reg_no)
@@ -863,10 +922,12 @@ class AddProductWidget(QWidget):
 
     def clear_product_fields(self):
 
-        self.name_input.clear()
+        self.name_input.setCurrentIndex(-1)
         self.code_input.clear()
         self.brand_input.clear()
         self.pack_size_input.clear()
+        
+        self.qty_input.clear()
         
         self.formula_input.clear()
         self.batch_input.clear()
@@ -874,6 +935,7 @@ class AddProductWidget(QWidget):
         
         self.unit_cost_input.clear()
         self.pack_price_input.clear()
+        self.unit_price_input.setText('0.0')
         
         
     

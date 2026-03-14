@@ -314,8 +314,12 @@ class AddPurchaseReturnWidget(QWidget):
         product = QComboBox()
         product.setPlaceholderText("select product")
         
+        
+        
         product.setEditable(True)
         product.wheelEvent = lambda event: event.ignore()
+        
+        
         
         
         
@@ -377,7 +381,13 @@ class AddPurchaseReturnWidget(QWidget):
 
         self.update_table_height()
         
-        
+    
+    
+    
+    
+    
+            
+                
 
     def remove_row(self, target_row):
         self.table.removeRow(target_row)
@@ -943,7 +953,7 @@ class AddPurchaseReturnWidget(QWidget):
         print("Product id is: ", product_id)
 
         stock_query = QSqlQuery()
-        stock_query.prepare("SELECT batch_no FROM batch WHERE product_id = ?")
+        stock_query.prepare("SELECT batch_no FROM batch WHERE product_id = ? and source = 'PURCHASE' ")
         stock_query.addBindValue(product_id)
         
 
@@ -975,33 +985,7 @@ class AddPurchaseReturnWidget(QWidget):
                 
             print(str(e))
         
-        
-
-
-    # def on_item_selected(self, item):
-        
-    #     text = item.currentText()
-    #     data = item.currentData()
-
-        
-    #     print("Selected text is: ",text, data)
-    #     data = int(data)
-        
-    #     query = QSqlQuery()
-    #     query.prepare("""
-    #         SELECT * FROM product
-    #         WHERE id = ? """)
-        
-    #     query.addBindValue(data)
-        
-    #     if not query.exec():
-            
-    #         print("Cannot Get the product")
-            
-    #     else:
-            
-    #         print("Got the product")
-                
+    
                 
 
 

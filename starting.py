@@ -1,6 +1,15 @@
 
 import os
 import csv
+import sys
+
+def resource_path(relative_path: str) -> str:
+    base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    return os.path.join(base_path, relative_path)
+
+
+master_products_file = resource_path("master_products.csv")
+manufacturers_file = resource_path("manufacturers.csv")
 
 
 # Fix Wayland compositor issue (especially on Chromebooks / Crostini)
@@ -742,7 +751,7 @@ class AuthWindow(QMainWindow):
 
 
 
-    def populate_manufacturers_from_csv(self, file_path: str = "manufacturers.csv"):
+    def populate_manufacturers_from_csv(self, file_path = resource_path("manufacturers.csv")):
         
         if not os.path.exists(file_path):
             print(f"Manufacturer file not found: {file_path}")
@@ -805,7 +814,7 @@ class AuthWindow(QMainWindow):
         return " ".join(parts)
 
 
-    def populate_products_from_csv(self, file_path: str = "master_products.csv"):
+    def populate_products_from_csv(self, file_path = resource_path("master_products.csv")):
         
         if not os.path.exists(file_path):
             print(f"Product file not found: {file_path}")

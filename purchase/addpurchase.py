@@ -483,6 +483,9 @@ class AddPurchaseWidget(QWidget):
         self.item.wheelEvent = lambda event: event.ignore()
         self.item.setPlaceholderText("select product")
         self.item.setEditable(True)
+        
+        line_edit = self.item.lineEdit()
+        line_edit.textEdited.connect(self.force_uppercase)
 
         line_edit = SelectAllLineEdit()
         self.item.setLineEdit(line_edit)
@@ -1719,6 +1722,18 @@ class AddPurchaseWidget(QWidget):
             
         else:
             print("Import Dialog Cancelled")
+
+
+    def force_uppercase(self, text):
+        line_edit = self.name_input.lineEdit()
+        line_edit.blockSignals(True)
+        line_edit.setText(text.upper())
+        line_edit.blockSignals(False)
+
+
+
+
+
 
 
 

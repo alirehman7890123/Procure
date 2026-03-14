@@ -242,43 +242,16 @@ class CreateSalesWidget(QWidget):
 
 
 
-        # entry_line = QHBoxLayout()
-        
-        # self.item = QComboBox()
-        # self.item.wheelEvent = lambda event: event.ignore()
-        
-        # self.item.setPlaceholderText("select product")
-        # self.item.setEditable(True)
-        
-        # completer = QCompleter()
-        # self.item.setCompleter(completer)
-        # completer.setCompletionMode(QCompleter.PopupCompletion)
-        
-        # self.item.lineEdit().completer().popup().setStyleSheet("""
-        #     QListView {
-        #         padding: 5px;
-        #         background-color: white;
-        #         border: 1px solid gray;
-        #         color: #333;
-        #     }
-        #     QListView::item {
-        #         padding: 6px 10px;
-        #     }
-        #     QListView::item:selected {
-        #         background-color: #0078d7;
-        #         color: white;
-        #     }
-        # """)
-
-
-        # self.item.lineEdit().textEdited.connect(lambda: self.load_product_suggestions(self.item, completer))
-        
+       
         
         
         self.item = QComboBox()
         self.item.wheelEvent = lambda event: event.ignore()
         self.item.setPlaceholderText("select product")
         self.item.setEditable(True)
+        
+        line_edit = self.item.lineEdit()
+        line_edit.textEdited.connect(self.force_uppercase)
 
         line_edit = SelectAllLineEdit()
         self.item.setLineEdit(line_edit)
@@ -2418,83 +2391,6 @@ class CreateSalesWidget(QWidget):
 
     
         
-    # def load_product_suggestions(self, item, completer):
-        
-    #     print("Loading Product Suggestions")
-    #     item = item
-    #     completer = completer
-    #     current_text = item.currentText().strip()
-    #     print("Current Text is: ", current_text)
-        
-    #     if current_text == '':
-    #         return 
-
-            
-    #     if current_text and current_text.isdigit():
-            
-    #         self._pending_scan = (current_text, item)
-    #         self.scan_timer.start(150) # wait 150 ms before running the scan
-            
-    #         return
-            
-            
-        
-    #     query = QSqlQuery()
-    #     query.prepare("""
-    #                     SELECT p.id, p.display_name, pp.unit_price
-    #                     FROM product p
-    #                     LEFT JOIN price_pack pp ON pp.product_id = p.id
-    #                     WHERE p.display_name LIKE ?
-    #                     LIMIT 10
-    #                 """)
-    #     print("Current Text is: ", current_text)
-    #     query.addBindValue(f"%{current_text}%")
-        
-    #     products = []
-        
-        
-    #     if not query.exec():
-            
-    #         print("Something wrong happened...", query.lastError().text())
-        
-    #     else:
-        
-    #         while query.next():
-                
-    #             product_id = query.value(0)
-                
-    #             name = query.value(1)
-    #             unit_price = query.value(2) or 0.0
-                
-    #             print("Product suggestion: ", product_id, name, unit_price)
-                
-    #             label = f"{name}".strip()
-    #             print("Label is: ", label)
-    #             products.append(label)
-    #             item.addItem(label, {
-    #                 "product_id": product_id,
-    #                 "unit_price": unit_price
-    #             })
-                
-
-    #     print(products)
-        
-    #     completer.setCaseSensitivity(Qt.CaseInsensitive)
-        
-    #     data = products
-    #     model = QStringListModel()
-    #     model.setStringList(data)
-        
-        
-    #     completer.setModel(model)
-    #     completer.setCaseSensitivity(Qt.CaseInsensitive)
-    #     item.setCompleter(completer)
-        
-    #     completer.activated[str].connect(partial(self.on_completer_highlighted, item=item))
-        
-        
-    #     print("Setting Current Text")
-    #     item.lineEdit().setText(current_text)        
     
     
     def load_product_suggestions(self, item, completer):
@@ -3012,7 +2908,11 @@ class CreateSalesWidget(QWidget):
 
 
 
-    
+    def force_uppercase(self, text):
+        line_edit = self.name_input.lineEdit()
+        line_edit.blockSignals(True)
+        line_edit.setText(text.upper())
+        line_edit.blockSignals(False)
     
     
 
