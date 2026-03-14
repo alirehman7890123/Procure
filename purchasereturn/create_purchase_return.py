@@ -1,11 +1,10 @@
 
-from PySide6.QtWidgets import QWidget, QCompleter, QHBoxLayout, QFrame , QDateEdit,  QVBoxLayout, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
-from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, QDateTime, QTimer, Signal
+from PySide6.QtWidgets import QWidget, QCompleter, QHBoxLayout, QFrame , QVBoxLayout, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
+from PySide6.QtCore import QFile, Qt, QStringListModel, QTimer, Signal
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
-from PySide6.QtGui import QPalette, QColor, QKeyEvent
+from PySide6.QtGui import  QKeyEvent
 from functools import partial
-import csv    
-import os
+
 import math
 from utilities.stylus import load_stylesheets
 
