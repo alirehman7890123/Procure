@@ -287,7 +287,7 @@ class AddProductWidget(QWidget):
             QComboBox QAbstractItemView {
                 background-color: white;
                 color: black;
-                selection-background-color: #0078d7;
+                selection-background-color: #5A9EC9;
                 selection-color: white;
             }
             QComboBox::drop-down {
@@ -320,7 +320,7 @@ class AddProductWidget(QWidget):
                 padding: 6px 10px;
             }
             QListView::item:selected {
-                background-color: #0078d7;
+                background-color: #5A9EC9;
                 color: white;
             }
         """)
@@ -350,7 +350,7 @@ class AddProductWidget(QWidget):
             QComboBox QAbstractItemView {
                 background-color: white;
                 color: black;
-                selection-background-color: #0078d7;
+                selection-background-color: #5A9EC9;
                 selection-color: white;
             }
             QComboBox::drop-down {
@@ -373,7 +373,7 @@ class AddProductWidget(QWidget):
             QComboBox QAbstractItemView {
                 background-color: white;
                 color: black;
-                selection-background-color: #0078d7;
+                selection-background-color: #5A9EC9;
                 selection-color: white;
             }
             QComboBox::drop-down {
@@ -486,7 +486,7 @@ class AddProductWidget(QWidget):
             }
 
             QCalendarWidget QAbstractItemView {
-                selection-background-color: #0078d7;
+                selection-background-color: #5A9EC9;
                 selection-color: white;
                 color: black;
             }

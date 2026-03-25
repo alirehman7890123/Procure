@@ -98,78 +98,86 @@ class ExpenseListWidget(QWidget):
         
         super().showEvent(event)
         print("Widget shown — refreshing data")
-        self.load_customers_into_table()
+        self.load_expenses_into_table()
         
 
 
 
-    def load_customers_into_table(self):
-        
-        
+    def load_expenses_into_table(self):
         query = QSqlQuery()
-        query.exec("SELECT id, category, title, amount, creation_date FROM expense")
+        query.prepare("""
+            SELECT id, category, title, amount, creation_date
+            FROM expense
+            ORDER BY id DESC
+        """)
 
-        self.table.setRowCount(0)  # Clear existing rows
+        if not query.exec():
+            print("Error loading expenses:", query.lastError().text())
+            return
+
+        self.table.setRowCount(0)
 
         row = 0
-        
-        while query.next():
-            
-            self.table.insertRow(row)
-            
-            row_no = row + 1
-            exp_id = int(query.value(0))
-            category = query.value(1)
-            title = query.value(2)
-            amount = query.value(3)
-            creation_date = query.value(4)
-            
-            if isinstance(creation_date, QDateTime):
-                creation_date = creation_date.date().toString("dd-MM-yyyy")
-            elif isinstance(creation_date, QDate):
-                creation_date = creation_date.toString("dd-MM-yyyy")
-            else:
-                creation_date = str(creation_date)
 
-            row_no_item = QTableWidgetItem(str(row_no))
-            category = QTableWidgetItem(category)
-            title = QTableWidgetItem(title)
-            amount = QTableWidgetItem(amount)
-            creation_date = QTableWidgetItem(creation_date)
+        while query.next():
+            self.table.insertRow(row)
+
+            exp_id = int(query.value(0))
+            category_val = str(query.value(1) or "")
+            title_val = str(query.value(2) or "")
+            amount_val = query.value(3)
+            creation_date_val = query.value(4)
+
+            # format amount safely
+            try:
+                amount_text = f"{float(amount_val):.2f}"
+            except (TypeError, ValueError):
+                amount_text = "0.00"
+
+            # format date safely
+            if isinstance(creation_date_val, QDateTime):
+                creation_date_text = creation_date_val.toString("dd-MM-yyyy")
+            elif isinstance(creation_date_val, QDate):
+                creation_date_text = creation_date_val.toString("dd-MM-yyyy")
+            else:
+                creation_date_text = str(creation_date_val or "")
+
+            row_no_item = QTableWidgetItem(str(row + 1))
+            category_item = QTableWidgetItem(category_val)
+            title_item = QTableWidgetItem(title_val)
+            amount_item = QTableWidgetItem(amount_text)
+            creation_date_item = QTableWidgetItem(creation_date_text)
 
             self.table.setItem(row, 0, row_no_item)
-            self.table.setItem(row, 1, category)
-            self.table.setItem(row, 2, title)
-            self.table.setItem(row, 3, amount)
-            self.table.setItem(row, 4, creation_date)
-            
+            self.table.setItem(row, 1, category_item)
+            self.table.setItem(row, 2, title_item)
+            self.table.setItem(row, 3, amount_item)
+            self.table.setItem(row, 4, creation_date_item)
 
-            detail = QPushButton('Details')
+            detail = QPushButton("Details")
             detail.setCursor(Qt.PointingHandCursor)
             detail.setStyleSheet("""
-                    QPushButton {
-                        background-color: transparent;
-                        color: #333;
-                        padding: 4px 12px;
-                        border-radius: 2px;
-                        font-weight: 600;
-                    }
-                    QPushButton:hover {
-                        background-color: #340238;
-                        color: #fff;
-                    }
-                    QPushButton:pressed {
-                        background-color: #47034E;
-                        color: #fff;
-                    }
-                
+                QPushButton {
+                    background-color: transparent;
+                    color: #333;
+                    padding: 4px 12px;
+                    border-radius: 2px;
+                    font-weight: 600;
+                }
+                QPushButton:hover {
+                    background-color: #244A62;
+                    color: #fff;
+                }
+                QPushButton:pressed {
+                    background-color: #2F5D7C;
+                    color: #fff;
+                }
             """)
-            
-            self.table.setCellWidget(row, 5, detail)
+
             detail.clicked.connect(partial(self.detailpagesignal.emit, exp_id))
-            
-            row += 1
-        
+            self.table.setCellWidget(row, 5, detail)
+
+            row += 1 
 
 
 

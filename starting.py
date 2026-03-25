@@ -89,7 +89,7 @@ class AuthWindow(QMainWindow):
         companyinfo_layout.setSpacing(0)
         companyinfo.setMinimumWidth(600)
         
-        companyinfo.setStyleSheet("background-color: #000755;") 
+        companyinfo.setStyleSheet("background-color: #163B5C;") 
         
         
         
@@ -124,7 +124,7 @@ class AuthWindow(QMainWindow):
         
             QPushButton {
                 padding: 15px 0;
-                background-color: #000755;
+                background-color: #163B5C;
                 padding-left: 30px; 
                 font-family: roboto;
                 border:2px solid #333;
@@ -134,12 +134,12 @@ class AuthWindow(QMainWindow):
             }
             QPushButton:hover {
                 background-color: #fff;
-                color: #4B0082;
+                color: #2F5D7C;
                 font-weight: 600;
                 
             }
             QPushButton:pressed {
-                background-color: #000755;
+                background-color: #163B5C;
                 color: #fff;
             }
             
@@ -179,42 +179,6 @@ class AuthWindow(QMainWindow):
         
     
 
-    def update_batch_status(self):
-        
-        today = QDate.currentDate()
-
-        query = QSqlQuery()
-        # Get all batches with expiry dates
-        if not query.exec("SELECT id, expiry FROM batch"):
-            print("Query failed:", query.lastError().text())
-            return
-
-        while query.next():
-            batch_id = query.value(0)
-            expiry = query.value(1)  # QDate if DB driver supports, else string
-
-            if isinstance(expiry, str):
-                expiry = QDate.fromString(expiry, "yyyy-MM-dd")  # adjust format
-
-            # Calculate days difference
-            days_left = today.daysTo(expiry)
-
-            if days_left < 0:
-                status = "expired"
-            elif days_left <= 30:
-                status = "near-expiry"
-            else:
-                status = "valid"
-
-            # Update status in DB
-            update_query = QSqlQuery()
-            update_query.prepare("UPDATE batch SET status = ? WHERE id = ?")
-            update_query.addBindValue(status)
-            update_query.addBindValue(batch_id)
-
-            if not update_query.exec():
-                print(f"Failed to update batch {batch_id}: {update_query.lastError().text()}")
-
     
     
     
@@ -240,80 +204,19 @@ class AuthWindow(QMainWindow):
                 
                 self.settings.setValue("last_username", username)
                 
-                db = QSqlDatabase.database()
-                db.transaction()
-
-                try:
-                    self.ensure_additional_charges_column()
-                    db.commit()
-                except Exception as e:
-                    db.rollback()
-                    print("Migration failed:", e)
                 
                 
-                # Checking Products Expiry Status
-                self.update_batch_status()
+                
+                
                 
                 # Setting username 
                 QApplication.instance().setProperty("username", username)
                 
-                
-                self.create_supplier_table()
-                self.create_rep_table()
-                
-                self.create_manufacturer_table()
-                
-                self.create_product_table()
-                self.create_batch_table()
-                self.create_price_pack_table()
-                
-                self.create_inventory_adjustment_table()
-                self.create_accounting_settings_table()
-                
-                self.create_business_table()
-                self.create_purchase_table()
-                self.create_purchaseitem_table()
-                self.create_sales_table()
-                self.create_salesitem_table()
-                self.create_sold_batch_table()
-                self.create_employee_table()
-                self.create_customer_table()
-                self.create_supplier_transaction_table()
-                self.create_customer_transaction_table()
-                self.create_purchase_return_table()
-                self.create_purchase_return_item_table()
-                self.create_salesreturn_table()
-                self.create_salesreturn_item_table()
-                self.create_expense_table()
-                self.create_holdsale_table()
-                self.create_holdsale_items_table()
-                
+                self.initialize_database()
                 
                 # Create Business
                 
-                print("Inserting Business Record - Empty Now")
                 
-                business_query = QSqlQuery()
-                business_query.prepare(""" 
-                                       INSERT INTO business(businessname, address, contact, email, website, license, ntn) 
-                                       VALUES(?, ?, ?, ?, ?, ?, ?)
-                                       """ )
-                
-                business_query.addBindValue("")
-                business_query.addBindValue("")
-                business_query.addBindValue("")
-                business_query.addBindValue("")
-                business_query.addBindValue("")
-                business_query.addBindValue("")
-                business_query.addBindValue("")
-                
-                
-                
-                if business_query.exec():
-                    print("Business Record created")
-                else:
-                    print("Business Creation Failed")
-                    print(business_query.lastError().text())
                 
 
                 
@@ -331,12 +234,115 @@ class AuthWindow(QMainWindow):
                 self.password.clear()
                 self.username.setFocus()
             
+    
+    
+    def table_exists(self, table_name):
+        
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name = ?
+        """)
+        query.addBindValue(table_name)
+
+        if not query.exec():
+            print("table_exists error:", query.lastError().text())
+            return False
+
+        return query.next()
+
+    
+    def required_tables_exist(self):
+        self.create_expense_table()
+        required_tables = [
+            "expense",
+            "supplier_transaction",
+            "supplier",
+            "manufacturer",
+            "product",
+            "batch",
+            "sales",
+            "purchase",
+            "daily_session",
+        ]
+
+        for table_name in required_tables:
+            if not self.table_exists(table_name):
+                return False
+
+        return True
+    
+           
             
-            
-            
-            
-            
-            
+    def initialize_database(self):
+        
+        if self.required_tables_exist():
+            print("Tables already exist. Skipping creation.")
+            self.create_price_pack_table()
+            self.create_price_changes_table()
+            return
+
+        print("First run detected. Creating tables...")
+
+        self.create_daily_session_table()
+        self.create_supplier_table()
+        self.create_rep_table()
+        
+        self.create_manufacturer_table()
+        
+        self.create_product_table()
+        self.create_batch_table()
+        self.create_price_pack_table()
+        self.create_price_changes_table()
+        self.populate_products_from_csv()
+        
+        self.create_inventory_adjustment_table()
+        self.create_accounting_settings_table()
+        
+        self.create_business_table()
+        self.create_purchase_table()
+        self.create_purchaseitem_table()
+        self.create_sales_table()
+        self.create_salesitem_table()
+        self.create_sold_batch_table()
+        self.create_employee_table()
+        self.create_customer_table()
+        self.create_supplier_transaction_table()
+        self.create_customer_transaction_table()
+        self.create_purchase_return_table()
+        self.create_purchase_return_item_table()
+        self.create_salesreturn_table()
+        self.create_salesreturn_item_table()
+        self.create_expense_table()
+        self.create_holdsale_table()
+        self.create_holdsale_items_table()
+        
+        print("Inserting Business Record - Empty Now")
+                
+        business_query = QSqlQuery()
+        business_query.prepare(""" 
+                                INSERT INTO business(businessname, address, contact, email, website, license, ntn) 
+                                VALUES(?, ?, ?, ?, ?, ?, ?)
+                                """ )
+        
+        business_query.addBindValue("")
+        business_query.addBindValue("")
+        business_query.addBindValue("")
+        business_query.addBindValue("")
+        business_query.addBindValue("")
+        business_query.addBindValue("")
+        business_query.addBindValue("")
+        
+        if business_query.exec():
+            print("Business Record created")
+        else:
+            print("Business Creation Failed")
+            print(business_query.lastError().text())
+    
+    
+    
+    
         
     def authenticate_user(self, username, password):
         
@@ -516,26 +522,35 @@ class AuthWindow(QMainWindow):
 
     
     
+    def create_daily_session_table(self):
+
+        query = QSqlQuery()
+
+        query.exec("""
+            CREATE TABLE IF NOT EXISTS daily_session (
+                
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                session_date TEXT NOT NULL,
+
+                opening_cash REAL NOT NULL,
+                opening_note TEXT,
+
+                opened_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                system_cash REAL,
+                actual_cash REAL,
+                withdrawal REAL DEFAULT 0,
+                cash_difference REAL,
+
+                closing_note TEXT,
+                closed_at TIMESTAMP,
+
+                status TEXT DEFAULT 'open'
+            )
+        """)
     
     
-    def ensure_additional_charges_column(self):
-        
-        check_query = QSqlQuery()
-        check_query.exec("PRAGMA table_info(sales)")
-
-        columns = []
-        while check_query.next():
-            column_name = check_query.value(1)  # 1 = column name
-            columns.append(column_name)
-
-        if "additional_charges" not in columns:
-            print("Adding new column 'additional_charges'...")
-            alter_query = QSqlQuery()
-            alter_query.exec("ALTER TABLE sales ADD COLUMN additional_charges FLOAT DEFAULT 0;")
-        else:
-            print("Column 'additional_charges' already exists, skipping.")
-
-
         
         
         
@@ -626,6 +641,11 @@ class AuthWindow(QMainWindow):
         return True
 
 
+
+
+    
+        
+        
         
         
     def create_customer_table(self):
@@ -837,10 +857,19 @@ class AuthWindow(QMainWindow):
                 form,
                 strength,
                 packing,
-                pack_size,
                 manufacturer_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """)
+
+        price_query = QSqlQuery(db)
+        price_query.prepare("""
+            INSERT INTO price_pack (
+                product_id,
+                pack_size,
+                pack_price
+            )
+            VALUES (?, ?, ?)
         """)
 
         try:
@@ -875,11 +904,19 @@ class AuthWindow(QMainWindow):
                     query.addBindValue(form)
                     query.addBindValue(strength)
                     query.addBindValue(packing)
-                    query.addBindValue(pack_size)
                     query.addBindValue(manufacturer_id)
 
                     if not query.exec():
                         raise Exception(query.lastError().text())
+
+                    product_id = query.lastInsertId()
+
+                    price_query.addBindValue(product_id)
+                    price_query.addBindValue(pack_size)
+                    price_query.addBindValue(0)
+
+                    if not price_query.exec():
+                        raise Exception(price_query.lastError().text())
 
             if not db.commit():
                 raise Exception("Failed to commit product transaction.")
@@ -927,7 +964,6 @@ class AuthWindow(QMainWindow):
                 form TEXT,                               -- e.g. Tab
                 strength TEXT,                           -- e.g. 10mg
                 packing TEXT,                            -- e.g. 10x10s
-                pack_size INTEGER DEFAULT 1,             -- numeric extracted size
                 manufacturer_id INTEGER,                 -- FK to manufacturer table
                 status TEXT DEFAULT 'active',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -958,7 +994,7 @@ class AuthWindow(QMainWindow):
         print("Indexes created successfully.")
         
         
-        return self.populate_products_from_csv()
+        
         
         
             
@@ -988,6 +1024,32 @@ class AuthWindow(QMainWindow):
         print("Table 'price_pack' created successfully.")
         return True
 
+
+    def create_price_changes_table(self):
+        
+        query = QSqlQuery()
+        print("Creating price_changes Table")
+
+        # Create table if it doesn't exist
+        if not query.exec("""
+           
+            CREATE TABLE IF NOT EXISTS price_changes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL,
+                previous_price REAL NOT NULL,
+                new_price REAL NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                FOREIGN KEY (product_id) REFERENCES product(id)
+            );
+
+        """):
+            QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
+            return False
+
+        print("Table 'price_changes' created successfully.")
+        return True
+
         
         
         
@@ -1004,6 +1066,7 @@ class AuthWindow(QMainWindow):
                 batch_no TEXT,                       -- optional (manufacturer lot)
                 expiry_date DATE,                    -- optional
                 product_id INTEGER NOT NULL,
+                purchaseitem_id INTEGER,
                 total_received INTEGER NOT NULL,
                 paid_qty INTEGER NOT NULL,
                 quantity_remaining INTEGER NOT NULL,
@@ -1011,7 +1074,11 @@ class AuthWindow(QMainWindow):
                 source TEXT,                         -- 'opening', 'purchase'
                 received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-                FOREIGN KEY (product_id) REFERENCES product(id)
+                FOREIGN KEY (product_id) REFERENCES product(id),
+                FOREIGN KEY (purchaseitem_id) REFERENCES purchaseitem(id)
+            
+            
+            
             );
 
         """):
@@ -1081,11 +1148,13 @@ class AuthWindow(QMainWindow):
                 writeoff DECIMAL(10,2) NOT NULL,
                 
                 payable DECIMAL(10,2) NOT NULL,
-                receiveable DECIMAL(10,2) NOT NULL,
+                receivable DECIMAL(10,2) NOT NULL,
+                session_id INTEGER NOT NULL,
                 
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (supplier) REFERENCES supplier(id) ON DELETE RESTRICT,
-                FOREIGN KEY (rep) REFERENCES rep(id) ON DELETE RESTRICT
+                FOREIGN KEY (rep) REFERENCES rep(id) ON DELETE RESTRICT,
+                FOREIGN KEY (session_id) REFERENCES daily_session(id) ON DELETE RESTRICT
             );
         """):
             QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
@@ -1127,11 +1196,21 @@ class AuthWindow(QMainWindow):
                 rep INTEGER,
                 note TEXT(500),
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                session_id INTEGER NOT NULL,
+                
+                payment_method TEXT,
+                bank_name TEXT,
+                account_no TEXT,
+                transaction_mode TEXT,
+                wallet_provider TEXT,
+                wallet_no TEXT,
+                payment_reference TEXT,
 
                 FOREIGN KEY (supplier) REFERENCES supplier(id) ON DELETE RESTRICT,
                 FOREIGN KEY (rep) REFERENCES rep(id) ON DELETE RESTRICT,
                 FOREIGN KEY (ref) REFERENCES purchase(id) ON DELETE RESTRICT,
-                FOREIGN KEY (return_ref) REFERENCES purchase_return(id) ON DELETE RESTRICT
+                FOREIGN KEY (return_ref) REFERENCES purchase_return(id) ON DELETE RESTRICT,
+                FOREIGN KEY (session_id) REFERENCES daily_session(id) ON DELETE RESTRICT
             );
         """):
             QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
@@ -1168,15 +1247,25 @@ class AuthWindow(QMainWindow):
                 received DECIMAL(10,2) DEFAULT 0.00,
                 remaining_now DECIMAL(10,2) DEFAULT 0.00,
                 receiveable_after DECIMAL(10,2) DEFAULT 0.00,
+                
+                payment_method TEXT,
+                bank_name TEXT,
+                account_no TEXT,
+                transaction_mode TEXT,
+                wallet_provider TEXT,
+                wallet_no TEXT,
+                payment_reference TEXT,
 
                 salesman INTEGER,
                 note TEXT,
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                session_id INTEGER NOT NULL,
 
                 FOREIGN KEY (customer) REFERENCES customer(id) ON DELETE RESTRICT,
                 FOREIGN KEY (salesman) REFERENCES employee(id) ON DELETE RESTRICT,
                 FOREIGN KEY (ref) REFERENCES sales(id) ON DELETE RESTRICT,
-                FOREIGN KEY (return_ref) REFERENCES salesreturn(id) ON DELETE RESTRICT
+                FOREIGN KEY (return_ref) REFERENCES salesreturn(id) ON DELETE RESTRICT,
+                FOREIGN KEY (session_id) REFERENCES daily_session(id) ON DELETE RESTRICT
             );
         """):
             QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
@@ -1239,9 +1328,11 @@ class AuthWindow(QMainWindow):
                 payable DECIMAL(10,2) NOT NULL,
                 receiveable DECIMAL(10,2) NOT NULL,
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                session_id INTEGER NOT NULL,
 
                 FOREIGN KEY (supplier) REFERENCES supplier(id) ON DELETE RESTRICT,
-                FOREIGN KEY (rep) REFERENCES rep(id) ON DELETE RESTRICT
+                FOREIGN KEY (rep) REFERENCES rep(id) ON DELETE RESTRICT,
+                FOREIGN KEY (session_id) REFERENCES daily_session(id) ON DELETE RESTRICT
             );
         """):
             QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
@@ -1306,8 +1397,11 @@ class AuthWindow(QMainWindow):
                 payable REAL NOT NULL,
                 receiveable REAL NOT NULL,
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                session_id INTEGER NOT NULL,
+                
                 FOREIGN KEY (customer) REFERENCES customer(id) ON DELETE RESTRICT,
-                FOREIGN KEY (salesman) REFERENCES auth(id) ON DELETE RESTRICT
+                FOREIGN KEY (salesman) REFERENCES auth(id) ON DELETE RESTRICT,
+                FOREIGN KEY (session_id) REFERENCES daily_session(id) ON DELETE RESTRICT
             );
         """):
             QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
@@ -1460,9 +1554,13 @@ class AuthWindow(QMainWindow):
                 payable DECIMAL(10,2) NOT NULL,
                 receiveable DECIMAL(10,2) NOT NULL,
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                session_id INTEGER NOT NULL,
+                
+                
                 FOREIGN KEY (customer) REFERENCES customer(id) ON DELETE RESTRICT,
                 FOREIGN KEY (salesman) REFERENCES employee(id) ON DELETE RESTRICT,
-                FOREIGN KEY (salesorder) REFERENCES sales(id) ON DELETE RESTRICT
+                FOREIGN KEY (salesorder) REFERENCES sales(id) ON DELETE RESTRICT,
+                FOREIGN KEY (session_id) REFERENCES daily_session(id) ON DELETE RESTRICT
             );
         """):
             QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
@@ -1512,12 +1610,27 @@ class AuthWindow(QMainWindow):
         # Create table if it doesn't exist
         if not query.exec("""
             CREATE TABLE IF NOT EXISTS expense (
+                
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 category TEXT NOT NULL,
                 title TEXT NOT NULL,
                 amount DECIMAL(10,2) NOT NULL,
                 note TEXT NOT NULL,
-                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                session_id INTEGER NOT NULL,
+                
+                payment_method TEXT,
+                bank_name TEXT,
+                account_no TEXT,
+                transaction_mode TEXT,
+                wallet_provider TEXT,
+                wallet_no TEXT,
+                payment_reference TEXT,
+                
+                user_id INTEGER,
+                
+                FOREIGN KEY (user_id) REFERENCES auth(id) ON DELETE RESTRICT,
+                FOREIGN KEY (session_id) REFERENCES daily_session(id) ON DELETE RESTRICT
             );
         """):
             QMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")

@@ -8,6 +8,7 @@ from utilities.sidebarbutton import SideBarButton
 from utilities.database import SQLiteConnectionManager
 # from database import PostgresConnectionManager
 from PySide6.QtGui import QPalette, QColor, QPixmap, QIcon
+from dashboard.base_dashboard_page import BaseDashboardWidget
 from business.basebusiness import BaseBusinessWidget
 from supplier.basesupplier import BaseSupplierWidget
 from salesrep.basesalesrep import BaseSalesRepWidget
@@ -24,8 +25,6 @@ from expense.baseexpense import BaseExpenseWidget
 from reports.basereports import BaseReportsWidget
 from salehold.basehold import BaseHoldSalesWidget
 
-from dashboard.dashboard import DashboardWidget
-from dashboard.welcome import WelcomeWidget
 from utilities.sizehintfinder import print_size_hints
 from functools import wraps
 from PySide6.QtWidgets import QMessageBox, QApplication
@@ -103,10 +102,10 @@ class MainWindow(QMainWindow):
         self.sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
         self.sidebar_scroll.setStyleSheet(""" 
-                                    background-color: #47034E;
+                                    background-color: #2F5D7C;
                                     
                                     QScrollArea {
-                                        background-color: #47034E;
+                                        background-color: #2F5D7C;
                                         border: none;
                                     }
                                 """)
@@ -176,11 +175,6 @@ class MainWindow(QMainWindow):
         
         header_layout.addWidget(business_title)
         
-        # self.back_button = QPushButton("Back")
-        # header_layout.addWidget(self.back_button)
-        
-        # self.forward_button = QPushButton("Forward")
-        # header_layout.addWidget(self.forward_button)
         
         
         
@@ -189,7 +183,7 @@ class MainWindow(QMainWindow):
         header_layout.addStretch()
         
         logout_button = QPushButton("Logout")
-        logout_button.setStyleSheet("color: #fff; border-radius: 5px; padding: 5px 10px; background-color:  #47034E; margin-right: 20px;")
+        logout_button.setStyleSheet("color: #fff; border-radius: 5px; padding: 5px 10px; background-color:  #2F5D7C; margin-right: 20px;")
         logout_button.clicked.connect(self.logout)
         
         header_layout.addWidget(logout_button)
@@ -212,7 +206,7 @@ class MainWindow(QMainWindow):
         self.main_content_layout = QStackedLayout()
         self.reset_widget_size(self.main_content_layout, self.main_content_widget)
         
-        self.main_content_widget.setStyleSheet("background-color: #fff;")
+        self.main_content_widget.setStyleSheet("background-color: #f3f3f5;")
         
         
         
@@ -272,7 +266,7 @@ class MainWindow(QMainWindow):
         footer_button = QPushButton()
         footer_button.setStyleSheet("""
                                     margin-top: 100px;
-                                    background-color: #47034E;
+                                    background-color: #2F5D7C;
                                     padding-right: 0px;
                                     height: 0px;
                                     """)
@@ -294,7 +288,7 @@ class MainWindow(QMainWindow):
                 
             }
             QPushButton:pressed {
-                background-color: #000755;
+                background-color: #163B5C;
                 color: #fff;
             }
             
@@ -373,10 +367,8 @@ class MainWindow(QMainWindow):
         
 
 
-        self.dashboard = DashboardWidget()
+        self.dashboard = BaseDashboardWidget()
         
-        
-        self.welcome = WelcomeWidget()
         self.profile = BaseProfileWidget()
         self.business = BaseBusinessWidget()
         self.supplier = BaseSupplierWidget()
@@ -400,8 +392,8 @@ class MainWindow(QMainWindow):
         # self.holdsales = BaseHoldSalesWidget(controller=self)
         
         
-        self.dashboard.sales_page_signal.connect(lambda: self.set_sales(self.base_sales, self.main_content_layout))
-        self.dashboard.product_page_signal.connect(lambda: self.set_product(self.product, self.main_content_layout))
+        # self.dashboard.sales_page_signal.connect(lambda: self.set_sales(self.base_sales, self.main_content_layout))
+        # self.dashboard.product_page_signal.connect(lambda: self.set_product(self.product, self.main_content_layout))
         
         
 

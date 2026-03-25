@@ -178,11 +178,11 @@ class PurchaseListWidget(QWidget):
                         font-weight: 600;
                     }
                     QPushButton:hover {
-                        background-color: #340238;
+                        background-color: #244A62;
                         color: #fff;
                     }
                     QPushButton:pressed {
-                        background-color: #47034E;
+                        background-color: #2F5D7C;
                         color: #fff;
                     }
                 

@@ -1,9 +1,10 @@
 QLabel {
-    color: #555;
+    color: #222;
     font-family: 'montserrat';
     font-size: 14px;
     font-weight: 600;
     padding-left: 20px;
+    background-color: transparent;
 }
 
 QLineEdit {
@@ -13,6 +14,7 @@ QLineEdit {
     border: 1px solid #ccc;
     font-weight: 500;
     font-family: 'montserrat';
+    background-color: transparent;
 }
 QLineEdit:placeholder {
     color: gray;
@@ -25,11 +27,12 @@ QComboBox, QDateEdit {
     border: 1px solid #ccc;
     font-weight: 500;
     font-family: 'montserrat';
+    background-color: transparent;
 }
 
 QLineEdit:focus {
-    border-bottom: 1px solid #47034E;   /* highlight color */
-    background-color: #d6d6d6;   /* light tint background */
+    border-bottom: 1px solid #2F5D7C;   /* highlight color */
+    background-color: #EEF5FA;   /* soft blue tint for long-form use */
     outline: none;               /* removes default focus glow */
 }
 
@@ -56,7 +59,7 @@ QLabel#left_labels {
 
 QPushButton#TopRightButton {
     color: #fff;
-    background-color: #47034E;
+    background-color: #2F5D7C;
     font-weight: 700;
     font-family: 'montserrat';
     padding: 5px;
@@ -68,14 +71,24 @@ QPushButton#SaveButton {
     font-weight: 700;
     font-family: 'montserrat';
     border: 1px solid #ccc;
-    background-color: #47034E;
+    background-color: #2F5D7C;
     border-radius: 5px;
     padding: 8px;
     margin-top: 20px;
 }
 
+QPushButton#EntryButton {
+    color: #fff;
+    font-weight: 700;
+    font-family: 'montserrat';
+    border: 1px solid #ccc;
+    background-color: #2F5D7C;
+    border-radius: 5px;
+    padding: 5px;
+}
+
 QPushButton#SaveButton:hover {
-    background-color: #2B0130;
+    background-color: #1D3648;
 }
 
 QPushButton#SaveButton:pressed {
@@ -89,13 +102,13 @@ QScrollBar:vertical {
 }
 
 QScrollBar::handle:vertical {
-    background: #47034E;
+    background: #2F5D7C;
     border-radius: 3px;
     min-height: 20px;
 }
 
 QScrollBar::handle:vertical:hover {
-    background: #2B0130;
+    background: #1D3648;
 }
 
 QScrollBar:horizontal {
@@ -105,4 +118,30 @@ QScrollBar:horizontal {
 
 QMessageBox {
     color: #333;
+}
+
+
+QFrame#sectionCard {
+    background: white;
+    border: 1px solid #dcdcdc;
+    border-radius: 6px;
+    border-top: 1px solid #2F5D7C;
+}
+
+
+QLineEdit:focus,
+QComboBox:focus,
+QDateEdit:focus {
+    border: 2px solid #5B8FB8;
+    background: #F2F8FC;
+}
+
+
+
+QLabel#ErrorLabel {
+    color: #d9534f;
+    font-weight: 500;
+    font-family: 'montserrat';
+    font-size: 12px;
+    padding-left: 0;
 }

@@ -3,8 +3,8 @@ from PySide6.QtCore import QPropertyAnimation, Property, QEasingCurve, Qt
 from PySide6.QtGui import QColor, QPainter, QBrush, QFont
 
 class SideBarButton(QPushButton):
-    def __init__(self, text="", normal_color="#47034E", hover_color="#ffffff",
-                 text_normal="white", text_hover="#47034E", duration=250, parent=None):
+    def __init__(self, text="", normal_color="#2F5D7C", hover_color="#ffffff",
+                 text_normal="white", text_hover="#2F5D7C", duration=250, parent=None):
         super().__init__(text, parent)
 
         # background colors

@@ -255,7 +255,7 @@ class AddSupplierWidget(BasePage):
     
     def eventFilter(self, obj, event):
         if event.type() == QEvent.FocusIn:
-            self.indicators[obj].setStyleSheet("background-color: #0078d7; border: none;")  # active blue
+            self.indicators[obj].setStyleSheet("background-color: #5A9EC9; border: none;")  # active blue
         elif event.type() == QEvent.FocusOut:
             self.indicators[obj].setStyleSheet("background-color: #ccc; border: none;")  # reset gray
         return super().eventFilter(obj, event)

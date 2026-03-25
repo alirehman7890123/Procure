@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QDateEdit, QPushButton, QLabel, QFrame, QComboBox, QSpacerItem
-from PySide6.QtCore import Qt, QFile, QDate, Signal
+from PySide6.QtCore import Qt, QFile, QDate, Signal, QTimer
 import sys, os
 from PySide6.QtSql import QSqlQuery, QSqlDatabase
 from PySide6.QtCore import QDate
@@ -43,9 +43,6 @@ def load_stylesheets():
 class DashboardWidget(QWidget):
     
     
-    sales_page_signal = Signal()
-    product_page_signal = Signal()
-    
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -65,18 +62,11 @@ class DashboardWidget(QWidget):
         # header_layout.addWidget(self.supplierlist)
         
         
-        self.create_sale = QPushButton("Create New Sale", objectName="TopRightButton")
-        self.create_sale.setCursor(Qt.PointingHandCursor)
-        self.create_sale.setFixedWidth(150)
-        self.create_sale.clicked.connect(partial(self.sales_page_signal.emit))
-        
-        self.product_btn = QPushButton("View Products", objectName="TopRightButton")
-        self.product_btn.setCursor(Qt.PointingHandCursor)
-        self.product_btn.setFixedWidth(150)
-        self.product_btn.clicked.connect(partial(self.product_page_signal.emit))
+        self.session_btn = QPushButton("Daily Sessions", objectName="TopRightButton")
+        self.session_btn.setCursor(Qt.PointingHandCursor)
+        self.session_btn.setFixedWidth(150)
 
-        header_layout.addWidget(self.create_sale, 0, Qt.AlignRight)
-        header_layout.addWidget(self.product_btn, 0, Qt.AlignRight)
+        header_layout.addWidget(self.session_btn, 0, Qt.AlignRight)
 
         self.layout.addLayout(header_layout)
         
@@ -190,6 +180,11 @@ class DashboardWidget(QWidget):
         spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
         self.layout.addItem(spacer)
 
+
+        # QTimer.singleShot(0, self.check_session)
+        
+        # dialog = DailySessionDialog(mode="open", parent=self)
+        # dialog.exec()
         
         
        
@@ -198,12 +193,14 @@ class DashboardWidget(QWidget):
         self.setStyleSheet(load_stylesheets())
         
 
+        
+
+
+    
 
 
 
     def showEvent(self, event):
-        
-        print("Showing Dashboard Widget")
         
         super().showEvent(event)
         
@@ -326,8 +323,4 @@ class DashboardWidget(QWidget):
 
 
 
-        
-        
-        
-
-
+   

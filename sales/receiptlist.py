@@ -73,7 +73,7 @@ class ReceiptListWidget(QWidget):
             QCalendarWidget QAbstractItemView:enabled {
                 background-color: #2b2b2b;
                 color: white;
-                selection-background-color: #0078d7;  /* blue highlight */
+                selection-background-color: #5A9EC9;  /* blue highlight */
                 selection-color: white;
             }
             QCalendarWidget QToolButton {
@@ -269,7 +269,7 @@ class ReceiptListWidget(QWidget):
             
             # get salesitems 
             items_query = QSqlQuery()
-            items_query.prepare("SELECT product FROM salesitem WHERE sales = ? ")
+            items_query.prepare("SELECT product_id FROM salesitem WHERE sales_id = ? ")
             items_query.addBindValue(sales_id)
             
             if items_query.exec():
@@ -279,15 +279,15 @@ class ReceiptListWidget(QWidget):
                     product_id = items_query.value(0)
                     
                     product_query = QSqlQuery()
-                    product_query.prepare("SELECT name, form FROM product WHERE id=?")
+                    product_query.prepare("SELECT display_name FROM product WHERE id=?")
                     product_query.addBindValue(product_id)
                     
                     if product_query.exec() and product_query.next():
                         
                         product_name = product_query.value(0)
-                        form = product_query.value(1)
                         
-                        products += f"[ {product_name} {form} ]"
+                        products += f"[ {product_name} ]"
+
 
 
             
@@ -331,11 +331,11 @@ class ReceiptListWidget(QWidget):
                         font-weight: 600;
                     }
                     QPushButton:hover {
-                        background-color: #340238;
+                        background-color: #244A62;
                         color: #fff;
                     }
                     QPushButton:pressed {
-                        background-color: #47034E;
+                        background-color: #2F5D7C;
                         color: #fff;
                     }
                 

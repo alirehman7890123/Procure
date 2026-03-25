@@ -9,7 +9,10 @@ from PySide6.QtGui import QPalette, QColor, QKeyEvent, QPdfWriter, QKeySequence,
 from functools import partial
 import math
 from utilities.stylus import load_stylesheets
+from utilities.get_session import get_current_session
 from PySide6.QtGui import QKeySequence, QShortcut
+
+from utilities.payment_handler import PaymentMethodHandler
 
 
 
@@ -83,7 +86,7 @@ class CreateSalesWidget(QWidget):
         
         clear_btn = QPushButton('Clear Sale', objectName='TopRightButton')
         clear_btn.setCursor(Qt.PointingHandCursor)
-        # clear_btn.clicked.connect(lambda: self.clear_fields())
+        clear_btn.clicked.connect(self.clear_fields)
         
         
         self.invoicelist = QPushButton('SO List', objectName='TopRightButton')
@@ -245,26 +248,66 @@ class CreateSalesWidget(QWidget):
        
         
         
+        # self.item = QComboBox()
+        # self.item.wheelEvent = lambda event: event.ignore()
+        # self.item.setPlaceholderText("select product")
+        # self.item.setEditable(True)
+        
+        # line_edit = self.item.lineEdit()
+        # line_edit.textEdited.connect(self.force_uppercase)
+
+        # line_edit = SelectAllLineEdit()
+        # self.item.setLineEdit(line_edit)
+
+        # # self.item.lineEdit().editingFinished.connect(lambda c=self.item: self.handle_editing_finished(c))
+
+        # completer = QCompleter()
+        # self.item.setCompleter(completer)
+        # completer.setCompletionMode(QCompleter.PopupCompletion)
+
+        # completer.activated[str].connect(lambda text, c=self.item: self.on_completer_selected(text, c))
+
+        # self.item.lineEdit().completer().popup().setStyleSheet("""
+        #     QListView {
+        #         padding: 5px;
+        #         background-color: white;
+        #         border: 1px solid gray;
+        #         color: #333;
+        #     }
+        #     QListView::item {
+        #         padding: 6px 10px;
+        #     }
+        #     QListView::item:selected {
+        #         background-color: #5A9EC9;
+        #         color: white;
+        #     }
+        # """)
+
+        # self.item.lineEdit().textEdited.connect(
+        #     lambda text: self.load_product_suggestions(self.item, completer)
+        # )
+        
+        
         self.item = QComboBox()
         self.item.wheelEvent = lambda event: event.ignore()
         self.item.setPlaceholderText("select product")
         self.item.setEditable(True)
-        
-        line_edit = self.item.lineEdit()
-        line_edit.textEdited.connect(self.force_uppercase)
 
         line_edit = SelectAllLineEdit()
         self.item.setLineEdit(line_edit)
 
-        # self.item.lineEdit().editingFinished.connect(lambda c=self.item: self.handle_editing_finished(c))
+        self.item.lineEdit().textEdited.connect(self.force_uppercase)
 
         completer = QCompleter()
         self.item.setCompleter(completer)
         completer.setCompletionMode(QCompleter.PopupCompletion)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
 
-        completer.activated[str].connect(lambda text, c=self.item: self.on_completer_selected(text, c))
+        completer.activated[str].connect(
+            lambda text, c=self.item: self.on_completer_selected(text, c)
+        )
 
-        self.item.lineEdit().completer().popup().setStyleSheet("""
+        self.item.completer().popup().setStyleSheet("""
             QListView {
                 padding: 5px;
                 background-color: white;
@@ -275,7 +318,7 @@ class CreateSalesWidget(QWidget):
                 padding: 6px 10px;
             }
             QListView::item:selected {
-                background-color: #0078d7;
+                background-color: #5A9EC9;
                 color: white;
             }
         """)
@@ -283,8 +326,7 @@ class CreateSalesWidget(QWidget):
         self.item.lineEdit().textEdited.connect(
             lambda text: self.load_product_suggestions(self.item, completer)
         )
-        
-        
+                
         
         entry_line = QHBoxLayout()
         
@@ -421,6 +463,19 @@ class CreateSalesWidget(QWidget):
         calculate_labels_layout.addWidget(self.final_amount, 1)
         
         
+        payment_method_label = QLabel("Payment Method")
+        
+        self.payment_handler = PaymentMethodHandler(self)
+
+        self.payment_method = QComboBox()
+        self.payment_method.addItems(["Cash", "Bank Transfer", "EasyPaisa", "JazzCash"])
+        self.payment_method.currentTextChanged.connect(self.on_payment_method_changed)
+        
+        
+        calculate_labels_layout.addWidget(payment_method_label, 1)
+        calculate_labels_layout.addWidget(self.payment_method, 1)
+        
+        
         self.layout.addLayout(calculate_labels_layout)
         
         
@@ -493,7 +548,7 @@ class CreateSalesWidget(QWidget):
         save_row.addStretch()
         
         
-        
+        QShortcut(QKeySequence("F12"), self, activated=lambda: self.received_amount.setFocus())
         
 
 
@@ -526,7 +581,20 @@ class CreateSalesWidget(QWidget):
     
     
     
+    
+    
+    def on_payment_method_changed(self, method):
+        
+        success = self.payment_handler.handle_method_change(method)
+
+        if not success:
+            self.payment_method.blockSignals(True)
+            self.payment_method.setCurrentText("Cash")
+            self.payment_method.blockSignals(False)
    
+
+
+
 
     def update_line_total(self):
         
@@ -691,7 +759,7 @@ class CreateSalesWidget(QWidget):
         
         self.table.setRowHeight(row, self.row_height)
         
-        self.table.insertRow(row)
+        
         
         counter = QLabel()
         counter.setText(str(row + 1))
@@ -717,16 +785,16 @@ class CreateSalesWidget(QWidget):
         if product_name == '':
             print("Please Select a product first")
             QMessageBox.information(self, 'Error', "Please Select a product first")
-            product_combo.setFocus()
+            QTimer.singleShot(0, lambda: self.item.lineEdit().setFocus())
             return
         
         elif product_id is None:
             print("Entered product is not available... Please Add this product first")
             QMessageBox.information(self, 'Error', "Entered product is not available... Please Add this product first")
-            product_combo.setFocus()
+            QTimer.singleShot(0, lambda: self.item.lineEdit().setFocus())
             return
 
-        
+        self.table.insertRow(row)
         product_combo.addItem(product_name, product_id)
 
         product_combo.setStyleSheet("""
@@ -795,13 +863,7 @@ class CreateSalesWidget(QWidget):
         self.item.setFocus()
         self.update_total_amount()
         
-        self.qty_edit.clear()
-        self.rate_edit.clear()
-        self.discount.clear()
-        self.tax.clear()
-        
-        # clear combo field
-        self.item.setCurrentIndex(-1)
+       
         
 
     
@@ -998,29 +1060,6 @@ class CreateSalesWidget(QWidget):
     
     
     
-    # def populate_customer(self):
-        
-    #     self.customer.clear()
-        
-    #     query = QSqlQuery()
-
-    #     self.customer.addItem("Walk-in Customer")
-        
-    #     if query.exec("SELECT id, name, contact FROM customer WHERE status = 'active';"):
-    #         while query.next():
-    #             customer_id = query.value(0)
-    #             customer = query.value(1)
-    #             contact = query.value(2)
-                
-    #             customer = f'{customer}  [ {contact} ]'
-
-    #             self.customer.addItem(customer, customer_id)  # Text shown, ID stored as data
-
-    #     else:
-    #         QMessageBox.information(None, 'Error', query.lastError().text())
-
-
-
 
     def populate_salesman(self):
         
@@ -1048,141 +1087,7 @@ class CreateSalesWidget(QWidget):
         else:
             QMessageBox.information(None, 'Error', query.lastError().text() )
         
-    
         
-    def confirm_and_save_sale(self):
-        
-        # reply = QMessageBox.question(
-        #     self,
-        #     "Confirm Sale",
-        #     "Do you want to proceed and save this sale?",
-        #     QMessageBox.Yes | QMessageBox.No,
-        #     QMessageBox.No
-        # )
-
-        # if reply == QMessageBox.Yes:
-        #     # 👉 Place your DB insert logic here
-        #     print("Sale stored in database.")
-        #     return True
-        # else:
-        #     print("Sale ignored.")
-        #     return False
-        
-        return True
-        
-        
-        
-    # def insert_salesreceipt(self):
-        
-    #     try:
-    #         # --- Collect Data ---
-    #         customer_id = self.resolve_customer_for_sale()
-    #         customer = self.customer.currentData()
-    #         salesman = self.salesman.currentData()
-
-    #         # Convert numeric fields safely
-    #         def to_float(value):
-    #             value = str(value).strip()
-    #             return float(value) if value else 0.0
-
-    #         subtotal = to_float(self.gross_entry.text())
-    #         discount = to_float(self.discount_entry.text())
-    #         taxable = to_float(self.taxable_entry.text())
-    #         tax = to_float(self.tax_entry.text())
-    #         net_amount = to_float(self.net_amount_entry.text())
-    #         additional_charges = to_float(self.additional_entry.text())
-    #         total = to_float(self.final_amount.text())
-    #         received = to_float(self.received_amount.text())
-    #         remaining = to_float(self.remainingdata.text())
-
-    #         # --- Basic Validation ---
-    #         if salesman is None:
-    #             QMessageBox.warning(self, "Validation Error", "Salesman is required.")
-    #             return None
-
-    #         if total < 0:
-    #             QMessageBox.warning(self, "Validation Error", "Total cannot be negative.")
-    #             return None
-
-    #         if received < 0:
-    #             QMessageBox.warning(self, "Validation Error", "Received amount cannot be negative.")
-    #             return None
-
-    #         # Normalize customer (NULL if empty)
-    #         customer_id = customer if customer else None
-
-    #         writeoff = payable = receiveable = 0.0
-
-    #         if remaining > 0:
-    #             if self.writeoff_check.isChecked():
-    #                 writeoff = remaining
-    #             else:
-    #                 if customer_id is None:
-    #                     QMessageBox.information(
-    #                         self,
-    #                         'Error',
-    #                         "Walk-In Customer Can't Have Remaining Amount\nReceive Full amount or Write off"
-    #                     )
-    #                     return None
-    #                 receiveable = remaining
-
-    #         elif remaining < 0:
-    #             payable = abs(remaining)
-
-    #         # Walk-in customer cannot carry balance
-    #         if customer_id is None:
-    #             payable = receiveable = 0.0
-
-            
-    #         print("Writeoff: ", writeoff)
-    #         print("Payable", payable)
-    #         print("Receiveables", receiveable)
-            
-
-    #         # --- Insert Query ---
-    #         query = QSqlQuery()
-    #         query.prepare("""
-    #             INSERT INTO sales
-    #             (customer, salesman, subtotal, discount, taxable, tax,
-    #             net_amount, additional_charges, total, received,
-    #             remaining, writeoff, payable, receiveable)
-    #             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    #         """)
-
-    #         query.addBindValue(customer_id)
-    #         query.addBindValue(salesman)
-    #         query.addBindValue(subtotal)
-    #         query.addBindValue(discount)
-    #         query.addBindValue(taxable)
-    #         query.addBindValue(tax)
-    #         query.addBindValue(net_amount)
-    #         query.addBindValue(additional_charges)
-    #         query.addBindValue(total)
-    #         query.addBindValue(received)
-    #         query.addBindValue(remaining)
-    #         query.addBindValue(writeoff)
-    #         query.addBindValue(payable)
-    #         query.addBindValue(receiveable)
-
-    #         if not query.exec():
-    #             QMessageBox.critical(self, "Database Error", query.lastError().text())
-    #             return None
-
-    #         sales_id = query.lastInsertId()
-    #         print("Sales record inserted. ID:", sales_id)
-            
-            
-    #         self.insert_customer_transaction(sales_id, customer_id, total, received,remaining, salesman)
-            
-            
-
-    #         return sales_id
-
-    #     except Exception as e:
-    #         QMessageBox.critical(self, "Error", str(e))
-    #         return None
-
-    
     
     
     def insert_salesreceipt(self):
@@ -1219,6 +1124,12 @@ class CreateSalesWidget(QWidget):
                 QMessageBox.warning(self, "Validation Error", "Received amount cannot be negative.")
                 return None
 
+            session_id = get_current_session(self)
+            
+            if session_id is None:
+                QMessageBox.warning(self, "Validation Error", "No active session found.")
+                return None
+
             writeoff = payable = receiveable = 0.0
 
             if remaining > 0:
@@ -1249,8 +1160,8 @@ class CreateSalesWidget(QWidget):
                 INSERT INTO sales
                 (customer, salesman, subtotal, discount, taxable, tax,
                 net_amount, additional_charges, total, received,
-                remaining, writeoff, payable, receiveable)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                remaining, writeoff, payable, receiveable, session_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
 
             query.addBindValue(customer_id)
@@ -1267,6 +1178,7 @@ class CreateSalesWidget(QWidget):
             query.addBindValue(writeoff)
             query.addBindValue(payable)
             query.addBindValue(receiveable)
+            query.addBindValue(session_id)
 
             if not query.exec():
                 QMessageBox.critical(self, "Database Error", query.lastError().text())
@@ -1275,9 +1187,12 @@ class CreateSalesWidget(QWidget):
             sales_id = query.lastInsertId()
             print("Sales record inserted. ID:", sales_id)
 
-            self.insert_customer_transaction(
+            txn_inserted = self.insert_customer_transaction(
                 sales_id, customer_id, total, received, remaining, salesman
             )
+            if txn_inserted:
+                print("Customer transaction inserted for Sales ID:", sales_id)
+                
 
             return sales_id
 
@@ -1287,187 +1202,127 @@ class CreateSalesWidget(QWidget):
         
     
     
-
-    # def insert_customer_transaction(self, sales_id, customer_id,
-    #                             total_amount, received,
-    #                             remaining, salesman_id):
-
-    #     try:
-    #         payable_before = 0.0
-    #         receiveable_before = 0.0
-
-    #         db = QSqlDatabase.database()
-
-    #         # --- Fetch Existing Balance ---
-    #         if customer_id is not None:
-    #             balance_query = QSqlQuery()
-    #             balance_query.prepare("""
-    #                 SELECT payable, receiveable
-    #                 FROM customer
-    #                 WHERE id = ?
-    #             """)
-    #             balance_query.addBindValue(customer_id)
-
-    #             if not balance_query.exec() or not balance_query.next():
-    #                 raise Exception("Failed to fetch customer balance.")
-
-    #             payable_before = float(balance_query.value(0) or 0.0)
-    #             receiveable_before = float(balance_query.value(1) or 0.0)
-
-    #         # --- Determine Current Impact ---
-    #         payable_now = 0.0
-    #         receiveable_now = 0.0
-
-    #         if remaining > 0:
-    #             receiveable_now = remaining
-    #         elif remaining < 0:
-    #             payable_now = abs(remaining)
-
-    #         payable_after = payable_before + payable_now
-    #         receiveable_after = receiveable_before + receiveable_now
-
-    #         # --- Insert Transaction Record ---
-    #         insert_txn = QSqlQuery()
-    #         insert_txn.prepare("""
-    #             INSERT INTO customer_transaction
-    #             (customer, transaction_type, ref,
-    #             payable_before, due_amount, paid, remaining_due, payable_after,
-    #             receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
-    #             salesman, note)
-    #             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    #         """)
-
-    #         insert_txn.addBindValue(customer_id)
-    #         insert_txn.addBindValue("SALE")
-    #         insert_txn.addBindValue(sales_id)
-
-    #         insert_txn.addBindValue(payable_before)
-    #         insert_txn.addBindValue(total_amount)
-    #         insert_txn.addBindValue(received)
-    #         insert_txn.addBindValue(max(remaining, 0))
-    #         insert_txn.addBindValue(payable_after)
-
-    #         insert_txn.addBindValue(receiveable_before)
-    #         insert_txn.addBindValue(receiveable_now)
-    #         insert_txn.addBindValue(received)
-    #         insert_txn.addBindValue(max(remaining, 0))
-    #         insert_txn.addBindValue(receiveable_after)
-
-    #         insert_txn.addBindValue(salesman_id)
-    #         insert_txn.addBindValue(f"Sale ID {sales_id} recorded with total {total_amount}, received {received}, remaining {remaining}")
-    #         if not insert_txn.exec():
-    #             raise Exception(insert_txn.lastError().text())
-
-    #         # --- Update Customer Master ---
-    #         if customer_id is not None:
-    #             update_customer = QSqlQuery()
-    #             update_customer.prepare("""
-    #                 UPDATE customer
-    #                 SET payable = ?, receiveable = ?
-    #                 WHERE id = ?
-    #             """)
-    #             update_customer.addBindValue(payable_after)
-    #             update_customer.addBindValue(receiveable_after)
-    #             update_customer.addBindValue(customer_id)
-
-    #             if not update_customer.exec():
-    #                 raise Exception(update_customer.lastError().text())
-
-    #         return True
-
-    #     except Exception as e:
-    #         QMessageBox.critical(self, "Error", str(e))
-    #         return False
-
-
-        
     def insert_customer_transaction(self, sales_id, customer_id,
                                 total_amount, received,
                                 remaining, salesman_id):
 
-        if customer_id is None:
-            return True
+        print("ABOUT TO INSERT CUSTOMER TRANSACTION NOW...")
 
+        # default values for walk-in / no customer
         payable_before = 0.0
         receiveable_before = 0.0
-
-        balance_query = QSqlQuery()
-        balance_query.prepare("""
-            SELECT payable, receiveable
-            FROM customer
-            WHERE id = ?
-        """)
-        balance_query.addBindValue(customer_id)
-
-        if not balance_query.exec() or not balance_query.next():
-            raise Exception("Failed to fetch customer balance.")
-
-        payable_before = float(balance_query.value(0) or 0.0)
-        receiveable_before = float(balance_query.value(1) or 0.0)
-
         payable_now = 0.0
         receiveable_now = 0.0
+        paid = 0.0
+        remaining_due = 0.0
+        remaining_now = 0.0
+        payable_after = 0.0
+        receiveable_after = 0.0
 
-        if remaining > 0:
-            receiveable_now = remaining
-        elif remaining < 0:
-            payable_now = abs(remaining)
+        # only fetch/update balances if customer exists
+        if customer_id is not None:
+            balance_query = QSqlQuery()
+            balance_query.prepare("""
+                SELECT payable, receiveable
+                FROM customer
+                WHERE id = ?
+            """)
+            balance_query.addBindValue(customer_id)
 
-        payable_after = payable_before + payable_now
-        receiveable_after = receiveable_before + receiveable_now
+            if not balance_query.exec() or not balance_query.next():
+                raise Exception("Failed to fetch customer balance.")
+
+            payable_before = float(balance_query.value(0) or 0.0)
+            receiveable_before = float(balance_query.value(1) or 0.0)
+
+            if remaining > 0:
+                receiveable_now = float(remaining)
+                remaining_now = float(remaining)
+            elif remaining < 0:
+                payable_now = abs(float(remaining))
+                remaining_due = abs(float(remaining))
+
+            payable_after = payable_before + payable_now
+            receiveable_after = receiveable_before + receiveable_now
+
+        session_id = get_current_session(self)
+        if session_id is None:
+            QMessageBox.warning(self, "Validation Error", "No active session found.")
+            return None
+
+        payment = self.payment_handler.payment_data.copy()
+        print(payment)
+        print("Payment data is as above")
+
+        note = (
+            f"Sale ID {sales_id} recorded with total {total_amount}, "
+            f"received {received}, remaining {remaining}"
+        )
 
         insert_txn = QSqlQuery()
         insert_txn.prepare("""
             INSERT INTO customer_transaction
-            (customer, transaction_type, ref,
-             payable_before, due_amount, paid, remaining_due, payable_after,
-             receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
-             salesman, note)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (
+                customer, transaction_type, ref, return_ref,
+                payable_before, due_amount, paid, remaining_due, payable_after,
+                receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
+                payment_method, bank_name, account_no, transaction_mode,
+                wallet_provider, wallet_no, payment_reference,
+                salesman, note, session_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """)
 
-        insert_txn.addBindValue(customer_id)
+        insert_txn.addBindValue(customer_id)   # None becomes NULL
         insert_txn.addBindValue("SALE")
         insert_txn.addBindValue(sales_id)
+        insert_txn.addBindValue(None)
 
         insert_txn.addBindValue(payable_before)
-        insert_txn.addBindValue(total_amount)
-        insert_txn.addBindValue(received)
-        insert_txn.addBindValue(max(remaining, 0))
+        insert_txn.addBindValue(float(total_amount or 0.0))
+        insert_txn.addBindValue(paid)
+        insert_txn.addBindValue(remaining_due)
         insert_txn.addBindValue(payable_after)
 
         insert_txn.addBindValue(receiveable_before)
         insert_txn.addBindValue(receiveable_now)
-        insert_txn.addBindValue(received)
-        insert_txn.addBindValue(max(remaining, 0))
+        insert_txn.addBindValue(float(received or 0.0))
+        insert_txn.addBindValue(remaining_now)
         insert_txn.addBindValue(receiveable_after)
 
+        insert_txn.addBindValue(payment.get("payment_method") or None)
+        insert_txn.addBindValue(payment.get("bank_name") or None)
+        insert_txn.addBindValue(payment.get("account_no") or None)
+        insert_txn.addBindValue(payment.get("transaction_mode") or None)
+        insert_txn.addBindValue(payment.get("wallet_provider") or None)
+        insert_txn.addBindValue(payment.get("wallet_no") or None)
+        insert_txn.addBindValue(payment.get("payment_reference") or None)
+
         insert_txn.addBindValue(salesman_id)
-        insert_txn.addBindValue(
-            f"Sale ID {sales_id} recorded with total {total_amount}, received {received}, remaining {remaining}"
-        )
+        insert_txn.addBindValue(note)
+        insert_txn.addBindValue(session_id)
 
         if not insert_txn.exec():
             raise Exception(insert_txn.lastError().text())
 
-        update_customer = QSqlQuery()
-        update_customer.prepare("""
-            UPDATE customer
-            SET payable = ?, receiveable = ?
-            WHERE id = ?
-        """)
-        update_customer.addBindValue(payable_after)
-        update_customer.addBindValue(receiveable_after)
-        update_customer.addBindValue(customer_id)
+        print("Transaction Stored with ID:", insert_txn.lastInsertId())
 
-        if not update_customer.exec():
-            raise Exception(update_customer.lastError().text())
+        # only update customer running balance if linked customer exists
+        if customer_id is not None:
+            update_customer = QSqlQuery()
+            update_customer.prepare("""
+                UPDATE customer
+                SET payable = ?, receiveable = ?
+                WHERE id = ?
+            """)
+            update_customer.addBindValue(payable_after)
+            update_customer.addBindValue(receiveable_after)
+            update_customer.addBindValue(customer_id)
+
+            if not update_customer.exec():
+                raise Exception(update_customer.lastError().text())
 
         return True
-
-    
-    
-    
     
         
     
@@ -1504,351 +1359,6 @@ class CreateSalesWidget(QWidget):
         
       
         
-        
-    # def insert_salesitems(self, sales_id):
-        
-        
-    #     print("About to INSERT sales items with FIFO allocation for sales ID:", sales_id)
-        
-    #     try:
-            
-    #         def to_float(value):
-    #             value = str(value).strip()
-    #             return float(value) if value else 0.0
-
-    #         subtotal = to_float(self.gross_entry.text())
-    #         header_discount = to_float(self.discount_entry.text())
-    #         header_tax = to_float(self.tax_entry.text())
-    #         additional_charges = to_float(self.additional_entry.text())
-            
-
-    #         for row in range(self.table.rowCount()):
-
-    #             product_widget = self.table.cellWidget(row, 1)
-    #             if not product_widget:
-    #                 continue
-
-    #             product_id = product_widget.currentData()
-    #             product_id = product_id.get("product_id")
-    #             if not product_id:
-    #                 continue
-                
-    #             print("Processing row ", row, " with Product ID: ", product_id)
-    #             product_id = int(product_id)
-
-    #             qty = int(self.table.cellWidget(row, 2).text())
-    #             rate = float(self.table.cellWidget(row, 3).text())
-    #             discount = float(self.table.cellWidget(row, 4).text())
-    #             tax = float(self.table.cellWidget(row, 5).text())
-    #             line_total = float(self.table.cellWidget(row, 6).text()) 
-                
-                
-    #             # line weight
-    #             line_weight = 0.0
-    #             if subtotal > 0:
-    #                 line_weight = line_total / subtotal
-                    
-                
-                
-    #             line_header_discount = header_discount * line_weight
-    #             line_header_tax = header_tax * line_weight
-    #             line_additional_charges = additional_charges * line_weight
-                
-    #             print("Line Weight: ", line_weight, " Line Header Discount: ", line_header_discount, " Line Header Tax: ", line_header_tax, " Line Additional Charges: ", line_additional_charges)
-                
-    #             effective_line_total = line_total - line_header_discount + line_header_tax + line_additional_charges
-    #             effective_line_total = round(effective_line_total, 2)
-                
-    #             print("RECEIVED all the data now checking validation")
-    #             print("Data is: Product ID:", product_id, " Qty: ", qty, " Rate: ", rate, " Discount: ", discount, " Tax: ", tax, " Line Total: ", line_total)
-
-    #             if qty <= 0:
-    #                 raise Exception("Invalid quantity.")
-
-    #             # --- Check Stock Availability ---
-    #             stock_query = QSqlQuery()
-    #             stock_query.prepare("""
-    #                 SELECT SUM(quantity_remaining)
-    #                 FROM batch
-    #                 WHERE product_id = ?
-    #             """)
-    #             stock_query.addBindValue(product_id)
-
-    #             if not stock_query.exec() or not stock_query.next():
-    #                 raise Exception("Stock check failed.")
-
-    #             total_available = stock_query.value(0) or 0
-                
-    #             print("Available Stock is: ", total_available)
-
-    #             if qty > total_available:
-    #                 raise Exception(f"Insufficient stock for product {product_id}")
-
-    #             # --- Insert Sales Item (temporary COGS = 0) ---
-    #             insert_item = QSqlQuery()
-    #             insert_item.prepare("""
-    #                 INSERT INTO salesitem
-    #                 (sales_id, product_id, qty_sold, unit_price,
-    #                 discount, tax, line_total, line_weight, effective_line_total)
-    #                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    #             """)
-                
-    #             print("Inserting Data into salesitem table...")
-    #             print("Data is: Sales ID:", sales_id, " Product ID:", product_id, " Qty: ", qty, " Rate: ", rate, " Discount: ", discount, " Tax: ", tax, " Line Total: ", line_total, " Effective Line Total: ", effective_line_total)
-
-
-    #             insert_item.addBindValue(sales_id)
-    #             insert_item.addBindValue(product_id)
-    #             insert_item.addBindValue(qty)
-    #             insert_item.addBindValue(rate)
-    #             insert_item.addBindValue(discount)
-    #             insert_item.addBindValue(tax)
-    #             insert_item.addBindValue(line_total)
-    #             insert_item.addBindValue(line_weight)
-    #             insert_item.addBindValue(effective_line_total)
-
-    #             if not insert_item.exec():
-    #                 raise Exception(insert_item.lastError().text())
-
-    #             sale_item_id = insert_item.lastInsertId()
-    #             print("Sales Item Id is: ", sale_item_id)
-
-    #             # --- FIFO Allocation ---
-    #             remaining_qty = qty
-
-    #             batch_query = QSqlQuery()
-    #             batch_query.prepare("""
-    #                 SELECT id, quantity_remaining, unit_cost
-    #                 FROM batch
-    #                 WHERE product_id = ?
-    #                 AND quantity_remaining > 0
-    #                 ORDER BY received_at ASC, id ASC
-    #             """)
-    #             batch_query.addBindValue(product_id)
-                
-                
-
-    #             if not batch_query.exec():
-    #                 raise Exception(batch_query.lastError().text())
-
-    #             while batch_query.next() and remaining_qty > 0:
-
-    #                 batch_id = batch_query.value(0)
-    #                 available = batch_query.value(1)
-    #                 unit_cost = batch_query.value(2) or None
-
-    #                 take_qty = min(available, remaining_qty)
-    #                 if unit_cost is not None:
-    #                     line_cost = take_qty * unit_cost
-    #                 else:
-    #                     line_cost = None
-                        
-                    
-    #                 print("Batch Data is: ", batch_id, available, unit_cost, " Taking Qty: ", take_qty, " Line Cost: ", line_cost)
-
-    #                 # Deduct batch quantity
-    #                 update_batch = QSqlQuery()
-    #                 update_batch.prepare("""
-    #                     UPDATE batch
-    #                     SET quantity_remaining = quantity_remaining - ?
-    #                     WHERE id = ?
-    #                 """)
-    #                 update_batch.addBindValue(take_qty)
-    #                 update_batch.addBindValue(batch_id)
-
-    #                 if not update_batch.exec():
-    #                     raise Exception(update_batch.lastError().text())
-
-
-
-    #                 print("Inserting into Sold Batch Items")
-    #                 # Insert sold_batch record
-    #                 insert_sold = QSqlQuery()
-    #                 insert_sold.prepare("""
-    #                     INSERT INTO sold_batch
-    #                     (sale_item_id, batch_id, qty_taken, unit_cost, line_cost)
-    #                     VALUES (?, ?, ?, ?, ?)
-    #                 """)
-    #                 insert_sold.addBindValue(sale_item_id)
-    #                 insert_sold.addBindValue(batch_id)
-    #                 insert_sold.addBindValue(take_qty)
-    #                 insert_sold.addBindValue(unit_cost)
-    #                 insert_sold.addBindValue(line_cost)
-                    
-    #                 print("Data for SOLD BATCH is: Sale Item ID: ", sale_item_id, " Batch ID: ", batch_id, " Qty Taken: ", take_qty, " Unit Cost: ", unit_cost, " Line Cost: ", line_cost)
-
-    #                 if not insert_sold.exec():
-    #                     raise Exception(insert_sold.lastError().text())
-                    
-    #                 # if line_cost is not None:
-    #                 #     total_cogs += line_cost
-    #                 # else:
-    #                 #     total_cogs = None
-                        
-    #                 remaining_qty -= take_qty
-
-    #             if remaining_qty > 0:
-    #                 raise Exception("FIFO allocation failed.")
-
-                
-
-                
-
-    #     except Exception as e:
-    #         raise Exception("Failed to insert sales items.")
-    
-               
-    
-    
-    
-    # def insert_salesitems(self, sales_id):
-
-    #     print("About to INSERT sales items with FIFO allocation for sales ID:", sales_id)
-
-    #     def to_float(value):
-    #         value = str(value).strip()
-    #         return float(value) if value else 0.0
-
-    #     subtotal = to_float(self.gross_entry.text())
-    #     header_discount = to_float(self.discount_entry.text())
-    #     header_tax = to_float(self.tax_entry.text())
-    #     additional_charges = to_float(self.additional_entry.text())
-
-    #     for row in range(self.table.rowCount()):
-
-    #         product_widget = self.table.cellWidget(row, 1)
-    #         if not product_widget:
-    #             continue
-
-    #         product_data = product_widget.currentData()
-    #         if not product_data:
-    #             continue
-
-    #         product_id = product_data.get("product_id")
-    #         if not product_id:
-    #             continue
-
-    #         print("Processing row", row, "with Product ID:", product_id)
-    #         product_id = int(product_id)
-
-    #         qty = int(self.table.cellWidget(row, 2).text())
-    #         rate = float(self.table.cellWidget(row, 3).text())
-    #         discount = float(self.table.cellWidget(row, 4).text())
-    #         tax = float(self.table.cellWidget(row, 5).text())
-    #         line_total = float(self.table.cellWidget(row, 6).text())
-
-    #         line_weight = 0.0
-    #         if subtotal > 0:
-    #             line_weight = line_total / subtotal
-
-    #         line_header_discount = header_discount * line_weight
-    #         line_header_tax = header_tax * line_weight
-    #         line_additional_charges = additional_charges * line_weight
-
-    #         effective_line_total = line_total - line_header_discount + line_header_tax + line_additional_charges
-    #         effective_line_total = round(effective_line_total, 2)
-
-    #         if qty <= 0:
-    #             raise Exception("Invalid quantity.")
-
-    #         stock_query = QSqlQuery()
-    #         stock_query.prepare("""
-    #             SELECT SUM(quantity_remaining)
-    #             FROM batch
-    #             WHERE product_id = ?
-    #         """)
-    #         stock_query.addBindValue(product_id)
-
-    #         if not stock_query.exec() or not stock_query.next():
-    #             raise Exception("Stock check failed.")
-
-    #         total_available = stock_query.value(0) or 0
-
-    #         if qty > total_available:
-    #             raise Exception(f"Insufficient stock for product {product_id}")
-
-    #         insert_item = QSqlQuery()
-    #         insert_item.prepare("""
-    #             INSERT INTO salesitem
-    #             (sales_id, product_id, qty_sold, unit_price,
-    #             discount, tax, line_total, line_weight, effective_line_total)
-    #             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    #         """)
-
-    #         insert_item.addBindValue(sales_id)
-    #         insert_item.addBindValue(product_id)
-    #         insert_item.addBindValue(qty)
-    #         insert_item.addBindValue(rate)
-    #         insert_item.addBindValue(discount)
-    #         insert_item.addBindValue(tax)
-    #         insert_item.addBindValue(line_total)
-    #         insert_item.addBindValue(line_weight)
-    #         insert_item.addBindValue(effective_line_total)
-
-    #         if not insert_item.exec():
-    #             raise Exception(insert_item.lastError().text())
-
-    #         sale_item_id = insert_item.lastInsertId()
-    #         remaining_qty = qty
-
-    #         batch_query = QSqlQuery()
-    #         batch_query.prepare("""
-    #             SELECT id, quantity_remaining, unit_cost
-    #             FROM batch
-    #             WHERE product_id = ?
-    #             AND quantity_remaining > 0
-    #             ORDER BY received_at ASC, id ASC
-    #         """)
-    #         batch_query.addBindValue(product_id)
-
-    #         if not batch_query.exec():
-    #             raise Exception(batch_query.lastError().text())
-
-    #         while batch_query.next() and remaining_qty > 0:
-    #             batch_id = batch_query.value(0)
-    #             # available = batch_query.value(1)
-    #             # unit_cost = batch_query.value(2) if batch_query.value(2) is not None else None
-                
-    #             available = int(batch_query.value(1) or 0)
-    #             raw_cost = batch_query.value(2)
-    #             unit_cost = float(raw_cost) if raw_cost is not None else None
-
-    #             take_qty = min(available, remaining_qty)
-    #             line_cost = take_qty * unit_cost if unit_cost is not None else None
-
-    #             update_batch = QSqlQuery()
-    #             update_batch.prepare("""
-    #                 UPDATE batch
-    #                 SET quantity_remaining = quantity_remaining - ?
-    #                 WHERE id = ?
-    #             """)
-    #             update_batch.addBindValue(take_qty)
-    #             update_batch.addBindValue(batch_id)
-
-    #             if not update_batch.exec():
-    #                 raise Exception(update_batch.lastError().text())
-
-    #             insert_sold = QSqlQuery()
-    #             insert_sold.prepare("""
-    #                 INSERT INTO sold_batch
-    #                 (sale_item_id, batch_id, qty_taken, unit_cost, line_cost)
-    #                 VALUES (?, ?, ?, ?, ?)
-    #             """)
-    #             insert_sold.addBindValue(sale_item_id)
-    #             insert_sold.addBindValue(batch_id)
-    #             insert_sold.addBindValue(take_qty)
-    #             insert_sold.addBindValue(unit_cost)
-    #             insert_sold.addBindValue(line_cost)
-
-    #             if not insert_sold.exec():
-    #                 raise Exception(insert_sold.lastError().text())
-
-    #             remaining_qty -= take_qty
-
-    #         if remaining_qty > 0:
-    #             raise Exception("FIFO allocation failed.")
-
-    #     return True
     
     
     def insert_salesitems(self, sales_id):
@@ -2392,115 +1902,8 @@ class CreateSalesWidget(QWidget):
     
         
     
-    
     def load_product_suggestions(self, item, completer):
         
-        current_text = item.lineEdit().text().strip()
-        print("Current Text is:", current_text)
-
-        if not current_text:
-            item.blockSignals(True)
-            item.clear()
-            item.setCurrentIndex(-1)
-            item.blockSignals(False)
-            return
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT id, display_name
-            FROM product
-            WHERE display_name LIKE ?
-            LIMIT 10
-        """)
-        query.addBindValue(f"%{current_text}%")
-
-        products = []
-        product_data = []
-
-        if not query.exec():
-            print("Something wrong happened...", query.lastError().text())
-            return
-
-        while query.next():
-            product_id = query.value(0)
-            name = str(query.value(1)).strip()
-
-            products.append(name)
-            product_data.append((name, product_id))
-
-        item.blockSignals(True)
-        item.clear()
-
-        for name, product_id in product_data:
-            item.addItem(name, product_id)
-
-        item.setCurrentIndex(-1)
-        item.lineEdit().setText(current_text)
-        item.blockSignals(False)
-
-        model = QStringListModel(products)
-        completer.setModel(model)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-
-        # force popup to appear
-        completer.complete()
-        
-    
-    
-        
-    # def load_product_suggestions(self, item, completer):
-
-    #     print("Loading Product Suggestions")
-
-    #     current_text = item.currentText().strip()
-
-    #     if not current_text:
-    #         return
-
-    #     # Clear old suggestions
-    #     item.blockSignals(True)
-    #     item.clear()
-    #     item.blockSignals(False)
-
-    #     query = QSqlQuery()
-    #     query.prepare("""
-    #         SELECT p.id, p.display_name, pp.unit_price
-    #         FROM product p
-    #         LEFT JOIN price_pack pp ON pp.product_id = p.id
-    #         WHERE p.display_name LIKE ?
-    #         LIMIT 10
-    #     """)
-    #     query.addBindValue(f"%{current_text}%")
-
-    #     products = []
-
-    #     if query.exec():
-    #         while query.next():
-    #             product_id = query.value(0)
-    #             name = query.value(1)
-    #             unit_price = query.value(2) or 0.0
-
-    #             label = name.strip()
-
-    #             products.append(label)
-
-    #             item.addItem(label, {
-    #                 "product_id": product_id,
-    #                 "unit_price": unit_price
-    #             })
-
-    #     model = QStringListModel(products)
-    #     completer.setModel(model)
-        
-    #     completer.activated[str].connect(partial(self.on_completer_selected, item=item))
-
-    #     # DO NOT connect signals here
-    #     item.lineEdit().setText(current_text)
-        
-    
-    
-    def load_product_suggestions(self, item, completer):
-    
         current_text = item.lineEdit().text().strip()
         print("Current Text is:", current_text)
 
@@ -2534,13 +1937,10 @@ class CreateSalesWidget(QWidget):
             unit_price = query.value(2) or 0.0
 
             products.append(name)
-            product_data.append((
-                name,
-                {
-                    "product_id": product_id,
-                    "unit_price": unit_price
-                }
-            ))
+            product_data.append((name, {
+                "product_id": product_id,
+                "unit_price": unit_price
+            }))
 
         item.blockSignals(True)
         item.clear()
@@ -2552,66 +1952,41 @@ class CreateSalesWidget(QWidget):
         item.lineEdit().setText(current_text)
         item.blockSignals(False)
 
-        model = QStringListModel(products)
-        completer.setModel(model)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-
+        completer.setModel(QStringListModel(products))
         completer.complete()
-       
+     
+    
+    
         
+    def on_completer_selected(self, text, combo):
         
-    def on_completer_selected(self, text, item):
+        index = combo.findText(text.strip(), Qt.MatchExactly)
 
-        index = item.findText(text, Qt.MatchFixedString)
-        if index < 0:
-            return
-        
-        item.setCurrentIndex(index) 
-        data = item.itemData(index)
+        if index == -1:
+            combo.setCurrentIndex(-1)
+            return None
 
-        if not data:
-            return
+        combo.setCurrentIndex(index)
+        data = combo.currentData()
 
-        unit_price = data.get("unit_price")
+        if not isinstance(data, dict):
+            return None
 
-        if unit_price is not None:
+        product_id = data.get("product_id")
+        unit_price = data.get("unit_price", 0)
+
+        try:
             self.rate_edit.setText(f"{float(unit_price):.2f}")
-            
-            
-        # move to next field
+        except (TypeError, ValueError):
+            self.rate_edit.clear()
+
         self.qty_edit.setFocus()
         self.qty_edit.selectAll()
-    
-    
-        
+
+        return product_id
+            
             
 
-
-    # def on_item_selected(self, item):
-        
-    #     text = item.currentText()
-    #     data = item.currentData()
-
-        
-    #     print("Selected text is: ",text, data)
-    #     data = int(data)
-        
-    #     query = QSqlQuery()
-    #     query.prepare("""
-    #         SELECT * FROM product
-    #         WHERE id = ? """)
-        
-    #     query.addBindValue(data)
-        
-    #     if not query.exec():
-            
-    #         print("Cannot Get the product")
-            
-    #     else:
-            
-    #         print("Got the product")
-                
-      
 
 
 
@@ -2909,7 +2284,7 @@ class CreateSalesWidget(QWidget):
 
 
     def force_uppercase(self, text):
-        line_edit = self.name_input.lineEdit()
+        line_edit = self.item.lineEdit()
         line_edit.blockSignals(True)
         line_edit.setText(text.upper())
         line_edit.blockSignals(False)
@@ -2934,6 +2309,10 @@ class CreateSalesWidget(QWidget):
         self.remainingdata.clear()
         self.additional_entry.clear()
         
+        self.payment_method.blockSignals(True); 
+        self.payment_method.setCurrentText("Cash"); 
+        self.payment_method.blockSignals(False)
+        
         
         self.writeoff_check.setChecked(True)        
         
@@ -2941,7 +2320,6 @@ class CreateSalesWidget(QWidget):
         
         self.populate_customer()
         
-        self.table.setRowCount(0)
         
         
 

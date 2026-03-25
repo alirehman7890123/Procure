@@ -7,7 +7,8 @@ from functools import partial
 
 import math
 from utilities.stylus import load_stylesheets
-
+from utilities.get_session import get_current_session
+from utilities.payment_handler import PaymentMethodHandler
 
 
 
@@ -186,6 +187,24 @@ class AddPurchaseReturnWidget(QWidget):
         final_amount_row.addWidget(self.final_amountdata)
         
         self.layout.addLayout(final_amount_row)
+        
+        
+        payment_method_layout = QHBoxLayout()
+        
+        payment_method_label = QLabel("Payment Method")
+        
+        self.payment_handler = PaymentMethodHandler(self)
+
+        self.payment_method = QComboBox()
+        self.payment_method.addItems(["Cash", "Bank Transfer", "EasyPaisa", "JazzCash"])
+        self.payment_method.currentTextChanged.connect(self.on_payment_method_changed)
+        
+        
+        payment_method_layout.addWidget(payment_method_label, 1)
+        payment_method_layout.addWidget(self.payment_method, 1)
+        
+        
+        self.layout.addLayout(payment_method_layout)
 
         
         temporary_row = QHBoxLayout()
@@ -239,7 +258,14 @@ class AddPurchaseReturnWidget(QWidget):
 
 
         
+    def on_payment_method_changed(self, method):
         
+        success = self.payment_handler.handle_method_change(method)
+
+        if not success:
+            self.payment_method.blockSignals(True)
+            self.payment_method.setCurrentText("Cash")
+            self.payment_method.blockSignals(False)    
         
         
     
@@ -337,7 +363,7 @@ class AddPurchaseReturnWidget(QWidget):
                 padding: 6px 10px;
             }
             QListView::item:selected {
-                background-color: #0078d7;
+                background-color: #5A9EC9;
                 color: white;
             }
         """)
@@ -469,18 +495,17 @@ class AddPurchaseReturnWidget(QWidget):
             QMessageBox.information(None, 'Error', query.lastError().text())
         
     
-    
+     
+        
     def save_purchase_return(self):
-        
-        
+
         db = QSqlDatabase.database()
-        
+
         if not db.transaction():
             QMessageBox.critical(None, "Database Error", "Could not start transaction.")
             return
 
         try:
-            
             supplier = self.supplier_edit.currentData()
             rep = self.rep_edit.currentData()
 
@@ -499,12 +524,7 @@ class AddPurchaseReturnWidget(QWidget):
             received = round(safe_float(self.receive_edit.text()), 2)
             remaining = round(safe_float(self.remainingdata.text()), 2)
 
-            # # --- Financial Consistency Check ---
-            # if round(subtotal + roundoff, 2) != total:
-            #     raise ValueError("Total does not match Subtotal + Roundoff.")
-
-            # if round(total - received, 2) != remaining:
-            #     raise ValueError("Remaining amount calculation mismatch.")
+            payment = self.payment_handler.payment_data.copy()
 
             # --- Remaining Logic ---
             writeoff = 0.0
@@ -513,29 +533,35 @@ class AddPurchaseReturnWidget(QWidget):
 
             if remaining == 0.0:
                 pass
-
             elif remaining > 0.0:
                 if self.checkbox.isChecked():
                     writeoff = remaining
                 else:
                     receiveable = remaining
-
             else:  # remaining < 0
                 payable = abs(remaining)
+
+            session_id = get_current_session(self)
+            if session_id is None:
+                raise ValueError("No active session found.")
 
             # --- Insert Header ---
             query = QSqlQuery()
             query.prepare("""
                 INSERT INTO purchase_return
-                (supplier, rep, subtotal, roundoff, total, received, remaining, writeoff, payable, receiveable)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (
+                    supplier, rep, subtotal, roundoff, total, received, remaining,
+                    writeoff, payable, receiveable, session_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )
             """)
 
             values = (
                 supplier, rep,
                 subtotal, roundoff, total,
                 received, remaining,
-                writeoff, payable, receiveable
+                writeoff, payable, receiveable,
+                session_id
             )
 
             for v in values:
@@ -549,29 +575,26 @@ class AddPurchaseReturnWidget(QWidget):
             if not return_id:
                 raise Exception("Failed to retrieve inserted return ID.")
 
-            db.commit()
-            QMessageBox.information(None, "Success", "Purchase Return Saved Successfully")
-
-
-
             print("About to add purchase transaction")
-            
-            
-            
+
             supplier = int(supplier)
 
             # Fetch current supplier balances
             supplier_query = QSqlQuery()
-            supplier_query.prepare("SELECT payable, receiveable FROM supplier WHERE id = ?")
+            supplier_query.prepare("""
+                SELECT payable, receiveable
+                FROM supplier
+                WHERE id = ?
+            """)
             supplier_query.addBindValue(supplier)
 
             if supplier_query.exec() and supplier_query.next():
-                supplier_payable = float(supplier_query.value(0))
-                supplier_receiveable = float(supplier_query.value(1))
+                supplier_payable = float(supplier_query.value(0) or 0.0)
+                supplier_receiveable = float(supplier_query.value(1) or 0.0)
             else:
                 print("Error fetching supplier:", supplier_query.lastError().text())
                 QMessageBox.critical(self, "Error", "Supplier not found or database error.")
-                raise Exception
+                raise Exception("Supplier not found or database error.")
 
             transaction_type = "PURCHASE RETURN"
             ref_no = None
@@ -580,12 +603,11 @@ class AddPurchaseReturnWidget(QWidget):
             current_payable = 0.0
             current_receivable = 0.0
 
-            remaining = total - received   # IMPORTANT
+            remaining = round(total - received, 2)
 
             if remaining > 0.0:
                 # Supplier owes you
                 current_receivable = remaining
-
             elif remaining < 0.0:
                 # You owe supplier (over refund case)
                 current_payable = abs(remaining)
@@ -599,59 +621,83 @@ class AddPurchaseReturnWidget(QWidget):
             receivable_after = receivable_before + current_receivable
 
             # Transaction meta fields
-            due_amount = 0.0              # not applicable for return
-            paid_now = 0.0                # not applicable for return
-            remaining_due = 0.0           # not applicable
+            due_amount = 0.0
+            paid_now = 0.0
+            remaining_due = 0.0
 
-            receiveable_now = total       # value of goods returned
-            received = received      # refund received now
+            receiveable_now = total
+            received_now = received
             remaining_now = remaining
 
-            note = "Purchase Return recorded with total amount " + str(total) + ". Received: " + str(received) + ". Remaining: " + str(remaining_now) + ". Write-off: " + str(writeoff)
+            note = (
+                "Purchase Return recorded with total amount " + str(total) +
+                ". Received: " + str(received_now) +
+                ". Remaining: " + str(remaining_now) +
+                ". Write-off: " + str(writeoff)
+            )
 
             # Insert transaction record
             query = QSqlQuery()
             query.prepare("""
-                INSERT INTO supplier_transaction 
-                (supplier, transaction_type, ref, return_ref,
-                payable_before, due_amount, paid, remaining_due, payable_after,
-                receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
-                rep, note)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO supplier_transaction
+                (
+                    supplier, transaction_type, ref, return_ref,
+                    payable_before, due_amount, paid, remaining_due, payable_after,
+                    receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
+                    payment_method, bank_name, account_no, transaction_mode,
+                    wallet_provider, wallet_no, payment_reference,
+                    rep, note, session_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
 
             query.addBindValue(supplier)
             query.addBindValue(transaction_type)
             query.addBindValue(ref_no)
             query.addBindValue(return_ref)
+
             query.addBindValue(payable_before)
             query.addBindValue(due_amount)
             query.addBindValue(paid_now)
             query.addBindValue(remaining_due)
             query.addBindValue(payable_after)
+
             query.addBindValue(receivable_before)
             query.addBindValue(receiveable_now)
-            query.addBindValue(received)
+            query.addBindValue(received_now)
             query.addBindValue(remaining_now)
             query.addBindValue(receivable_after)
+
+            query.addBindValue(payment.get("payment_method") or None)
+            query.addBindValue(payment.get("bank_name") or None)
+            query.addBindValue(payment.get("account_no") or None)
+            query.addBindValue(payment.get("transaction_mode") or None)
+            query.addBindValue(payment.get("wallet_provider") or None)
+            query.addBindValue(payment.get("wallet_no") or None)
+            query.addBindValue(payment.get("payment_reference") or None)
+
             query.addBindValue(rep)
-            query.addBindValue(note if 'note' in locals() else "")
+            query.addBindValue(note)
+            query.addBindValue(session_id)
 
             if query.exec():
                 insert_id = query.lastInsertId()
                 print("Supplier transaction saved with ID:", insert_id)
-                QMessageBox.information(None, "Success", f"Supplier Transaction Stored Successfully (ID: {insert_id})")
             else:
                 print("Error inserting supplier transaction:", query.lastError().text())
                 QMessageBox.critical(None, "Error", query.lastError().text())
-                raise Exception
+                raise Exception(query.lastError().text())
 
             # Update supplier balances
             new_payable = payable_after
             new_receiveable = receivable_after
 
             update_supplier = QSqlQuery()
-            update_supplier.prepare("UPDATE supplier SET payable = ?, receiveable = ? WHERE id = ?")
+            update_supplier.prepare("""
+                UPDATE supplier
+                SET payable = ?, receiveable = ?
+                WHERE id = ?
+            """)
             update_supplier.addBindValue(new_payable)
             update_supplier.addBindValue(new_receiveable)
             update_supplier.addBindValue(supplier)
@@ -661,32 +707,24 @@ class AddPurchaseReturnWidget(QWidget):
             else:
                 print("Error updating supplier balances:", update_supplier.lastError().text())
                 QMessageBox.critical(self, "Error", update_supplier.lastError().text())
-                raise Exception
+                raise Exception(update_supplier.lastError().text())
 
-            
-            
-            
-            
             self.return_items(return_id)
-        
-        
+
         except Exception as e:
             print("An error occurred:", str(e))
-            QMessageBox.critical(None, "Error", f"An error occurred while saving the purchase: {str(e)}")
+            QMessageBox.critical(None, "Error", f"An error occurred while saving the purchase return: {str(e)}")
             db.rollback()
-        
+
         else:
             db.commit()
             print("Transaction committed successfully")
-            QMessageBox.information(None, "Success", "Purchase saved successfully")
+            QMessageBox.information(None, "Success", "Purchase return saved successfully")
             self.clear_fields()
-        
+
         finally:
             print("Database connection closed")
         
-        
-    
-    
     
     def return_items(self, return_id):
 
@@ -721,11 +759,11 @@ class AddPurchaseReturnWidget(QWidget):
             
             product_widget = self.table.cellWidget(row, 1)
             if not product_widget:
-                raise ValueError(f"Product missing at row {row+1}")
+                continue
 
             product_id = product_widget.currentData()
             if product_id is None:
-                raise ValueError(f"Product not selected at row {row+1}")
+                continue
             
             batch_no = self.table.cellWidget(row, 2).currentText()
             purchased_qty = safe_int(self.table.cellWidget(row, 3))
@@ -1057,6 +1095,10 @@ class AddPurchaseReturnWidget(QWidget):
         self.note.clear()
         
         self.table.setRowCount(0)
+        
+        self.payment_method.blockSignals(True); 
+        self.payment_method.setCurrentIndex(0) 
+        self.payment_method.blockSignals(False)
         
         self.populate_suppliers()
         

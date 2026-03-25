@@ -16,23 +16,25 @@ class ProductListWidget(QWidget):
     def __init__(self, parent=None):
 
         super().__init__(parent)
-
+        
+        self.current_page = 1
+        self.page_size = 50
+        self.current_search_text = ""
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(20, 20, 20, 20)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Product Information", objectName="SectionTitle")
         self.addproduct = QPushButton("Add Product", objectName="TopRightButton")
         self.addproduct.setCursor(Qt.PointingHandCursor)
-        self.addproduct.setFixedWidth(200)
+        self.addproduct.setFixedWidth(150)
         
         
         
-        header_layout.setContentsMargins(0, 0, 0, 10)
-        header_layout.addWidget(heading)
+        header_layout.addWidget(heading, 1)
         header_layout.addWidget(self.addproduct)
 
         self.layout.addLayout(header_layout)
@@ -55,24 +57,24 @@ class ProductListWidget(QWidget):
         
         info_layout = QHBoxLayout()
         
-        total_products_label = QLabel("Total Products: ")
-        self.total_products_value = QLabel("0") 
+        total_products_label = QLabel("Resulted Records: ")
+        total_products_label.setFixedWidth(200)
+        self.total_products_value = QLabel("0")
+        
+        # push to the left
+        self.total_products_value.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.total_products_value.setAlignment(Qt.AlignLeft | Qt.AlignVCenter) 
 
-        low_products_label = QLabel(" | Low Stock Products: ")
-        self.low_products_value = QLabel("0")
+        
+        info_layout.addWidget(total_products_label)
+        info_layout.addWidget(self.total_products_value, 1)
         
         
-        info_layout.addWidget(total_products_label, 2)
-        info_layout.addWidget(self.total_products_value, 2)
-        info_layout.addSpacing(30)
-        info_layout.addWidget(low_products_label, 2)
-        info_layout.addWidget(self.low_products_value, 2)
-        info_layout.addSpacing(30)
-        
-        low_stock = QPushButton("View Low Stock", objectName="TopRightButton")
+        low_stock = QPushButton("Low Stock", objectName="TopRightButton")
+        low_stock.setFixedWidth(150)
         low_stock.clicked.connect(lambda: self.view_low_stock())
         
-        info_layout.addWidget(low_stock, 2)
+        info_layout.addWidget(low_stock)
         low_stock.setCursor(Qt.PointingHandCursor)
 
         
@@ -86,6 +88,9 @@ class ProductListWidget(QWidget):
         
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Search Product...")
+        
+        # convert input to uppercase
+        self.search_edit.textChanged.connect(lambda text: self.search_edit.setText(text.upper()))
 
         self.search_timer = QTimer()
         self.search_timer.setSingleShot(True)
@@ -96,12 +101,19 @@ class ProductListWidget(QWidget):
 
         search_layout.addWidget(self.search_edit, 6)
         self.layout.addLayout(search_layout)
+        
+        self.search_category = QComboBox()
+        self.search_category.addItems(["Product", "Brand", "All"])
+        self.search_category.setFixedWidth(150)
+        search_layout.addWidget(self.search_category, 1)
+        
+        
         self.layout.addSpacing(10)
         
         
 
 
-        self.row_height = 40
+        self.row_height = 34
 
         self.table = MyTable(column_ratios=[0.05, 0.25, 0.15, 0.12, 0.12])
         headers = ['No.', 'Product', 'Manufacturer', 'Stock', 'Detail']
@@ -123,6 +135,7 @@ class ProductListWidget(QWidget):
 
         self.table.setMinimumWidth(1000)
         
+        
         # Hide vertical header (row numbers)
         self.table.verticalHeader().setVisible(False)
         
@@ -133,7 +146,7 @@ class ProductListWidget(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
 
-        self.layout.addWidget(self.table)
+        self.layout.addWidget(self.table, 1)
         
         # Pagination Layout
         pagination_layout = QHBoxLayout()
@@ -153,9 +166,8 @@ class ProductListWidget(QWidget):
         self.layout.addLayout(pagination_layout)
 
         
-        self.layout.addStretch()
         self.show_products_info()
-
+        
         
         self.setStyleSheet(load_stylesheets())
         
@@ -268,11 +280,7 @@ class ProductListWidget(QWidget):
 
 
         """)
-        if low_stock_query.next():
-            low_stock_products = low_stock_query.value(0)
-            self.low_products_value.setText(str(low_stock_products))
-        else:
-            self.low_products_value.setText("0")
+        
 
             
             
@@ -280,403 +288,38 @@ class ProductListWidget(QWidget):
 
     def show_next_page(self):
         
-        import math
-        from PySide6.QtSql import QSqlQuery, QSqlQueryModel
-        from PySide6.QtWidgets import QMessageBox
+        next_page = self.current_page + 1
 
-
-        # get total rows
-        count_q = QSqlQuery()
-        if not count_q.exec_("SELECT COUNT(*) FROM product"):
-            QMessageBox.critical(None, "Error", f"Count query failed: {count_q.lastError().text()}")
-            return
-        
-        count_q.next()
-        total_rows = count_q.value(0) or 0
-        total_pages = max(1, math.ceil(int(total_rows) / int(self.page_size)))
-        
-        print("Total Pages are: ", total_pages)
-
-        # don't advance beyond last page
-        if self.current_page >= total_pages:
-            self.next_button.setEnabled(False)
-            return
-
-        self.current_page += 1
-        offset = (self.current_page - 1) * self.page_size
-
-        sql = f"SELECT * FROM product LIMIT {self.page_size} OFFSET {offset}"
-        query = QSqlQuery()
-        query.prepare(sql)
-
-        if not query.exec():
-            QMessageBox.critical(None, "Error", f"Query failed: {query.lastError().text()}")
-            return
-       
-        try:
-            # self.table.clearContents()
-            # rows = model.rowCount()
-            # cols = model.columnCount()
-            # self.table.setRowCount(rows)
-            # self.table.setColumnCount(cols)
-            # # set headers if available
-            # headers = [model.headerData(c, 1) for c in range(cols)]
-            # self.table.setHorizontalHeaderLabels([str(h) if h is not None else "" for h in headers])
-            # for r in range(rows):
-            #     for c in range(cols):
-            #         value = model.data(model.index(r, c))
-            #         item = QTableWidgetItem(str(value) if value is not None else "")
-            #         self.table.setItem(r, c, item)
-            
-            self.table.setRowCount(0)  # Clear existing rows
-            row = 0
-            
-            print("Query Successful Got the rows, populating table now")
-
-            while query.next():
-
-                counter = str(offset + row + 1)
-                self.table.insertRow(row)
-
-                product_id = query.value(0)
-                name = query.value(1)
-                code = query.value(2)
-                category = query.value(3)
-                brand = query.value(4)
-                form = query.value(6)
-                strength = query.value(7)
-                
-                name = f"{name} {form} {strength}"
-                
-                counter = QTableWidgetItem(counter)
-                name = QTableWidgetItem(name)
-                code = QTableWidgetItem(code)
-                category = QTableWidgetItem(category)
-                brand = QTableWidgetItem(brand)
-
-                
-                self.table.setItem(row, 0, counter)
-                self.table.setItem(row, 1, name)
-                self.table.setItem(row, 2, code)
-                self.table.setItem(row, 3, category)
-                self.table.setItem(row, 4, brand)
-                
-                product_id = int(product_id)
-                
-                
-                # bring stock and level from stock table
-                stock_query = QSqlQuery()
-                stock_query.prepare("SELECT packsize, units, reorder from stock where product = ?")
-                stock_query.addBindValue(product_id)
-                
-                if stock_query.exec() and stock_query.next():
-                    
-                    packsize = stock_query.value(0)
-                    units = stock_query.value(1)
-                    reorder = stock_query.value(2)
-                    
-                    # packsize = int(packsize)
-                    # units = int(units)
-                    # reorder = int(reorder)
-                    
-                    level = ""
-                    
-                    
-                    if packsize != 0:
-                        
-                        packs = units // packsize
-                        
-                        if packs > reorder:
-                            level = 'normal'
-                        else:
-                            level = 'low'
-                        
-                        
-                        rems = units % packsize
-
-                        if packs > 0 and rems > 0:
-                            stock = f"{packs} + ({rems})"
-                        elif packs > 0:
-                            stock = f"{packs}"
-                        else:
-                            stock = f"    ({rems})"
-
-                    
-                    
-                    stock = QTableWidgetItem(str(stock))
-                    # stock.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                    level = QTableWidgetItem(level)
-                    
-                    self.table.setItem(row, 5, stock)
-                    self.table.setItem(row, 6, level)
-                
-                    
-                
-                
-                # inserting product status from batch table
-                
-                batch_query = QSqlQuery()
-                batch_query.prepare("SELECT status, resolved FROM batch WHERE product = :product_id")
-                batch_query.bindValue(":product_id", product_id)
-                
-                status = "Valid"
-                
-                if batch_query.exec():
-                    
-                    while batch_query.next():
-
-                        batch_status = batch_query.value(0)
-                        resolved = batch_query.value(1)
-                        
-                        if resolved:
-                            continue
-                        
-                        if batch_status == 'near-expiry' or batch_status == 'expired':
-                            status = 'Near / Expired'
-                        
-                        
-                else:
-                    
-                    print("Error executing batch query:", batch_query.lastError().text())
-                
-                
-                status = QTableWidgetItem(status)
-                self.table.setItem(row, 7, status)
-                
-                detail = QPushButton('Details')
-                detail.setCursor(Qt.PointingHandCursor)
-                detail.setStyleSheet("""
-                        QPushButton {
-                            background-color: transparent;
-                            color: #333;
-                            padding: 4px 12px;
-                            border-radius: 2px;
-                            font-weight: 600;
-                        }
-                        QPushButton:hover {
-                            background-color: #340238;
-                            color: #fff;
-                        }
-                        QPushButton:pressed {
-                            background-color: #47034E;
-                            color: #fff;
-                        }
-                    
-                """)
-                
-                
-                self.table.setCellWidget(row, 8, detail)
-                detail.clicked.connect(partial(self.detailpagesignal.emit, product_id))
-                
-                row += 1
-            
-                    
-        except Exception:
-            # if fallback fails, at least inform user
-            QMessageBox.information(None, "Info", "Unable to populate table widget with model; check table type.")
-
-        # update buttons enabled state
-        self.prev_button.setEnabled(self.current_page > 1)
-        self.next_button.setEnabled(self.current_page < total_pages)
-
-        
+        if self.current_search_text:
+            self.search_rows(
+                self.current_search_text,
+                page=next_page,
+                page_size=self.page_size
+            )
+        else:
+            self.load_products_into_table(
+                page=next_page,
+                page_size=self.page_size
+            )
     
     def show_previous_page(self):
         
-        import math
-        from PySide6.QtSql import QSqlQuery, QSqlQueryModel
-        from PySide6.QtWidgets import QMessageBox, QTableWidgetItem
-
-        if not hasattr(self, "page_size"):
-            self.page_size = 50
-        if not hasattr(self, "current_page"):
-            self.current_page = 1
-
-        # Get total row count
-        count_q = QSqlQuery()
-        if not count_q.exec_("SELECT COUNT(*) FROM product"):
-            QMessageBox.critical(None, "Error", f"Count query failed: {count_q.lastError().text()}")
-            return
-        count_q.next()
-        total_rows = count_q.value(0) or 0
-        total_pages = max(1, math.ceil(int(total_rows) / int(self.page_size)))
-
-        # Don't go below page 1
         if self.current_page <= 1:
-            self.prev_button.setEnabled(False)
             return
 
-        self.current_page -= 1
-        offset = (self.current_page - 1) * self.page_size
+        prev_page = self.current_page - 1
 
-        # Query for that page
-        sql = f"SELECT * FROM product LIMIT {self.page_size} OFFSET {offset}"
-        query = QSqlQuery()
-        query.prepare(sql)
-        
-        if not query.exec():
-            QMessageBox.critical(None, "Error", f"Query failed: {query.lastError().text()}")
-            return
-
-
-        try:
-            
-            
-            self.table.setRowCount(0)  # Clear existing rows
-            row = 0
-
-            while query.next():
-
-                counter = counter = str(offset + row + 1)
-                self.table.insertRow(row)
-
-                product_id = query.value(0)
-                name = query.value(1)
-                code = query.value(2)
-                category = query.value(3)
-                brand = query.value(4)
-                form = query.value(6)
-                strength = query.value(7)
-                
-                name = f"{name} {form} {strength}"
-                
-                counter = QTableWidgetItem(counter)
-                name = QTableWidgetItem(name)
-                code = QTableWidgetItem(code)
-                category = QTableWidgetItem(category)
-                brand = QTableWidgetItem(brand)
-
-                
-                self.table.setItem(row, 0, counter)
-                self.table.setItem(row, 1, name)
-                self.table.setItem(row, 2, code)
-                self.table.setItem(row, 3, category)
-                self.table.setItem(row, 4, brand)
-                
-                product_id = int(product_id)
-                
-                
-                # bring stock and level from stock table
-                stock_query = QSqlQuery()
-                stock_query.prepare("SELECT packsize, units, reorder from stock where product = ?")
-                stock_query.addBindValue(product_id)
-                
-                if stock_query.exec() and stock_query.next():
-                    
-                    packsize = stock_query.value(0)
-                    units = stock_query.value(1)
-                    reorder = stock_query.value(2)
-                    
-                    # packsize = int(packsize)
-                    # units = int(units)
-                    # reorder = int(reorder)
-                    
-                    level = ""
-                    
-                    
-                    if packsize != 0:
-                        
-                        packs = units // packsize
-                        
-                        if packs > reorder:
-                            level = 'normal'
-                        else:
-                            level = 'low'
-                        
-                        
-                        rems = units % packsize
-
-                        if packs > 0 and rems > 0:
-                            stock = f"{packs} + ({rems})"
-                        elif packs > 0:
-                            stock = f"{packs}"
-                        else:
-                            stock = f"    ({rems})"
-
-                    
-                    level = QTableWidgetItem(level)
-                    if level == 'low':
-                        level.setForeground(QColor("red"))
-                    
-                    
-                    
-                    
-                    stock = QTableWidgetItem(str(stock))
-                    
-                    self.table.setItem(row, 5, stock)
-                    self.table.setItem(row, 6, level)
-                
-                    
-                
-                
-                # inserting product status from batch table
-                
-                batch_query = QSqlQuery()
-                batch_query.prepare("SELECT status, resolved FROM batch WHERE product = :product_id")
-                batch_query.bindValue(":product_id", product_id)
-                
-                status = "Valid"
-                
-                if batch_query.exec():
-                    
-                    while batch_query.next():
-
-                        batch_status = batch_query.value(0)
-                        resolved = batch_query.value(1)
-                        
-                        if resolved:
-                            continue
-                        
-                        if batch_status == 'near-expiry' or batch_status == 'expired':
-                            status = 'Near / Expired'
-                        
-                        
-                else:
-                    
-                    print("Error executing batch query:", batch_query.lastError().text())
-                
-                
-                status = QTableWidgetItem(status)
-                self.table.setItem(row, 7, status)
-                
-                detail = QPushButton('Details')
-                detail.setCursor(Qt.PointingHandCursor)
-                detail.setStyleSheet("""
-                        QPushButton {
-                            background-color: transparent;
-                            color: #333;
-                            padding: 4px 12px;
-                            border-radius: 2px;
-                            font-weight: 600;
-                        }
-                        QPushButton:hover {
-                            background-color: #340238;
-                            color: #fff;
-                        }
-                        QPushButton:pressed {
-                            background-color: #47034E;
-                            color: #fff;
-                        }
-                    
-                """)
-                
-                
-                self.table.setCellWidget(row, 8, detail)
-                detail.clicked.connect(partial(self.detailpagesignal.emit, product_id))
-                
-                row += 1
-            
-                    
-        except Exception:
-            # if fallback fails, at least inform user
-            QMessageBox.information(None, "Info previous", "Unable to populate table widget with model; check table type.")
-
-        # update buttons enabled state
-        
-        self.prev_button.setEnabled(self.current_page > 1)
-        self.next_button.setEnabled(self.current_page < total_pages)
-
-
+        if self.current_search_text:
+            self.search_rows(
+                self.current_search_text,
+                page=prev_page,
+                page_size=self.page_size
+            )
+        else:
+            self.load_products_into_table(
+                page=prev_page,
+                page_size=self.page_size
+            )
 
         
     
@@ -688,386 +331,273 @@ class ProductListWidget(QWidget):
         
         
 
-    def search_rows(self, text):
+    def search_rows(self, text, page=1, page_size=50):
         
-        if text.strip() == '':
-            self.load_products_into_table()
+        self.current_search_text = text
+        self.current_page = page
+        
+        text = text.strip()
+
+        if text == '':
+            self.load_products_into_table(page=page, page_size=page_size)
             return
 
+        category = self.search_category.currentText()
         pattern = f"%{text}%"
-        
-        
-        
-        search_query = QSqlQuery()
-        search_query.prepare(f"SELECT id, display_name, brand FROM product WHERE display_name LIKE ? LIMIT 50")
-        search_query.addBindValue(pattern)
-        
-        print("SEarching foir text ", pattern)
+        offset = (page - 1) * page_size
 
-        self.table.setRowCount(0)  # Clear existing rows
+        self.table.setRowCount(0)
 
-        row = 0
-        if search_query.exec():
-            print("Searching for ", text, " and query is successful")
-            
-            while search_query.next():
-                
-                counter = row + 1
-                counter = str(counter)
-                self.table.insertRow(row)
-                
-                product_id = search_query.value(0)
-                name = search_query.value(1)
-                brand = search_query.value(2)
-                
-                
-                counter = QTableWidgetItem(counter)
-                name = QTableWidgetItem(name)
-                brand = QTableWidgetItem(brand)
-
-                
-                self.table.setItem(row, 0, counter)
-                self.table.setItem(row, 1, name)
-                self.table.setItem(row, 2, brand)
-                
-                product_id = int(product_id)
-                
-                
-                # bring stock and level from stock table
-                stock_query = QSqlQuery()
-                stock_query.prepare("""SELECT COALESCE(SUM(quantity_remaining), 0) AS total_stock
-                                        FROM batch
-                                        WHERE product_id = ?;
-                                    """)
-                
-                stock_query.addBindValue(product_id)
-                
-                if stock_query.exec() and stock_query.next():
-                    
-                    total_stock = stock_query.value(0)
-                    print("Total stock is: ", total_stock)
-                    
-                    stock = QTableWidgetItem(str(total_stock))
-                    
-                    self.table.setItem(row, 3, stock)
-                    
-                else:
-                    self.table.setItem(row, 3, QTableWidgetItem("0"))
-                    
-                
-                
-                detail = QPushButton('Details')
-                detail.setCursor(Qt.PointingHandCursor)
-                detail.setStyleSheet("""
-                        QPushButton {
-                            background-color: transparent;
-                            color: #333;
-                            padding: 4px 12px;
-                            border-radius: 2px;
-                            font-weight: 600;
-                        }
-                        QPushButton:hover {
-                            background-color: #340238;
-                            color: #fff;
-                        }
-                        QPushButton:pressed {
-                            background-color: #47034E;
-                            color: #fff;
-                        }
-                    
-                """)
-                
-                
-                self.table.setCellWidget(row, 4, detail)
-                detail.clicked.connect(partial(self.detailpagesignal.emit, product_id))
-                
-                row += 1
-            
-            
-            
-        else:
-            print("Search query failed:", search_query.lastError().text())    
-            
-        
-        
-        
-        
-
-    def load_products_into_table(self):
-        
-
-        query = QSqlQuery()
-        query.exec("SELECT id, display_name, brand FROM product LIMIT 50")
-
-        self.table.setRowCount(0)  # Clear existing rows
-
-        row = 0
-        
-        while query.next():
-            
-            counter = row + 1
-            counter = str(counter)
-            self.table.insertRow(row)
-            
-            product_id = query.value(0)
-            name = query.value(1)
-            brand = query.value(2)
-            
-            
-            counter = QTableWidgetItem(counter)
-            name = QTableWidgetItem(name)
-            brand = QTableWidgetItem(brand)
-
-            
-            self.table.setItem(row, 0, counter)
-            self.table.setItem(row, 1, name)
-            self.table.setItem(row, 2, brand)
-            
-            product_id = int(product_id)
-            
-            
-            # bring stock and level from stock table
-            stock_query = QSqlQuery()
-            stock_query.prepare("""SELECT COALESCE(SUM(quantity_remaining), 0) AS total_stock
-                                    FROM batch
-                                    WHERE product_id = ?;
-                                """)
-            
-            stock_query.addBindValue(product_id)
-            
-            if stock_query.exec() and stock_query.next():
-                
-                total_stock = stock_query.value(0)
-                
-                stock = QTableWidgetItem(str(total_stock))
-                
-                self.table.setItem(row, 3, stock)
-                
-            else:
-                self.table.setItem(row, 3, QTableWidgetItem("0"))
-                
-            
-            
-            detail = QPushButton('Details')
-            detail.setCursor(Qt.PointingHandCursor)
-            detail.setStyleSheet("""
-                    QPushButton {
-                        background-color: transparent;
-                        color: #333;
-                        padding: 4px 12px;
-                        border-radius: 2px;
-                        font-weight: 600;
-                    }
-                    QPushButton:hover {
-                        background-color: #340238;
-                        color: #fff;
-                    }
-                    QPushButton:pressed {
-                        background-color: #47034E;
-                        color: #fff;
-                    }
-                
-            """)
-            
-            
-            self.table.setCellWidget(row, 4, detail)
-            detail.clicked.connect(partial(self.detailpagesignal.emit, product_id))
-            
-            row += 1
-        
-        
-        
-        
-
-    def save_stock_adjustment(self, product_id, packs_src, units_src, totalcost_src, already_adjusted, table):
-        
-
-        # Fetch packsize, current units from stock table
-        stock_query = QSqlQuery()
-        stock_query.prepare("SELECT packsize, units FROM stock WHERE product = :product_id")
-        stock_query.bindValue(":product_id", product_id)
-
-        if stock_query.exec() and stock_query.next():
-            packsize = stock_query.value(0) or 0
-            stockunits = stock_query.value(1) or 0
-        else:
-            print("Error retrieving stock information:", stock_query.lastError().text())
-            return
-
-        # Parse inputs safely
-        
-        
-        if already_adjusted:
-            # Text values passed directly
-            packs_text = packs_src
-            units_text = units_src
-            # maybe skip or just re-update
-        else:
-            # Widgets passed, read their text
-            packs_text = packs_src.text()
-            units_text = units_src.text()
-            
-        
-        cost_text = totalcost_src.text()
-
-        update_fields = []
-        update_values = {}
-
-        # --- Stock adjustment ---
-        if packs_text != '' or units_text != '':
-            
-            packs_text = int(packs_text) if packs_text != '' else 0
-            units_text = int(units_text) if units_text != '' else 0
-            
-            entered_units = packs_text * packsize + units_text
-            total_units = stockunits + units_text + (packs_text * packsize)
-
-
-            # update stock
-            new_stock = QSqlQuery()
-            new_stock.prepare("UPDATE stock SET units = :units WHERE product = :product_id")
-            new_stock.bindValue(":units", total_units)
-            new_stock.bindValue(":product_id", product_id)
-
-            if new_stock.exec():
-                print("Stock updated successfully.")
-            else:
-                print("Error updating stock:", new_stock.lastError().text())
-                
-                
-
-            update_fields.append("qty = :units")
-            update_fields.append("stock_adjusted = 1")
-            update_values[":units"] = entered_units
-            print(f"StockCost Stock updated → Product ID {product_id}: Units={total_units}")
-        
-
-        # --- Cost adjustment ---
-        if cost_text != "":  # only skip if field is blank
-            
-            totalcost = float(cost_text)
-            update_fields.append("totalcost = :totalcost")
-            update_fields.append("cost_adjusted = 1")
-            update_values[":totalcost"] = totalcost
-            print(f"StockCost Cost updated → Product ID {product_id}: TotalCost={totalcost}")
-
-        # Nothing to update?
-        if not update_fields:
-            print(f"No valid input for Product ID {product_id}. Nothing updated.")
-            return
-
-        # Build dynamic SQL
-        sql = f"""
-            UPDATE stockcost
-            SET {', '.join(update_fields)}
-            WHERE product = :product_id AND stocktype = 'onhand'
+        # common FROM + JOIN part
+        from_clause = """
+            FROM product p
+            LEFT JOIN manufacturer m
+                ON p.manufacturer_id = m.id
+            LEFT JOIN (
+                SELECT product_id, SUM(quantity_remaining) AS total_stock
+                FROM batch
+                GROUP BY product_id
+            ) bs
+                ON p.id = bs.product_id
         """
 
-        update_query = QSqlQuery()
-        update_query.prepare(sql)
-        for key, value in update_values.items():
-            update_query.bindValue(key, value)
-        update_query.bindValue(":product_id", product_id)
+        where_clause = ""
+        bindings = []
 
-        # Execute
-        if update_query.exec():
-            print(f"Stock adjustment saved successfully for Product ID {product_id}.")
-            
-            # Hide the row after saving
-            row = table.currentRow()
-            table.setRowHidden(row, True)
-            
-            
-            # index = self.table.indexAt(event.pos())
-            # if index.isValid():
-            #     row = index.row()
-            #     self.table.setRowHidden(row, True)
-            
-            # self.stock_table.cellClicked.connect(lambda: self.hide_row_on_click(row=self.stock_table.currentRow()))
+        if category == "Product":
+            where_clause = "WHERE p.display_name LIKE ?"
+            bindings.append(pattern)
+
+        elif category == "Brand":
+            where_clause = "WHERE COALESCE(m.name, '') LIKE ?"
+            bindings.append(pattern)
+
+        elif category == "All":
+            where_clause = """
+                WHERE (
+                    p.display_name LIKE ?
+                    OR COALESCE(m.name, '') LIKE ?
+                )
+            """
+            bindings.extend([pattern, pattern])
 
         else:
-            print("Error saving stock adjustment:", update_query.lastError().text())
+            where_clause = "WHERE p.display_name LIKE ?"
+            bindings.append(pattern)
+
+        # 1) count only filtered rows
+        count_query = QSqlQuery()
+        count_sql = f"""
+            SELECT COUNT(*)
+            {from_clause}
+            {where_clause}
+        """
+        count_query.prepare(count_sql)
+
+        for value in bindings:
+            count_query.addBindValue(value)
+
+        total_records = 0
+        if count_query.exec() and count_query.next():
+            total_records = int(count_query.value(0))
+        else:
+            print("Count query failed:", count_query.lastError().text())
+            return
+
+        # 2) load only current page
+        data_query = QSqlQuery()
+        data_sql = f"""
+            SELECT
+                p.id,
+                p.display_name,
+                COALESCE(m.name, '') AS manufacturer_name,
+                COALESCE(bs.total_stock, 0) AS total_stock
+            {from_clause}
+            {where_clause}
+            ORDER BY p.id DESC
+            LIMIT ? OFFSET ?
+        """
+        data_query.prepare(data_sql)
+
+        for value in bindings:
+            data_query.addBindValue(value)
+
+        data_query.addBindValue(page_size)
+        data_query.addBindValue(offset)
+
+        if not data_query.exec():
+            print("Search query failed:", data_query.lastError().text())
+            return
+
+        row = 0
+        while data_query.next():
+            self.table.insertRow(row)
+
+            product_id = int(data_query.value(0))
+            display_name = str(data_query.value(1) or "")
+            manufacturer_name = str(data_query.value(2) or "")
+            total_stock = data_query.value(3) or 0
+
+            self.table.setItem(row, 0, QTableWidgetItem(str(offset + row + 1)))
+            self.table.setItem(row, 1, QTableWidgetItem(display_name))
+            self.table.setItem(row, 2, QTableWidgetItem(manufacturer_name))
+            self.table.setItem(row, 3, QTableWidgetItem(str(total_stock)))
+
+            container = QWidget()
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(6, 2, 6, 2)
+            layout.setAlignment(Qt.AlignCenter)
+
+            container = QWidget()
+
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setAlignment(Qt.AlignCenter)
+
+            detail = QPushButton("Details")
+            detail.setCursor(Qt.PointingHandCursor)
+            detail.setFixedSize(80, 28)
+
+            detail.setStyleSheet("""
+                QPushButton {
+                    background-color: #f5f0f6;
+                    color: #244A62;
+                    border: 1px solid #d8c7da;
+                    border-radius: 14px;
+                    font-size: 12px;
+                    font-weight: 600;
+                }
+                QPushButton:hover {
+                    background-color: #244A62;
+                    color: white;
+                    border: 1px solid #244A62;
+                }
+            """)
+
+            layout.addWidget(detail)
+
+
+            detail.clicked.connect(partial(self.detailpagesignal.emit, product_id))
+            
+            self.table.setCellWidget(row, 4, detail)
+
+
+            row += 1
+
+        self.total_products_value.setText(f"<b>{total_records}</b>")
+
+        total_pages = max(1, (total_records + page_size - 1) // page_size)
+        self.prev_button.setEnabled(page > 1)
+        self.next_button.setEnabled(page < total_pages)    
+        
+        
+            
+        
+
+    def load_products_into_table(self, page=1, page_size=50):
+        
+        self.current_page = page
+        self.page_size = page_size
+        self.current_search_text = ""
+
+        # total count
+        count_query = QSqlQuery()
+        if not count_query.exec("SELECT COUNT(*) FROM product"):
+            print("Count error:", count_query.lastError().text())
+            return
+
+        total_records = 0
+        if count_query.next():
+            total_records = int(count_query.value(0))
+
+        offset = (page - 1) * page_size
+
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT 
+                p.id,
+                p.display_name,
+                COALESCE(m.name, '') AS manufacturer_name,
+                COALESCE(bs.total_stock, 0) AS total_stock
+            FROM product p
+            LEFT JOIN manufacturer m ON p.manufacturer_id = m.id
+            LEFT JOIN (
+                SELECT product_id, SUM(quantity_remaining) AS total_stock
+                FROM batch
+                GROUP BY product_id
+            ) bs ON p.id = bs.product_id
+            ORDER BY p.id DESC
+            LIMIT ? OFFSET ?
+        """)
+        query.addBindValue(page_size)
+        query.addBindValue(offset)
+
+        if not query.exec():
+            print("Load error:", query.lastError().text())
+            return
+
+        self.table.setRowCount(0)
+        row = 0
+
+        while query.next():
+            self.table.insertRow(row)
+
+            product_id = int(query.value(0))
+            display_name = str(query.value(1) or "")
+            manufacturer_name = str(query.value(2) or "")
+            total_stock = query.value(3) or 0
+
+            self.table.setItem(row, 0, QTableWidgetItem(str(offset + row + 1)))
+            self.table.setItem(row, 1, QTableWidgetItem(display_name))
+            self.table.setItem(row, 2, QTableWidgetItem(manufacturer_name))
+            self.table.setItem(row, 3, QTableWidgetItem(str(total_stock)))
             
             
-    
-    def hide_row_on_click(self, row):
+           
+            container = QWidget()
 
-        print("Stock table in dialog: for hidden row", self.stock_table)
-        self.stock_table.setRowHidden(row, True)
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setAlignment(Qt.AlignCenter)
 
+            detail = QPushButton("Details")
+            detail.setCursor(Qt.PointingHandCursor)
+            detail.setFixedSize(80, 28)
 
+            detail.setStyleSheet("""
+                QPushButton {
+                    background-color: #f5f0f6;
+                    color: #244A62;
+                    border: 1px solid #d8c7da;
+                    border-radius: 14px;
+                    font-size: 12px;
+                    font-weight: 600;
+                }
+                QPushButton:hover {
+                    background-color: #244A62;
+                    color: white;
+                    border: 1px solid #244A62;
+                }
+            """)
 
+            layout.addWidget(detail)
 
-
-
-    
-    # def save_stock_adjustment(self, product_id, packs_edit, units_edit, totalcost_edit):
-        
-        
-    #     # get packsize, units, from stock table for the product
-        
-    #     stock_query = QSqlQuery()
-    #     stock_query.prepare("SELECT packsize, units FROM stock WHERE product = :product_id")
-    #     stock_query.bindValue(":product_id", product_id)
-
-    #     if stock_query.exec() and stock_query.next():
-    #         packsize = stock_query.value(0)
-    #         stockunits = stock_query.value(1)
-    #     else:
-    #         print("Error retrieving stock information:", stock_query.lastError().text())
-    #         return
-        
-        
-    #     try:
+            detail.clicked.connect(partial(self.detailpagesignal.emit, product_id))
             
-    #         entered_units = int(units_edit.text() or 0)
-    #         entered_packs = int(packs_edit.text() or 0)
-    #         totalcost = float(totalcost_edit.text() or 0)
+            self.table.setCellWidget(row, 4, detail)
 
-    #         if packsize > 0:
-    #             total_units = entered_units + entered_packs * packsize + stockunits
-    #         else:
-    #             total_units = entered_units + entered_packs + stockunits
+            row += 1
+            
 
-                
-    #         # update stock 
-    #         new_stock = QSqlQuery()
-    #         new_stock.prepare("UPDATE stock SET units = :units WHERE product = :product_id")
-    #         new_stock.bindValue(":units", total_units)
-    #         new_stock.bindValue(":product_id", product_id)
+        self.total_products_value.setText(f"<b>{total_records}</b>")
 
-    #         if new_stock.exec():
-    #             print("Stock updated successfully.")
-    #         else:
-    #             print("Error updating stock:", new_stock.lastError().text())
-                
-                
+        total_pages = max(1, (total_records + page_size - 1) // page_size)
+        self.prev_button.setEnabled(page > 1)
+        self.next_button.setEnabled(page < total_pages) 
+            
+            
+                    
 
-    #     except ValueError:
-    #         print("Invalid input. Please enter numeric values for packs, units, and total cost.")
-    #         return
-        
-        
-    #     # Update the stockcost table
-    #     update_query = QSqlQuery()
-    #     update_query.prepare("""
-    #         UPDATE stockcost
-    #         SET qty = :units,
-    #             totalcost = :totalcost,
-    #             stock_adjusted = 1,
-    #             cost_adjusted = 1
-    #         WHERE product = :product_id AND stocktype = 'onhand'
-    #     """)
-    #     update_query.bindValue(":units", total_units)
-    #     update_query.bindValue(":totalcost", totalcost)
-    #     update_query.bindValue(":product_id", product_id)
-        
-    #     if update_query.exec():
-    #         print("Stock adjustment saved successfully.")
-    #     else:
-    #         print("Error saving stock adjustment:", update_query.lastError().text())
-        
-        
 
 
 
@@ -1078,6 +608,9 @@ class MyTable(QTableWidget):
         self.column_ratios = column_ratios or []
         header = self.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)  # user can drag
+        
+        
+        
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

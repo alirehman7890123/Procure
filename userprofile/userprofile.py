@@ -151,7 +151,7 @@ class ProfileWidget(QWidget):
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.FocusIn:
-            self.indicators[obj].setStyleSheet("background-color: #47034E; border: none;")  # active blue
+            self.indicators[obj].setStyleSheet("background-color: #2F5D7C; border: none;")  # active blue
         elif event.type() == QEvent.FocusOut:
             self.indicators[obj].setStyleSheet("background-color: #ccc; border: none;")  # reset gray
         return super().eventFilter(obj, event)

@@ -1,10 +1,10 @@
 
-from PySide6.QtWidgets import QWidget, QPushButton, QComboBox, QVBoxLayout, QHBoxLayout, QFrame, QLineEdit, QLabel, QSpacerItem, QSizePolicy, QMessageBox
+from PySide6.QtWidgets import QWidget, QApplication, QPushButton, QComboBox, QVBoxLayout, QHBoxLayout, QFrame, QLineEdit, QLabel, QSpacerItem, QSizePolicy, QMessageBox
 from PySide6.QtCore import QSize, Qt, QFile, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from utilities.stylus import load_stylesheets
-
-
+from utilities.payment_handler import PaymentMethodHandler
+from utilities.get_session import get_current_session
 
 class AddExpenseWidget(QWidget):
 
@@ -47,7 +47,7 @@ class AddExpenseWidget(QWidget):
         self.layout.addSpacing(20)
 
 
-        labels = ["Category", "Title", "Amount", "Description"]
+        labels = ["Category", "Title", "Payment Method", "Amount", "Description"]
         
         self.category = QComboBox()
         self.category.addItems(['Office', 'Pharmacist', 'Utility', 'Food' ])
@@ -72,10 +72,19 @@ class AddExpenseWidget(QWidget):
             }
         """)
         
+        
+        self.payment_handler = PaymentMethodHandler(self)
+
+        self.payment_method = QComboBox()
+        self.payment_method.addItems(["Cash", "Bank Transfer", "EasyPaisa", "JazzCash"])
+        self.payment_method.currentTextChanged.connect(self.on_payment_method_changed)
+        
+        
+        
         self.amount = QLineEdit()
         self.description = QLineEdit()
 
-        fields = [self.category, self.title, self.amount, self.description]
+        fields = [self.category, self.title, self.payment_method, self.amount, self.description]
 
         self.indicators = {}
 
@@ -120,9 +129,22 @@ class AddExpenseWidget(QWidget):
         self.setStyleSheet(load_stylesheets())
 
 
+
+    
+    def on_payment_method_changed(self, method):
+        
+        success = self.payment_handler.handle_method_change(method)
+
+        if not success:
+            self.payment_method.blockSignals(True)
+            self.payment_method.setCurrentText("Cash")
+            self.payment_method.blockSignals(False)
+
+
+
     def eventFilter(self, obj, event):
         if event.type() == QEvent.FocusIn:
-            self.indicators[obj].setStyleSheet("background-color: #0078d7; border: none;")
+            self.indicators[obj].setStyleSheet("background-color: #5A9EC9; border: none;")
         elif event.type() == QEvent.FocusOut:
             self.indicators[obj].setStyleSheet("background-color: #ccc; border: none;")
         return super().eventFilter(obj, event)
@@ -147,15 +169,50 @@ class AddExpenseWidget(QWidget):
             return
 
         
+        payment = self.payment_handler.payment_data.copy()
+        print(payment)
+        print("Payment data is as above")
+        
+        session_id = get_current_session(self)
+            
+        if session_id is None:
+            QMessageBox.warning(self, "Validation Error", "No active session found.")
+            return None
+        
+        
+        # get user_id from the session...
+        
+        username = QApplication.instance().property("username")
+        
+        user_query = QSqlQuery(db)
+        user_query.prepare("SELECT id FROM auth WHERE username = ?")
+        user_query.addBindValue(username)
+        user_query.exec()
+        if user_query.next():
+            user_id = user_query.value(0)
+        else:
+            user_id = None
+            return QMessageBox.critical(self, "Error", "User not found in database.")
+
         # Insert customer data
         query.prepare("""
-            INSERT INTO expense (category, title, amount, note) 
-            VALUES (?, ?, ?, ?)
+            INSERT INTO expense (category, title, amount, note, session_id, user_id, payment_method, bank_name, account_no, transaction_mode, wallet_provider, wallet_no, payment_reference) 
+
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """)
         query.addBindValue(category)
         query.addBindValue(title) 
         query.addBindValue(amount)
         query.addBindValue(note)
+        query.addBindValue(session_id)
+        query.addBindValue(user_id)
+        query.addBindValue(payment.get("payment_method") or None)
+        query.addBindValue(payment.get("bank_name") or None)
+        query.addBindValue(payment.get("account_no") or None)
+        query.addBindValue(payment.get("transaction_mode") or None)
+        query.addBindValue(payment.get("wallet_provider") or None)
+        query.addBindValue(payment.get("wallet_no") or None)
+        query.addBindValue(payment.get("payment_reference") or None)
 
         if query.exec():
             QMessageBox.information(self, "Success", "Expense added successfully")
@@ -173,3 +230,7 @@ class AddExpenseWidget(QWidget):
         self.title.clear()
         self.amount.clear()
         self.description.clear()
+        
+        self.payment_method.blockSignals(True); 
+        self.payment_method.setCurrentIndex(0) 
+        self.payment_method.blockSignals(False)

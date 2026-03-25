@@ -4,3 +4,4 @@ __pycache__/
 build/
 dist/
 starting.spec
+test_*.py

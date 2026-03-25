@@ -2,18 +2,18 @@ QTableWidget {
     border: 1px solid #ccc;
     border-radius: 8px;
     gridline-color: #eee;
-    font-size: 14px;
+    font-size: 12px;
     font-family: 'Segoe UI', 'Montserrat';
     background-color: #fafafa;
     alternate-background-color: #fdfdfd;
 }
 
 QHeaderView::section {
-    background-color: #47034E;
+    background-color: #2F5D7C;
     font-family: 'montserrat', 'roboto', 'arial';
     color: #fff;
     font-weight: 700;
-    padding: 8px 10px;
+    padding: 6px 10px;
     border: none;
     border-bottom: 2px solid #ddd;
 }
@@ -32,10 +32,11 @@ QTableWidget, QLineEdit {
 QTableWidget::item {
     padding: 2px 3px;
     color: #333;
+    border-bottom: 1px solid #333;
 }
 
 QTableWidget::item:selected {
-    background-color: #ffd7c2;
+    background-color: rgb(217, 233, 244);
 }
 
 
@@ -54,3 +55,19 @@ QScrollBar::handle:vertical {
 QScrollBar::handle:vertical:hover {
     background: #a0a0a0;
 }
+
+QTableWidget QLineEdit,
+QTableWidget QComboBox,
+QTableWidget QDateEdit {
+    border: none;
+    background: transparent;
+}
+
+QTableWidget QLineEdit:focus,
+QTableWidget QComboBox:focus,
+QTableWidget QDateEdit:focus {
+    border: 1px solid #5B8FB8;
+    background: #ffffff;
+}
+
+
