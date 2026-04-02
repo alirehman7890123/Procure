@@ -1,6 +1,7 @@
 
-from PySide6.QtWidgets import QApplication, QWidget,QTableWidget, QMainWindow,QMessageBox, QPushButton, QHBoxLayout, QVBoxLayout, QStackedLayout, QLabel,  QSizePolicy
-from PySide6.QtCore import QSize, Qt, QEvent, Signal
+from PySide6.QtWidgets import QApplication, QLineEdit, QWidget,QTableWidget, QMainWindow,QMessageBox, QPushButton, QHBoxLayout, QVBoxLayout, QStackedLayout, QLabel,  QSizePolicy
+from PySide6.QtCore import QSize, Qt, QEvent, Signal, QObject, QTimer, QStringListModel
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtWidgets import QScrollArea
 from utilities.sidebarbutton import SideBarButton
@@ -274,7 +275,7 @@ class MainWindow(QMainWindow):
         button_styles = """
         
             QPushButton {
-                padding: 15px 0;
+                padding: 10px 0;
                 padding-left: 30px; 
                 font-family: montserrat;
                 border:none;
@@ -697,23 +698,34 @@ class MainWindow(QMainWindow):
 
 
 
+class SelectAllLineEditFilter(QObject):
+    def eventFilter(self, obj, event):
+        if isinstance(obj, QLineEdit) and event.type() == QEvent.FocusIn:
+            QTimer.singleShot(0, obj.selectAll)
+        return super().eventFilter(obj, event)
+    
 
+
+
+
+    
 if __name__ == '__main__':
 
-    app = QApplication([])
-    
+    app = QApplication(sys.argv)
+
+    select_all_filter = SelectAllLineEditFilter()
+    app.installEventFilter(select_all_filter)
+
+
     style = ""
     for css_file in css_files:
         path = resource_path(css_file)
         with open(path, "r") as f:
             style += f.read() + "\n"
 
-
     app.setStyleSheet(style)
-    
+
     window = MainWindow()
-    
     window.show()
-    app.exec()
-    
-    
+
+    sys.exit(app.exec())

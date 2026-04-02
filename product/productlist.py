@@ -115,7 +115,7 @@ class ProductListWidget(QWidget):
 
         self.row_height = 34
 
-        self.table = MyTable(column_ratios=[0.05, 0.25, 0.15, 0.12, 0.12])
+        self.table = MyTable(column_ratios=[0.05, 0.25, 0.15, 0.12, 0.05])
         headers = ['No.', 'Product', 'Manufacturer', 'Stock', 'Detail']
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)

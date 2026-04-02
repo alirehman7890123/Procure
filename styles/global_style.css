@@ -10,7 +10,7 @@ QLabel {
 QLineEdit {
     color: #333;
     padding: 4px 8px;
-    font-size: 14px;
+    font-size: 12px;
     border: 1px solid #ccc;
     font-weight: 500;
     font-family: 'montserrat';
@@ -21,9 +21,9 @@ QLineEdit:placeholder {
 }
 
 QComboBox, QDateEdit {
-    color: #555;
-    padding: 4px 8px;
-    font-size: 14px;
+    color: #333;
+    padding: 3px 8px;
+    font-size: 12px;
     border: 1px solid #ccc;
     font-weight: 500;
     font-family: 'montserrat';
@@ -40,7 +40,7 @@ QLabel#SectionTitle {
     color: #333;
     font-weight: 700;
     font-family: 'roboto';
-    font-size: 20px;
+    font-size: 16px;
     padding-left: 0;
 }
 
@@ -60,10 +60,9 @@ QLabel#left_labels {
 QPushButton#TopRightButton {
     color: #fff;
     background-color: #2F5D7C;
-    font-weight: 700;
+    font-weight: 500;
     font-family: 'montserrat';
-    padding: 5px;
-    width: 250px;
+    padding: 3px;
 }
 
 QPushButton#SaveButton {
@@ -79,12 +78,16 @@ QPushButton#SaveButton {
 
 QPushButton#EntryButton {
     color: #fff;
-    font-weight: 700;
+    font-weight: 600;
     font-family: 'montserrat';
     border: 1px solid #ccc;
     background-color: #2F5D7C;
-    border-radius: 5px;
+    border-radius: 3px;
     padding: 5px;
+}
+QPushButton#EntryButton:hover {
+    background-color: #1D3648;
+    cursor: pointer;
 }
 
 QPushButton#SaveButton:hover {
@@ -144,4 +147,14 @@ QLabel#ErrorLabel {
     font-family: 'montserrat';
     font-size: 12px;
     padding-left: 0;
+}
+#FinalAmount {
+    font-size: 20px;
+    font-weight: 700;
+}
+
+#ReceivedAmount {
+    font-size: 16px;
+    font-weight: 600;
+    padding: 5px;
 }

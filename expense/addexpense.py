@@ -50,6 +50,7 @@ class AddExpenseWidget(QWidget):
         labels = ["Category", "Title", "Payment Method", "Amount", "Description"]
         
         self.category = QComboBox()
+        self.category.setEditable(True)
         self.category.addItems(['Office', 'Pharmacist', 'Utility', 'Food' ])
         
         self.title = QComboBox()

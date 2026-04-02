@@ -21,6 +21,7 @@ class AddProductWidget(QWidget):
         self.layout.setContentsMargins(40, 40, 40, 40)
         self.layout.setSpacing(20)
         
+        
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Product Information", objectName="SectionTitle")
@@ -773,10 +774,9 @@ class AddProductWidget(QWidget):
                         form,
                         strength,
                         packing,
-                        pack_size,
                         manufacturer_id
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """)
                 
                 
@@ -793,7 +793,6 @@ class AddProductWidget(QWidget):
                 product_query.addBindValue(form)
                 product_query.addBindValue(strength)
                 product_query.addBindValue(packing)
-                product_query.addBindValue(pack_size)
                 product_query.addBindValue(manufacturer_id)
 
                 if not product_query.exec():

@@ -449,10 +449,52 @@ class AddPurchaseWidget(QWidget):
         total = float(qty) * float(rate) - flat_discount + tax_amount
         self.amount_edit.setText(f"{total:.2f}")
         
-        
     
     
     def populate_totals_section(self):
+        
+        field_style = """
+            QLabel {
+                margin: 0;
+                padding-left: 5px;
+                font-size: 12px;
+            }
+
+            QLineEdit {
+                margin: 0;
+                padding: 5px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                font-size: 12px;
+                background-color: #f9f9f9;
+            }
+
+            QComboBox {
+                margin: 0;
+                padding: 5px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                font-size: 12px;
+                background-color: #f9f9f9;
+            }
+            
+            QLineEdit:focus,
+            QComboBox:focus,
+            QDateEdit:focus {
+                border: 2px solid #5B8FB8;
+                background: #F2F8FC;
+            }
+
+            KeyUpLineEdit {
+                margin: 0;
+                padding: 5px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                font-size: 12px;
+                background-color: #f9f9f9;
+            }
+        """
+
     
         totals_frame = QFrame()
         totals_frame.setObjectName("sectionCard")
@@ -472,19 +514,24 @@ class AddPurchaseWidget(QWidget):
         gross_label = QLabel("Gross Amount")
         self.gross_entry = QLineEdit("0.00")
         self.gross_entry.setReadOnly(True)
+        self.gross_entry.setStyleSheet(field_style)
 
         discount_label = QLabel("Discount")
         self.discount_entry = QLineEdit()
+        self.discount_entry.setStyleSheet(field_style)
 
         taxable_label = QLabel("Taxable")
         self.taxable_entry = QLineEdit("0.00")
         self.taxable_entry.setReadOnly(True)
+        self.taxable_entry.setStyleSheet(field_style)
 
         tax_236g_label = QLabel("Tax 236(G)")
         self.tax_236g_entry = QLineEdit()
+        self.tax_236g_entry.setStyleSheet(field_style)
 
         tax_236h_label = QLabel("Tax 236(H)")
         self.tax_236h_entry = QLineEdit()
+        self.tax_236h_entry.setStyleSheet(field_style)
 
         sales_tax_label = QLabel("Sales Tax")
         self.sales_tax_entry = QLineEdit()
@@ -645,6 +692,7 @@ class AddPurchaseWidget(QWidget):
     def populate_label_line(self):
     
         label_entry_frame = QFrame()
+        
         label_entry_frame.setObjectName("sectionCard")
         label_entry_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.label_entry_frame = label_entry_frame
@@ -714,7 +762,7 @@ class AddPurchaseWidget(QWidget):
         expiry_label = QLabel("Expiry")
         expiry_label.setStyleSheet(field_style)
 
-        qty_label = QLabel("Qty")
+        qty_label = QLabel("Packs")
         qty_label.setStyleSheet(field_style)
 
         bonus_label = QLabel("Bonus")
@@ -902,14 +950,6 @@ class AddPurchaseWidget(QWidget):
         # Focus flow
         # -----------------------------
         QWidget.setTabOrder(self.item, self.batch_edit)
-        QWidget.setTabOrder(self.batch_edit, self.expiry_edit)
-        QWidget.setTabOrder(self.expiry_edit, self.qty_edit)
-        QWidget.setTabOrder(self.qty_edit, self.bonus_edit)
-        QWidget.setTabOrder(self.bonus_edit, self.rate_edit)
-        QWidget.setTabOrder(self.rate_edit, self.discount_edit)
-        QWidget.setTabOrder(self.discount_edit, self.tax_edit)
-        QWidget.setTabOrder(self.tax_edit, self.amount_edit)
-        QWidget.setTabOrder(self.amount_edit, add_button)
 
         self.item.lineEdit().returnPressed.connect(lambda: self.handle_item_return_pressed(self.item))
         self.batch_edit.returnPressed.connect(lambda: self.focus_next_field(self.expiry_edit))
@@ -925,9 +965,9 @@ class AddPurchaseWidget(QWidget):
         # -----------------------------
         label_entry_layout.addLayout(grid)
         
+        
+        
         # add table
-        
-        
         table = self.add_table()
         
         label_entry_layout.addSpacing(10)
@@ -1870,6 +1910,9 @@ class AddPurchaseWidget(QWidget):
                 raise Exception(f"Tax cannot be negative in row {row + 1}.")
 
 
+
+        
+           
             # --------------------------------------------------------
             # 11) Insert into purchaseitem
             # --------------------------------------------------------
@@ -1920,6 +1963,21 @@ class AddPurchaseWidget(QWidget):
             # --------------------------------------------------------
             #
             received = qty + bonus
+            
+             # get pack_size from price_pack
+            
+            size_query = QSqlQuery()
+            size_query.prepare("SELECT pack_size FROM price_pack WHERE product_id = ?")
+            size_query.addBindValue(product)
+            
+            if not size_query.exec() or not size_query.next():
+                raise Exception(f"Failed to fetch pack size for product ID {product}: {size_query.lastError().text()}")
+            
+            pack_size = size_query.value(0)
+            received_qty = received * pack_size if pack_size else qty
+
+            paid_qty = qty * pack_size if pack_size else qty
+            
             batch_query = QSqlQuery()
             batch_query.prepare("""
                 INSERT INTO batch (
@@ -1944,9 +2002,9 @@ class AddPurchaseWidget(QWidget):
             batch_query.addBindValue(product)
             batch_query.addBindValue(purchase_item_id if purchase_item_id else None)
             
-            batch_query.addBindValue(received)
-            batch_query.addBindValue(qty)
-            batch_query.addBindValue(received)
+            batch_query.addBindValue(received_qty)
+            batch_query.addBindValue(paid_qty)
+            batch_query.addBindValue(received_qty)
             batch_query.addBindValue(rate)
             batch_query.addBindValue('PURCHASE')
             
@@ -2264,10 +2322,9 @@ class AddPurchaseWidget(QWidget):
                     form,
                     strength,
                     packing,
-                    pack_size,
                     manufacturer_id
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
             
             code = ''
@@ -2284,7 +2341,6 @@ class AddPurchaseWidget(QWidget):
             product_query.addBindValue(item_form)
             product_query.addBindValue(item_packing)
             product_query.addBindValue(packing)
-            product_query.addBindValue(packsize)
             product_query.addBindValue(manufacturer)
 
             if not product_query.exec():
@@ -2676,6 +2732,7 @@ class ImportDialog(QDialog):
 
         forms = sorted([f.title() for f in forms])
         self.form_input = QComboBox()
+        self.form_input.setEditable(True)
         self.form_input.addItems(forms)
         item_layout.addWidget(self.form_input, stretch=1)
 
@@ -2706,7 +2763,6 @@ class ImportDialog(QDialog):
         
         
         
-        # pack size - line
         
         size_layout = QHBoxLayout()
         
@@ -2722,7 +2778,7 @@ class ImportDialog(QDialog):
         
         
         
-        # pack size - line
+        
         
         price_layout = QHBoxLayout()
         

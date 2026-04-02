@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QApplication, QWidget, QCompleter, QDateEdit, QVBoxLayout, QHBoxLayout, QInputDialog, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
+from PySide6.QtWidgets import QApplication, QWidget, QCompleter, QDateEdit, QVBoxLayout, QHBoxLayout, QDialog, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
 from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, Signal, QTimer, QEvent, QRectF
 import os
 import sys
@@ -59,8 +59,11 @@ class CreateSalesWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         
-        # self.setFixedWidth(1200)
-        self.sales_locked = False
+        
+        # === Main Vertical Layout ===
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
         
         self.scan_timer = QTimer(self)
         self.scan_timer.setSingleShot(True)
@@ -72,55 +75,106 @@ class CreateSalesWidget(QWidget):
         self.reloading_sale = False
         self.order_modified = False
         self.row_height = 40
-        self.min_visible_rows = 5
 
-        # === Main Vertical Layout ===
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(30, 20, 30, 20)
-        self.layout.setSpacing(10)
+        
 
         # === Header Row ===
         header_layout = QHBoxLayout()
-        heading = QLabel("Create Sales Receipt", objectName='SectionTitle')
+        heading = QLabel("Sales Receipt", objectName='SectionTitle')
         
         
         clear_btn = QPushButton('Clear Sale', objectName='TopRightButton')
+        clear_btn.setFixedWidth(150)
         clear_btn.setCursor(Qt.PointingHandCursor)
         clear_btn.clicked.connect(self.clear_fields)
         
         
         self.invoicelist = QPushButton('SO List', objectName='TopRightButton')
+        self.invoicelist.setFixedWidth(150)
         self.invoicelist.setCursor(Qt.PointingHandCursor)
         
+        header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.addWidget(heading)
-        header_layout.addStretch()
         header_layout.addWidget(clear_btn)
         header_layout.addWidget(self.invoicelist)
+        
         self.layout.addLayout(header_layout)
 
-        self.layout.addSpacing(20)
-        
-        line = QFrame()
-        line.setObjectName("lineSeparator")
-
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
-        line.setStyleSheet("""
-                QFrame#lineSeparator {
-                    border: none;
-                    border-top: 2px solid #333;
-                }
-            """)
-
-        self.layout.addWidget(line)
-        self.layout.addSpacing(20)
-        
         
 
         # === Customer + Salesman Row ===
         
+        self.add_customer_section()
+        
+
+        self.add_product_section()
+        
+        
+
+        self.add_totals_section()
+        self.layout.addStretch()
+        
+
+        
+        QShortcut(
+            QKeySequence("F12"),
+            self,
+            activated=lambda: (
+                self.received_entry.setFocus(),
+                QTimer.singleShot(0, self.received_entry.selectAll)
+            )
+        )
+        
+        
+        
+        QShortcut(QKeySequence("Ctrl+Numpad+"), self, activated=self.add_row)
+        
+
+
+        QShortcut(QKeySequence("Ctrl+Return"), self, activated=lambda: self.save_receipt())
+        QShortcut(QKeySequence("Ctrl+Enter"), self, activated=lambda: self.save_receipt())  
+
+        
+        self.setStyleSheet(load_stylesheets())
+        
+    
+    
+    
+    
+    def clear_product_field(self):
+         
+        self.item.blockSignals(True)
+
+        self.item.setCurrentIndex(-1)
+        self.item.lineEdit().clear()
+
+        if self.item.completer():
+            self.item.completer().popup().hide()
+
+        self.item.blockSignals(False)
+        self.item.setFocus()
+       
+    
+    
+    def add_customer_section(self):
+        
+        # ---------------------------
+        # Customer Section Frame
+        # ---------------------------
+        customer_frame = QFrame()
+        customer_frame.setObjectName("sectionCard")
+        self.customer_frame = customer_frame
+
+        customer_layout = QVBoxLayout(customer_frame)
+        customer_layout.setContentsMargins(15, 10, 15, 10)
+        customer_layout.setSpacing(8)
+
+        # Top Row Layout
         top_row = QHBoxLayout()
-        customerlabel = QLabel("Customer")
+        top_row.setSpacing(15)
+
+        top_row = QHBoxLayout()
+        customerlabel = QLabel("CUSTOMER")
         
         self.customer = QComboBox()
         self.customer.setMinimumWidth(200) 
@@ -134,164 +188,259 @@ class CreateSalesWidget(QWidget):
         
         self.customer.setInsertPolicy(QComboBox.NoInsert)
         
+        self.new_customer_btn = QPushButton("+")
+        btn_style = """
+        QPushButton {
+            background-color: #2d2d2d;
+            color: white;
+            border: 1px solid #444;
+            border-radius: 4px;
+            font-weight: 500;
+            padding: 2px;
+        }
 
+        QPushButton:hover {
+            background-color: #3a3a3a;
+        }
 
+        QPushButton:pressed {
+            background-color: #1f1f1f;
+        }
+        """
 
+        self.new_customer_btn.setStyleSheet(btn_style)
+        self.new_customer_btn.setFixedSize(28, 28)
         
-        # salesmanlabel = QLabel("Salesman")
-        self.salesman = QComboBox()
-        self.salesman.setMinimumWidth(200)
-        top_row.addWidget(customerlabel)
+        spacer = QLabel()
+
+        # Add widgets
+        top_row.addWidget(customerlabel, 1)
         top_row.addWidget(self.customer, 2)
-        top_row.addSpacing(40)
-        # top_row.addWidget(salesmanlabel)
-        # top_row.addWidget(self.salesman, 2)
-        self.layout.addLayout(top_row)
+        top_row.addWidget(self.new_customer_btn)
+        top_row.addWidget(spacer, 5)
+        
+        main_final_label = QLabel("Final Amount")
+        main_final_label.setStyleSheet("font-weight: 500; font-size: 14px;")   
+        
+             
+        self.main_final_amount = QLabel("0.00")
+        self.main_final_amount.setStyleSheet("font-weight: 700; font-size: 20px;")
+        top_row.addWidget(main_final_label)
+        top_row.addWidget(self.main_final_amount)
+        
+        self.new_customer_btn.clicked.connect(self.open_customer_dialog)
         
         
-        
-        line = QFrame()
-        line.setObjectName("lineSeparator")
+        customer_layout.addLayout(top_row)
 
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
-        line.setStyleSheet("""
-                QFrame#lineSeparator {
-                    border: none;
-                    border-top: 2px solid #333;
-                }
+        # Add frame to main layout
+        self.layout.addWidget(customer_frame, 0, Qt.AlignTop)
+        
+        self.customer.setStyleSheet("font-weight: 600;")
+        
+        
+
+        
+    def open_customer_dialog(self):
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add Customer")
+        dialog.setMinimumWidth(350)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("New Customer")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        name_label = QLabel("Customer Name")
+        name_edit = QLineEdit()
+        name_edit.setPlaceholderText("Enter customer name")
+
+        contact_label = QLabel("Contact")
+        contact_edit = QLineEdit()
+        contact_edit.setPlaceholderText("Enter contact")
+
+        layout.addWidget(name_label)
+        layout.addWidget(name_edit)
+        layout.addWidget(contact_label)
+        layout.addWidget(contact_edit)
+
+        btn_row = QHBoxLayout()
+
+        save_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+
+        btn_row.addWidget(save_btn)
+        btn_row.addWidget(cancel_btn)
+        layout.addLayout(btn_row)
+
+        def save_customer():
+            name = name_edit.text().strip()
+            contact = contact_edit.text().strip()
+
+            if not name:
+                QMessageBox.warning(dialog, "Validation Error", "Customer name is required.")
+                return
+
+            query = QSqlQuery()
+            query.prepare("""
+                INSERT INTO customer (
+                    name,
+                    contact
+                )
+                VALUES (?, ?)
             """)
+            query.addBindValue(name)
+            query.addBindValue(contact if contact else None)
 
-        self.layout.addWidget(line)
-        self.layout.addSpacing(20)
+            if not query.exec():
+                QMessageBox.critical(
+                    dialog,
+                    "Database Error",
+                    f"Failed to save customer:\n{query.lastError().text()}"
+                )
+                return
+
+            QMessageBox.information(dialog, "Success", "Customer added successfully.")
+            dialog.accept()
+
+            if hasattr(self, "populate_customers"):
+                self.populate_customers()
+
+
+        save_btn.clicked.connect(save_customer)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        dialog.exec()
+
+
+    
+    def add_table(self):
         
-        label_style = """
+        self.row_height = 30
 
+        self.table = MyTable(column_ratios=[0.05, 0.35, 0.08, 0.08, 0.08, 0.08, 0.08, 0.03])
+        headers = ["#", " Product ", " Qty", "Rate", "Disc %", "Tax %", "Total", "X"]
+        self.table.setColumnCount(len(headers))
+        self.table.setHorizontalHeaderLabels(headers)
+
+        self.table.setTabKeyNavigation(False)
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.table.verticalHeader().setDefaultSectionSize(self.row_height)
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setMinimumWidth(900)
+        self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        
+        visible_rows = 8
+        header_height = self.table.horizontalHeader().height()
+
+        table_height = header_height + (self.row_height * visible_rows) + 2
+        self.table.setFixedHeight(table_height)
+
+        return self.table 
+        
+    
+    def add_product_section(self):
+        
+        product_frame = QFrame()
+        product_frame.setObjectName("sectionCard")
+        self.product_frame = product_frame
+        
+        product_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        
+        
+        product_entry_layout = QVBoxLayout(product_frame)
+        product_entry_layout.setContentsMargins(15, 10, 15, 20)
+        product_entry_layout.setSpacing(0)
+        self.product_entry_layout = product_entry_layout
+        
+        product_entry_layout.setAlignment(Qt.AlignTop)
+        
+        field_style = """
             QLabel {
                 margin: 0;
-                padding: 0;
+                font-size: 11px;
+                letter-spacing: 0.2px;
+                margin-right: 5px;
             }
-            
+
             QLineEdit {
                 margin: 0;
                 padding: 5px;
                 border: 1px solid #ccc;
-                border-radius: 4px;
-                font-size: 14px;
+                border-radius: 3px;
+                font-size: 12px;
+                letter-spacing: 0.2px;
                 background-color: #f9f9f9;
             }
+
             QComboBox {
                 margin: 0;
                 padding: 5px;
                 border: 1px solid #ccc;
-                border-radius: 4px;
-                font-size: 14px;
+                border-radius: 3px;
+                font-size: 12px;
+                letter-spacing: 0.2px;
                 background-color: #f9f9f9;
             }
+            
+            QLineEdit:focus,
+            QComboBox:focus,
+            QDateEdit:focus {
+                border: 2px solid #5B8FB8;
+                background: #F2F8FC;
+            }
+
             KeyUpLineEdit {
                 margin: 0;
                 padding: 5px;
                 border: 1px solid #ccc;
                 border-radius: 4px;
-                font-size: 14px;
+                font-size: 12px;
+                letter-spacing: 0.2px;
                 background-color: #f9f9f9;
-            }   
-            
-            
+            }
         """
+
         
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setContentsMargins(0, 0, 0, 0)
+        self.entry_grid = grid
+
+        # -----------------------------
+        # Labels
+        # -----------------------------
         
-        label_line = QHBoxLayout()
+        info_box_layout = QHBoxLayout()
         
-        product_label = QLabel("Product")
-        # product_label.setFixedWidth(400)
-        product_label.setStyleSheet(label_style)
-        label_line.addWidget(product_label, 4)
-
-        qty_label = QLabel("Qty")
-        # qty_label.setFixedWidth(100)
-        qty_label.setStyleSheet(label_style)
-        label_line.addWidget(qty_label, 1)
-
-        rate_label = QLabel("Unit Rate")
-        # rate_label.setFixedWidth(100)
-        rate_label.setStyleSheet(label_style)
-        label_line.addWidget(rate_label, 1)
+        info_btn = QPushButton("i")
+        info_btn.setFixedWidth(40)
         
-        discount_label = QLabel("Discount %")
-        # rate_label.setFixedWidth(200)
-        discount_label.setStyleSheet(label_style)
-        label_line.addWidget(discount_label, 1)
+        info_box_layout.addWidget(info_btn)
         
-        tax_label = QLabel("Tax %")
-        # rate_label.setFixedWidth(100)
-        tax_label.setStyleSheet(label_style)
-        label_line.addWidget(tax_label, 1)
+        grid.addLayout(info_box_layout, 0 , 0)
+
         
-        total_label = QLabel("Amount")
-        # total_label.setFixedWidth(100)
-        total_label.setStyleSheet(label_style)
-        label_line.addWidget(total_label, 1)
+        product_box_layout = QHBoxLayout()
         
-        empty_label = QLabel("")
-        # empty_label.setFixedWidth(100)
-        empty_label.setStyleSheet(label_style)
-        label_line.addWidget(empty_label, 1)
-        
-
-
-
-        self.layout.addLayout(label_line)
-
-
-
-       
-        
-        
-        # self.item = QComboBox()
-        # self.item.wheelEvent = lambda event: event.ignore()
-        # self.item.setPlaceholderText("select product")
-        # self.item.setEditable(True)
-        
-        # line_edit = self.item.lineEdit()
-        # line_edit.textEdited.connect(self.force_uppercase)
-
-        # line_edit = SelectAllLineEdit()
-        # self.item.setLineEdit(line_edit)
-
-        # # self.item.lineEdit().editingFinished.connect(lambda c=self.item: self.handle_editing_finished(c))
-
-        # completer = QCompleter()
-        # self.item.setCompleter(completer)
-        # completer.setCompletionMode(QCompleter.PopupCompletion)
-
-        # completer.activated[str].connect(lambda text, c=self.item: self.on_completer_selected(text, c))
-
-        # self.item.lineEdit().completer().popup().setStyleSheet("""
-        #     QListView {
-        #         padding: 5px;
-        #         background-color: white;
-        #         border: 1px solid gray;
-        #         color: #333;
-        #     }
-        #     QListView::item {
-        #         padding: 6px 10px;
-        #     }
-        #     QListView::item:selected {
-        #         background-color: #5A9EC9;
-        #         color: white;
-        #     }
-        # """)
-
-        # self.item.lineEdit().textEdited.connect(
-        #     lambda text: self.load_product_suggestions(self.item, completer)
-        # )
+        product_label = QLabel("PRODUCT")
+        product_label.setStyleSheet(field_style)
         
         
         self.item = QComboBox()
         self.item.wheelEvent = lambda event: event.ignore()
-        self.item.setPlaceholderText("select product")
         self.item.setEditable(True)
+        
+        
 
         line_edit = SelectAllLineEdit()
         self.item.setLineEdit(line_edit)
@@ -326,45 +475,137 @@ class CreateSalesWidget(QWidget):
         self.item.lineEdit().textEdited.connect(
             lambda text: self.load_product_suggestions(self.item, completer)
         )
-                
         
-        entry_line = QHBoxLayout()
         
-        # self.item.setFixedWidth(400)
+        QShortcut(
+            QKeySequence(Qt.Key_Escape),
+            self.item,
+            activated=self.clear_product_field
+        )
         
-        self.item.setStyleSheet(label_style)
-        entry_line.addWidget(self.item, 4)
+        
+        self.item.setStyleSheet(field_style)
+        
+        product_box_layout.addWidget(product_label, 0)
+        product_box_layout.addWidget(self.item, 1)
+        
+        grid.addLayout(product_box_layout, 0, 1)
+        
+        
+        
+        
+        qty_box_layout = QHBoxLayout()
+        
+        qty_label = QLabel("QTY")
+        qty_label.setStyleSheet(field_style)
         
         self.qty_edit = QLineEdit()
         self.qty_edit.setPlaceholderText("qty")
-        # self.qty_edit.setFixedWidth(100)
-        self.qty_edit.setStyleSheet(label_style)
-        entry_line.addWidget(self.qty_edit, 1)
+        self.qty_edit.setStyleSheet(field_style)
+        
+        qty_box_layout.addWidget(qty_label)
+        qty_box_layout.addWidget(self.qty_edit)
+        
+        grid.addLayout(qty_box_layout, 0, 2)
+        
+        
+        
+        
+        rate_box_layout = QHBoxLayout()
+
+        rate_label = QLabel("PRICE")
+        rate_label.setStyleSheet(field_style)
         
         self.rate_edit = QLineEdit()
         self.rate_edit.setPlaceholderText("rate")
-        # self.rate_edit.setFixedWidth(100)
-        self.rate_edit.setStyleSheet(label_style)
-        entry_line.addWidget(self.rate_edit, 1)
+        self.rate_edit.setStyleSheet(field_style)
         
+        
+        rate_box_layout.addWidget(rate_label)
+        rate_box_layout.addWidget(self.rate_edit)
+        
+        grid.addLayout(rate_box_layout, 0, 3)
+        
+
+        # ---- DISC % ----
+        discount_box_layout = QHBoxLayout()
+        discount_box_layout.setSpacing(6)
+
+        discount_label = QLabel("DISC %")
+        discount_label.setStyleSheet(field_style)
+
         self.discount = KeyUpLineEdit()
         self.discount.setPlaceholderText("Disc %")
-        # self.discount.setFixedWidth(100)
-        self.discount.setStyleSheet(label_style)
-        entry_line.addWidget(self.discount, 1)
-        
+        self.discount.setStyleSheet(field_style)
+
+        discount_box_layout.addWidget(discount_label)
+        discount_box_layout.addWidget(self.discount)
+
+        grid.addLayout(discount_box_layout, 0, 4)
+
+
+
+        # ---- TAX % ----
+        tax_box_layout = QHBoxLayout()
+        tax_box_layout.setSpacing(6)
+
+        tax_label = QLabel("TAX %")
+        tax_label.setStyleSheet(field_style)
+
         self.tax = KeyUpLineEdit()
         self.tax.setPlaceholderText("Tax %")
-        self.tax.setStyleSheet(label_style)
-        entry_line.addWidget(self.tax, 1)
+        self.tax.setStyleSheet(field_style)
+
+        tax_box_layout.addWidget(tax_label)
+        tax_box_layout.addWidget(self.tax)
+
+        grid.addLayout(tax_box_layout, 0, 5)
+
+
+        # ---- TOTAL ----
+        total_box_layout = QHBoxLayout()
+        total_box_layout.setSpacing(6)
+
+        total_label = QLabel("TOTAL")
+        total_label.setStyleSheet(field_style)
 
         self.amount_edit = QLineEdit()
         self.amount_edit.setReadOnly(True)
-        # self.amount_edit.setFixedWidth(100)
         self.amount_edit.setText("0.00")
-        self.amount_edit.setStyleSheet("font-weight: bold;")
-        self.amount_edit.setStyleSheet(label_style)
-        entry_line.addWidget(self.amount_edit, 1)
+        self.amount_edit.setStyleSheet(field_style)
+
+        total_box_layout.addWidget(total_label)
+        total_box_layout.addWidget(self.amount_edit)
+
+        grid.addLayout(total_box_layout, 0, 6)
+
+
+        # ---- ACTION ----
+        add_button = QPushButton("+", objectName="EntryButton")
+        add_button.clicked.connect(self.add_row)
+
+        action_box_layout = QHBoxLayout()
+        action_box_layout.setContentsMargins(0, 0, 0, 0)
+        action_box_layout.setSpacing(6)
+        action_box_layout.addWidget(add_button)
+
+        grid.addLayout(action_box_layout, 0, 7)
+        
+        
+        
+        
+        
+        
+        
+        qty_filter = QtyValidationFilter(self, self.qty_edit, self.item)
+        self.qty_edit.installEventFilter(qty_filter)
+
+        # important: keep reference
+        if not hasattr(self, "qty_filters"):
+            self.qty_filters = []
+        self.qty_filters.append(qty_filter)
+        
+        
         
         
         self.qty_edit.returnPressed.connect(lambda: self.focus_next_field(self.rate_edit))
@@ -380,91 +621,133 @@ class CreateSalesWidget(QWidget):
         self.tax.textChanged.connect(self.update_line_total)
         
         
-        add_button = QPushButton("Add", objectName="SaveButton")
-        entry_line.addWidget(add_button, 1)
         
         
-        add_button.clicked.connect(self.add_row)        
         
-        self.layout.addLayout(entry_line)
+        # -----------------------------
+        # Stretch factors
+        # -----------------------------
+        ratios = [5, 35, 8, 8, 8, 8, 8, 3]
 
-        # === Table ===
-        self.row_height = 40
-        self.min_visible_rows = 5
-
-
-        self.table = MyTable(column_ratios=[0.05, 0.35, 0.08, 0.08, 0.08, 0.08, 0.08, 0.08, 0.05])
-        headers = ["#", " Product Description", " Qty", "Unit Rate", "Disc %", "Tax %", "Total", "X"]
-        self.table.setColumnCount(len(headers))
-        self.table.setHorizontalHeaderLabels(headers)
-        
-        self.table.setTabKeyNavigation(False)
-        self.table.setFixedHeight(260)   # pixels
+        for col, r in enumerate(ratios):
+            grid.setColumnStretch(col, r)
 
         
-        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.table.verticalHeader().setDefaultSectionSize(self.row_height)
-        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        
-        self.table.verticalHeader().setFixedWidth(0)
-        remove_col = headers.index("X")
-        self.table.horizontalHeaderItem(remove_col).setTextAlignment(Qt.AlignCenter)
-        
-        self.table.setStyleSheet("QTableWidget::item { color: #333; }")
 
-        self.table.verticalHeader().setFixedWidth(0)
-        header = self.table.horizontalHeader()
-        header.setStretchLastSection(True)   
-        
-        self.table.setMinimumWidth(1000)
-        
-        # Hide vertical header (row numbers)
-        self.table.verticalHeader().setVisible(False)
-        
+        product_entry_layout.addLayout(grid)
+        product_entry_layout.addSpacing(10)
 
-        # Alternating row colors
-        self.table.setAlternatingRowColors(True)
+        table = self.add_table()
+        product_entry_layout.addWidget(table)
 
-        # Selection behaviour
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.layout.addWidget(product_frame)
+    
+    
+    
+    
+    def clear_product_field(self):
+        
+        self.item.blockSignals(True)
 
-        self.layout.addWidget(self.table)
-        
-      
+        self.item.setCurrentIndex(-1)
+        self.item.lineEdit().clear()
 
-        ### --- calculate label 
-        
-        
-        calculate_labels_layout = QHBoxLayout()
-        
-        gross_label = QLabel("Gross Amount")
-        calculate_labels_layout.addWidget(gross_label, 1)
-        
+        if self.item.completer():
+            self.item.completer().popup().hide()
+
+        self.item.blockSignals(False)
+        self.item.setFocus()
+    
+    
+    
+    
+    def add_totals_section(self):
+    
+        totals_frame = QFrame()
+        totals_frame.setObjectName("sectionCard")
+        self.totals_frame = totals_frame
+
+        totals_layout = QVBoxLayout(totals_frame)
+        totals_layout.setContentsMargins(10, 10, 10, 10)
+        totals_layout.setSpacing(12)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(5)
+
+        label_style = """
+        QLabel {
+            font-size: 12px;
+            color: #555;
+            font-weight: 600;
+        }
+        """
+
+        # -----------------------------
+        # Create labels
+        # -----------------------------
+        gross_label = QLabel("Sub Total")
         discount_label = QLabel("Discount")
-        calculate_labels_layout.addWidget(discount_label, 1)
-        
-        taxable_label = QLabel("Taxable")
-        calculate_labels_layout.addWidget(taxable_label, 1)
-        
-        tax_label = QLabel("Tax")
-        calculate_labels_layout.addWidget(tax_label, 1)
-        
-        net_amount_label = QLabel("Net Amount")
-        calculate_labels_layout.addWidget(net_amount_label, 1)
-        
+        tax_label = QLabel("Sales Tax")
         additional_label = QLabel("Additional Charges")
-        calculate_labels_layout.addWidget(additional_label, 1)
-        
-        final_label = QLabel("Final Amount")
-        calculate_labels_layout.addWidget(final_label, 1)
-        
-        self.final_amount = QLabel("0.0")
-        calculate_labels_layout.addWidget(self.final_amount, 1)
-        
-        
+        taxable_label = QLabel("Taxable")
+        net_amount_label = QLabel("Net Amount")
+
+        final_amount_label = QLabel("Final Amount")
+        final_amount_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        final_amount_label.setStyleSheet("font-size: 16px; font-weight:600; color: #666;")
+
+        received_label = QLabel("Received")
+        received_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        received_label.setStyleSheet("font-size: 16px; font-weight: 600;")
+
         payment_method_label = QLabel("Payment Method")
+        remaining_label = QLabel("Remaining Amount")
+        change_label = QLabel("Change")
+
+        gross_label.setStyleSheet(label_style)
+        discount_label.setStyleSheet(label_style)
+        taxable_label.setStyleSheet(label_style)
+        tax_label.setStyleSheet(label_style)
+        net_amount_label.setStyleSheet(label_style)
+        additional_label.setStyleSheet(label_style)
+        payment_method_label.setStyleSheet(label_style)
+        remaining_label.setStyleSheet(label_style)
+        change_label.setStyleSheet(label_style)
+
+        # -----------------------------
+        # Create fields
+        # -----------------------------
+        self.gross_entry = QLineEdit("0.00")
+        self.gross_entry.setReadOnly(True)
+
+        self.discount_entry = QLineEdit()
+
+        self.tax_entry = QLineEdit()
+
+        self.additional_entry = QLineEdit()
+
+        self.taxable_entry = QLineEdit("0.00")
+        self.taxable_entry.setReadOnly(True)
+
+        self.net_amount_entry = QLineEdit("0.00")
+        self.net_amount_entry.setReadOnly(True)
+
+        self.final_amount_entry = QLabel("0.00")
+        self.final_amount_entry.setObjectName("FinalAmount")
+
+        self.received_entry = QLineEdit("0.00")
+        self.received_entry.setObjectName("ReceivedAmount")
         
+        self.change_entry = QLineEdit("0.00")
+        self.change_entry.setReadOnly(True)
+
+        self.remainingdata = QLineEdit("0.00")
+        self.remainingdata.setReadOnly(True)
+
+        self.writeoff_check = QCheckBox("Write-off Remaining")
+        self.writeoff_check.setStyleSheet("QCheckBox { color: #333; }")
+
         self.payment_handler = PaymentMethodHandler(self)
 
         self.payment_method = QComboBox()
@@ -472,96 +755,366 @@ class CreateSalesWidget(QWidget):
         self.payment_method.currentTextChanged.connect(self.on_payment_method_changed)
         
         
-        calculate_labels_layout.addWidget(payment_method_label, 1)
-        calculate_labels_layout.addWidget(self.payment_method, 1)
         
-        
-        self.layout.addLayout(calculate_labels_layout)
-        
-        
-        
-        calculate_entry_layout = QHBoxLayout()
-        
-        self.gross_entry = QLabel("0.00")
-        calculate_entry_layout.addWidget(self.gross_entry, 1)
-        
-        self.discount_entry = QLineEdit()
-        calculate_entry_layout.addWidget(self.discount_entry, 1)
-        
-        self.taxable_entry = QLabel("0.00")
-        calculate_entry_layout.addWidget(self.taxable_entry, 1)
-        
-        self.tax_entry = QLineEdit()
-        calculate_entry_layout.addWidget(self.tax_entry, 1)
-        
-        self.net_amount_entry = QLabel("0.00")
-        calculate_entry_layout.addWidget(self.net_amount_entry, 1)
-        
-        self.additional_entry = QLineEdit()
-        calculate_entry_layout.addWidget(self.additional_entry, 1)
-        
-        self.received_label = QLabel("Received Amount")
-        calculate_entry_layout.addWidget(self.received_label, 1)
-        
-        self.received_amount = QLineEdit()
-        calculate_entry_layout.addWidget(self.received_amount, 1)
-        
+        self.gross_entry.setAlignment(Qt.AlignRight)
+        self.discount_entry.setAlignment(Qt.AlignRight)
+        self.tax_entry.setAlignment(Qt.AlignRight)
+        self.received_entry.setAlignment(Qt.AlignRight)
+        self.remainingdata.setAlignment(Qt.AlignRight)
 
-        self.layout.addLayout(calculate_entry_layout)
-        
-        
+        # -----------------------------
+        # Signals
+        # -----------------------------
         self.discount_entry.textChanged.connect(self.update_total_amount)
         self.tax_entry.textChanged.connect(self.update_total_amount)
         self.additional_entry.textChanged.connect(self.update_total_amount)
+        self.received_entry.textChanged.connect(self.calculate_payment)
+
+        # -----------------------------
+        # Row 1
+        # subtotal-value, discount-value, tax-value,
+        # final_amount-value, then a space, then received-value
+        # -----------------------------
+        subtotal_layout = QHBoxLayout()
+        subtotal_layout.addWidget(gross_label)
+        subtotal_layout.addWidget(self.gross_entry)
+        grid.addLayout(subtotal_layout, 0, 0)
+
+        discount_layout = QHBoxLayout()
+        discount_layout.addWidget(discount_label)
+        discount_layout.addWidget(self.discount_entry)
+        grid.addLayout(discount_layout, 0, 1)
+
+        tax_layout = QHBoxLayout()
+        tax_layout.addWidget(tax_label)
+        tax_layout.addWidget(self.tax_entry)
+        grid.addLayout(tax_layout, 0, 2)
         
-        self.received_amount.textChanged.connect(self.calculate_payment)
+        additional_layout = QHBoxLayout()
         
+        additional_layout.addWidget(additional_label)
+        additional_layout.addWidget(self.additional_entry)
+        grid.addLayout(additional_layout, 0, 3)
         
+        space_label = QLabel()
+        grid.addWidget(space_label, 0, 4)
+
+        final_amount_layout = QHBoxLayout()
+        final_amount_layout.setContentsMargins(10, 0, 0, 0)
+        final_amount_layout.addWidget(final_amount_label)
+        final_amount_layout.addWidget(self.final_amount_entry)
+        grid.addLayout(final_amount_layout, 0, 5)
+
+        # give layout left margin
+        
+
+        received_layout = QHBoxLayout()
+        received_layout.addWidget(received_label)
+        received_layout.addWidget(self.received_entry)
+        grid.addLayout(received_layout, 0, 6)
+
+        # -----------------------------
+        # Row 2
+        # under final_amount-value column make payment method-value,
+        # then space, then remaining-value
+        # -----------------------------
+        method_layout = QHBoxLayout()
+        method_layout.addWidget(payment_method_label)
+        method_layout.addWidget(self.payment_method)
+        grid.addLayout(method_layout, 1, 3)
+
+        space_label_2 = QLabel()
+        grid.addWidget(space_label_2, 1, 4)
+
         remaining_layout = QHBoxLayout()
-        
-        spacer_label = QLabel()
-        remaining_layout.addWidget(spacer_label, 7)
-        
-        self.remaining_label = QLabel("Remaining Amount")
-        remaining_layout.addWidget(self.remaining_label, 1)
-        
-        self.remainingdata = QLabel("0.00")
-        self.remainingdata.setStyleSheet("font-weight: bold;")
-        self.remainingdata.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        remaining_layout.addWidget(self.remainingdata, 1)
-        
-        self.writeoff_check = QCheckBox("Write-off Remaining")
-        remaining_layout.addWidget(self.writeoff_check, 1)
-        self.writeoff_check.setStyleSheet("QCheckBox { color: #333; }")
-        
-        self.layout.addLayout(remaining_layout)
+        remaining_layout.addWidget(remaining_label)
+        remaining_layout.addWidget(self.remainingdata)
+        grid.addLayout(remaining_layout, 1, 6)
 
+        # -----------------------------
+        # Row 3
+        # checkbox at the end column
+        # -----------------------------
+        checkbox_layout = QHBoxLayout()
+        checkbox_layout.addStretch()
+        checkbox_layout.addWidget(self.writeoff_check)
+        grid.addLayout(checkbox_layout, 2, 6)
 
+        # -----------------------------
+        # Stretch
+        # -----------------------------
+        for col in range(7):
+            grid.setColumnStretch(col, 1)
 
+        totals_layout.addLayout(grid)
 
-        # === Save Button ===
+        # -----------------------------
+        # Add totals frame
+        # -----------------------------
+        self.layout.addWidget(totals_frame, 0)
+
+        # -----------------------------
+        # Save Button
+        # -----------------------------
         save_row = QHBoxLayout()
-        addreceipt = QPushButton('Save Sales Receipt', objectName='SaveButton')
+        addreceipt = QPushButton("Save Sales Receipt", objectName="SaveButton")
         addreceipt.setCursor(Qt.PointingHandCursor)
         addreceipt.clicked.connect(lambda: self.save_receipt())
         save_row.addWidget(addreceipt, 1)
-        save_row.addStretch()
+
+        self.layout.addLayout(save_row, 0)
+        
+    
+    # def add_totals_section(self):
+    
+    #     totals_frame = QFrame()
+    #     totals_frame.setObjectName("sectionCard")
+    #     self.totals_frame = totals_frame
+
+    #     totals_layout = QVBoxLayout(totals_frame)
+    #     totals_layout.setContentsMargins(10, 10, 10, 10)
+    #     totals_layout.setSpacing(12)
+
+    #     grid = QGridLayout()
+    #     grid.setHorizontalSpacing(14)
+    #     grid.setVerticalSpacing(5)
+        
+    #     label_style= """
+        
+    #     QLabel {
+    #         font-size: 12px;
+    #         color: #555; 
+    #         font-weight: 600;    
+    #     }
+        
+    #     """
+
+    #     # -----------------------------
+    #     # Create labels
+    #     # -----------------------------
         
         
-        QShortcut(QKeySequence("F12"), self, activated=lambda: self.received_amount.setFocus())
+    #     subtotal_layout = QHBoxLayout()
+    #     gross_label = QLabel("Sub Total")
+    #     self.gross_entry = QLineEdit("0.00")
+    #     self.gross_entry.setReadOnly(True)
+        
+    #     subtotal_layout.addWidget(gross_label)
+    #     subtotal_layout.addWidget(self.gross_entry)
+    #     grid.addLayout(subtotal_layout, 0, 0)
+        
+        
+        
+        
+    #     discount_layout = QHBoxLayout()
+    #     discount_label = QLabel("Discount")
+    #     self.discount_entry = QLineEdit()
+        
+    #     discount_layout.addWidget(discount_label)
+    #     discount_layout.addWidget(self.discount_entry)
+        
+    #     grid.addLayout(discount_layout, 0, 1)
+        
+        
+        
+    #     tax_layout = QHBoxLayout()
+        
+    #     tax_label = QLabel("Sales Tax")
+    #     self.tax_entry = QLineEdit()
+        
+    #     tax_layout.addWidget(tax_label)
+    #     tax_layout.addWidget(self.tax_entry)
+        
+    #     grid.addLayout(tax_layout, 0, 2)
+        
+        
+        
+        
+        
+    #     additional_layout = QHBoxLayout()
+        
+    #     additional_label = QLabel("Additional Charges")
+    #     self.additional_entry = QLineEdit()
+        
+    #     additional_layout.addWidget(additional_label)
+    #     additional_layout.addWidget(self.additional_entry)
+        
+    #     grid.addLayout(additional_layout, 0, 3)
+
+        
+    #     taxable_label = QLabel("Taxable")
+        
+    #     net_amount_label = QLabel("Net Amount")
+    #     final_amount_label = QLabel("Final Amount")
+    #     final_amount_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    #     final_amount_label.setStyleSheet("font-size: 16px; font-weight:600;")
+        
+        
+    #     gross_label.setStyleSheet(label_style)
+    #     discount_label.setStyleSheet(label_style)
+    #     taxable_label.setStyleSheet(label_style)
+    #     tax_label.setStyleSheet(label_style)
+    #     net_amount_label.setStyleSheet(label_style)
+    #     additional_label.setStyleSheet(label_style)
+
+        
+    #     change_label = QLabel("Change")
+    #     remaining_label = QLabel("Remaining Amount")
+        
+    #     remaining_label.setStyleSheet(label_style)
+    #     change_label.setStyleSheet(label_style)
+
+    #     # -----------------------------
+    #     # Create fields
+    #     # -----------------------------
+        
+        
+        
+    #     space_label = QLabel()
+    #     grid.addWidget(space_label, 0, 4)
+        
+        
+        
+    #     method_layout = QHBoxLayout()
+        
+    #     payment_method_label = QLabel("Payment Method")
+    #     payment_method_label.setStyleSheet(label_style)
+        
+    #     self.payment_handler = PaymentMethodHandler(self)
+
+    #     self.payment_method = QComboBox()
+    #     self.payment_method.addItems(["Cash", "Bank Transfer", "EasyPaisa", "JazzCash"])
+    #     self.payment_method.currentTextChanged.connect(self.on_payment_method_changed)
+        
+        
+    #     method_layout.addWidget(payment_method_label)
+    #     method_layout.addWidget(self.payment_method)
+        
+    #     grid.addLayout(method_layout, 1, 0)
+        
+        
+        
+    #     received_layout = QHBoxLayout()   
+        
+    #     received_label = QLabel("Received")
+    #     received_label.setStyleSheet(label_style)
+    #     received_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+    #     received_label.setStyleSheet('font-size: 16px; font-weight: 600;')
+        
+    #     self.received_entry = QLineEdit("0.00")
+    #     self.received_entry.setStyleSheet('font-size: 16px; font-weight: 600; padding: 5px;')
+        
+        
+    #     received_layout.addWidget(received_label)
+    #     received_layout.addWidget(self.received_entry)
+        
+    #     grid.addLayout(received_layout, 0, 7)
+        
         
 
 
-        QShortcut(QKeySequence("Ctrl+Return"), self, activated=lambda: self.save_receipt())
-        QShortcut(QKeySequence("Ctrl+Enter"), self, activated=lambda: self.save_receipt())  
 
         
-        self.setStyleSheet(load_stylesheets())
-        self.layout.addStretch()
+    #     self.taxable_entry = QLineEdit("0.00")
+    #     self.taxable_entry.setReadOnly(True)
+        
+
+    #     self.net_amount_entry = QLineEdit("0.00")
+    #     self.net_amount_entry.setReadOnly(True)
+
+
+
+        
+    #     self.final_amount_entry = QLabel("0.00")
+    #     self.final_amount_entry.setStyleSheet("font-size: 20px; font-weight: 700;")
         
         
         
         
+        
+        
+        
+        
+    #     self.change_entry = QLineEdit("0.00")
+    #     self.change_entry.setReadOnly(True)
+        
+    #     self.remainingdata = QLineEdit("0.00")
+    #     self.remainingdata.setReadOnly(True)
+
+        
+        
+        
+        
+
+    #     self.writeoff_check = QCheckBox("Write-off Remaining")
+    #     self.writeoff_check.setStyleSheet("QCheckBox { color: #333; }")
+
+    #     # -----------------------------
+    #     # Signals
+    #     # -----------------------------
+    #     self.discount_entry.textChanged.connect(self.update_total_amount)
+    #     self.tax_entry.textChanged.connect(self.update_total_amount)
+    #     self.additional_entry.textChanged.connect(self.update_total_amount)
+    #     self.received_entry.textChanged.connect(self.calculate_payment)
+
+
+        
+    #     final_amount_layout = QHBoxLayout()
+        
+        
+    #     final_amount_layout.addWidget(final_amount_label)
+    #     final_amount_layout.addWidget(self.final_amount_entry)
+    #     grid.addLayout(final_amount_layout, 0, 5)
+        
+        
+    #     grid.addWidget(payment_method_label, 2, 0)
+    #     grid.addWidget(self.payment_method,  2, 1)
+        
+        
+        
+        
+
+    #     grid.addWidget(remaining_label, 2, 5)
+    #     grid.addWidget(self.remainingdata,   2, 6)
+        
+        
+    #     grid.addWidget(self.writeoff_check,  3, 6)
+        
+
+        
+
+    #     # -----------------------------
+    #     # Stretch
+    #     # -----------------------------
+    #     for col in range(7):
+    #         grid.setColumnStretch(col, 1)
+
+        
+        
+        
+        
+    #     totals_layout.addLayout(grid)
+
+    #     # -----------------------------
+    #     # Add totals frame
+    #     # -----------------------------
+    #     self.layout.addWidget(totals_frame, 0)
+
+    #     # -----------------------------
+    #     # Save Button
+    #     # -----------------------------
+    #     save_row = QHBoxLayout()
+    #     addreceipt = QPushButton("Save Sales Receipt", objectName="SaveButton")
+    #     addreceipt.setCursor(Qt.PointingHandCursor)
+    #     addreceipt.clicked.connect(lambda: self.save_receipt())
+    #     save_row.addWidget(addreceipt, 1)
+
+    #     self.layout.addLayout(save_row, 0)
+        
+    
+    
+    
+            
         
     def focus_next_field(self, widget):
         widget.setFocus()
@@ -687,10 +1240,10 @@ class CreateSalesWidget(QWidget):
         
         print("Running Percentage Discount")
         
-        subtotal = self.subtotaldata.text()
+        subtotal = self.gross_entry.text()
         subtotal = float(subtotal) if subtotal else 0
         
-        discount = self.percentage.text()
+        discount = self.discount_entry.text()
         discount = float(discount) if discount else 0
         
         print("Subtotal is: ", subtotal, " percentage discount is; ", discount )
@@ -722,11 +1275,14 @@ class CreateSalesWidget(QWidget):
     
     def calculate_payment(self):
         
-        finalamount = self.final_amount.text()
+        finalamount = self.final_amount_entry.text()
         finalamount = float(finalamount) if finalamount else 0.00
 
-        received = self.received_amount.text()
+        received = self.received_entry.text()
         received = float(received) if received else 0.00
+        
+        change =  max(received - finalamount, 0)
+        self.change_entry.setText(str(change))
 
         remaining = finalamount - received
         self.remainingdata.setText(str(remaining))
@@ -737,14 +1293,14 @@ class CreateSalesWidget(QWidget):
 
     def calculate_tax(self):
         
-        net_amount = self.net_amountdata.text()
+        net_amount = self.net_amount_entry.text()
         net_amount = float(net_amount) if net_amount else 0
         
-        tax = self.taxedit.text()
+        tax = self.tax_entry.text()
         tax = float(tax) if tax else 0
         
         tax_amount = net_amount * tax / 100
-        self.taxamount.setText(f"{tax_amount:.2f}")
+        self.tax_entry.setText(f"{tax_amount:.2f}")
         
         self.update_total_amount()
         
@@ -762,14 +1318,14 @@ class CreateSalesWidget(QWidget):
         
         
         counter = QLabel()
+        counter.setStyleSheet('font-weight: 500;')
         counter.setText(str(row + 1))
-        counter.setAlignment(Qt.AlignCenter)
         
 
         
         remove_btn = QPushButton("X")
         remove_btn.clicked.connect(lambda _, r=row: self.remove_row(r))
-        remove_btn.setStyleSheet("color: #333;")
+        remove_btn.setStyleSheet("color: #333; ")
 
         product_name = self.item.currentText()
         product_id = self.item.currentData()
@@ -778,6 +1334,7 @@ class CreateSalesWidget(QWidget):
         
         product_combo = QComboBox()
         product_combo.setEditable(True)
+        product_combo.lineEdit().setStyleSheet("font-weight: 700;")
         product_combo.lineEdit().setReadOnly(True)
         product_combo.setInsertPolicy(QComboBox.NoInsert)
         
@@ -798,6 +1355,7 @@ class CreateSalesWidget(QWidget):
         product_combo.addItem(product_name, product_id)
 
         product_combo.setStyleSheet("""
+        QComboBox {font-weight: 600; padding: 0;}
         QComboBox::drop-down {
             border: 0px;
         }
@@ -805,6 +1363,14 @@ class CreateSalesWidget(QWidget):
             image: none;
         }
         """)
+        
+        
+        
+        
+        
+        
+        
+        
         
         
         qty_data = self.qty_edit.text()
@@ -824,10 +1390,18 @@ class CreateSalesWidget(QWidget):
         qty_edit.setReadOnly(True)
         qty_edit.setText(qty_data)
         
+        qty_edit.setStyleSheet("font-weight: 600;")
+        
+        
+        
+        
+        
+        
+        
         rate_edit = QLineEdit()
         rate_edit.setReadOnly(True)
         rate_edit.setText(rate_data)
-        
+        rate_edit.setStyleSheet("font-weight: 600;")
         discount = QLineEdit()
         discount.setReadOnly(True)
         discount.setText(discount_data)
@@ -839,7 +1413,7 @@ class CreateSalesWidget(QWidget):
         amount_edit = QLineEdit()
         amount_edit.setReadOnly(True)
         amount_edit.setText(total_data)
-        
+        amount_edit.setStyleSheet("font-weight: 600;")
         self.table.setCellWidget(row, 0, counter)
         self.table.setCellWidget(row, 1, product_combo)
         self.table.setCellWidget(row, 2, qty_edit)
@@ -888,7 +1462,7 @@ class CreateSalesWidget(QWidget):
             percentage_discount = float(percentage_discount) if percentage_discount else 0
             
             discount_amount =  rate * (percentage_discount / 100)
-            self.flat_discount.setText(f"{discount_amount:.2f}")
+            self.discount.setText(f"{discount_amount:.2f}")
             price = rate - discount_amount
             
             total = qty * price
@@ -911,7 +1485,7 @@ class CreateSalesWidget(QWidget):
             qty_text = self.qty_edit.text()
             rate_text = self.rate_edit.text()
             # get percentage amount
-            flat_discount = self.flat_discount.text()
+            flat_discount = self.discount.text()
 
             qty = float(qty_text) if qty_text else 0
             rate = float(rate_text) if rate_text else 0
@@ -953,6 +1527,9 @@ class CreateSalesWidget(QWidget):
             if isinstance(widget, QPushButton):
                 widget.clicked.disconnect()
                 widget.clicked.connect(lambda _, r=row: self.remove_row(r))
+                
+        # update total amount
+        self.update_total_amount()
 
         
         
@@ -966,13 +1543,12 @@ class CreateSalesWidget(QWidget):
         
         if not self.reloading_sale:
             
-            self.populate_customer()
-            self.populate_salesman()
+            self.populate_customers()
 
 
 
 
-    def populate_customer(self):
+    def populate_customers(self):
     
         self.customer.clear()
         self.customer.addItem("Walk-in Customer", None)
@@ -989,47 +1565,9 @@ class CreateSalesWidget(QWidget):
     
     
     
-    def find_customer_by_name(self, name):
-    
-        name = name.strip().lower()
-
-        for i in range(self.customer.count()):
-            text = self.customer.itemText(i).strip().lower()
-            if text == name:
-                return self.customer.itemData(i)
-
-        return None
     
     
     
-    def resolve_customer_for_sale(self):
-    
-        typed_name = self.customer.currentText().strip()
-
-        if not typed_name or typed_name.lower() == "walk-in customer":
-            return None
-
-        existing_customer_id = self.find_customer_by_name(typed_name)
-
-        if existing_customer_id is not None:
-            return existing_customer_id
-
-        reply = QMessageBox.question(
-            self,
-            "Add Customer",
-            f'"{typed_name}" not found.\nWould you like to add it as a new customer?',
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-
-        if reply == QMessageBox.Yes:
-            new_customer_id = self.insert_customer_quick(typed_name)
-            if new_customer_id:
-                self.customer.addItem(typed_name, new_customer_id)
-                self.customer.setCurrentText(typed_name)
-                return new_customer_id
-
-        return None
     
     
     
@@ -1061,45 +1599,45 @@ class CreateSalesWidget(QWidget):
     
     
 
-    def populate_salesman(self):
+    def get_customer_id(self):
         
-        self.salesman.clear()
+        customer = self.customer.currentData()
+        return customer
+        
+        
+        
+    
+    
+    def get_salesman_id(self):
         
         username = QApplication.instance().property("username")
-        
         query = QSqlQuery()
-        query.prepare("SELECT id, firstname, lastname FROM auth WHERE username = ?;")
+        query.prepare("SELECT id FROM auth WHERE username = ?;")
         query.addBindValue(username)
-        
-        if query.exec():
-            
-            while query.next():
-                employee_id = query.value(0)
-                firstname = query.value(1)
-                lastname = query.value(2)
-                
-                salesman = f'{firstname} {lastname}'
-
-                print(employee_id, salesman)
-
-                self.salesman.addItem(salesman, employee_id)  # Text shown, ID stored as data
-
+        if query.exec() and query.next():
+            return query.value(0)
         else:
             QMessageBox.information(None, 'Error', query.lastError().text() )
-        
-        
+            self.close()                # Close main window
+            QApplication.quit()
+            return None    
+    
+    
     
     
     def insert_salesreceipt(self):
     
         try:
             # --- Collect Data ---
-            customer_id = self.resolve_customer_for_sale()
-            salesman = self.salesman.currentData()
+            customer_id = self.get_customer_id()
+            salesman = self.get_salesman_id()
+                
 
             def to_float(value):
+                
                 value = str(value).strip()
                 return float(value) if value else 0.0
+            
 
             subtotal = to_float(self.gross_entry.text())
             discount = to_float(self.discount_entry.text())
@@ -1107,15 +1645,11 @@ class CreateSalesWidget(QWidget):
             tax = to_float(self.tax_entry.text())
             net_amount = to_float(self.net_amount_entry.text())
             additional_charges = to_float(self.additional_entry.text())
-            total = to_float(self.final_amount.text())
-            received = to_float(self.received_amount.text())
+            total = to_float(self.net_amount_entry.text())
+            received = to_float(self.received_entry.text())
             remaining = to_float(self.remainingdata.text())
 
             # --- Basic Validation ---
-            if salesman is None:
-                QMessageBox.warning(self, "Validation Error", "Salesman is required.")
-                return None
-
             if total < 0:
                 QMessageBox.warning(self, "Validation Error", "Total cannot be negative.")
                 return None
@@ -1163,6 +1697,8 @@ class CreateSalesWidget(QWidget):
                 remaining, writeoff, payable, receiveable, session_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
+
+    
 
             query.addBindValue(customer_id)
             query.addBindValue(salesman)
@@ -1399,6 +1935,7 @@ class CreateSalesWidget(QWidget):
 
             return int(query.value(0) or 0)
 
+
         def insert_sales_item_record(
             sales_id, product_id, qty, rate, discount, tax,
             line_total, line_weight, effective_line_total
@@ -1507,6 +2044,15 @@ class CreateSalesWidget(QWidget):
             return subtotal, header_discount, header_tax, additional_charges
 
         subtotal, header_discount, header_tax, additional_charges = get_header_values()
+        
+        
+        # check for empty table
+        row_count = self.table.rowCount()
+        if row_count <= 0:
+            QMessageBox
+            raise Exception(f"No Items in Table")
+            
+        
 
         for row in range(self.table.rowCount()):
 
@@ -1619,11 +2165,9 @@ class CreateSalesWidget(QWidget):
 
             # get salesorder data
             customer = self.customer.currentData()
-            salesman = self.salesman.currentData()
             status = 'On Hold'
             
             print("Customer is: ", customer)
-            print("Salesman is: ", salesman)        
             
             if customer == 0:
                 customer = None
@@ -1670,6 +2214,8 @@ class CreateSalesWidget(QWidget):
             print("Transaction committed successfully")
             self.clear_fields()
             QMessageBox.information(None, "Success", "Sales Hold saved successfully")
+        
+        
         
         
         
@@ -1736,6 +2282,8 @@ class CreateSalesWidget(QWidget):
         if not items_exits:
             print("No Records in the Order")
             raise Exception
+    
+    
     
     
     
@@ -1982,6 +2530,10 @@ class CreateSalesWidget(QWidget):
 
         self.qty_edit.setFocus()
         self.qty_edit.selectAll()
+        
+        
+        # empty completer
+        combo.completer().setModel(QStringListModel([]))
 
         return product_id
             
@@ -2005,7 +2557,7 @@ class CreateSalesWidget(QWidget):
                     subtotal = subtotal + value
                     
                 except ValueError:
-                    pass  # skip empty or invalid cells
+                    pass  
                 
             else:
                 continue
@@ -2024,13 +2576,15 @@ class CreateSalesWidget(QWidget):
         
         self.net_amount_entry.setText(f"{net_amount:.2f}")
         
-        cn_adjust = self.additional_entry.text()
-        cn_adjust = float(cn_adjust) if cn_adjust else 0.00
+        additional_charges = self.additional_entry.text()
+        additional_charges = float(additional_charges) if additional_charges else 0.00
         
-        final_amount = net_amount + cn_adjust
-        self.final_amount.setText(f"{final_amount:.2f}")
+        final_amount = net_amount + additional_charges
+        self.final_amount_entry.setText(f"{final_amount:.2f}")
         
-        self.final_amount.setStyleSheet("font-weight: bold;")
+        self.final_amount_entry.setStyleSheet("font-weight: bold;")
+        
+        self.main_final_amount.setText(f"{final_amount:.2f}")
         
     
 
@@ -2304,10 +2858,11 @@ class CreateSalesWidget(QWidget):
         self.net_amount_entry.clear()
         self.tax_entry.clear()
         self.taxable_entry.clear()
-        self.final_amount.clear()
-        self.received_amount.clear()
+        self.received_entry.clear()
         self.remainingdata.clear()
         self.additional_entry.clear()
+        self.final_amount_entry.clear()
+        self.main_final_amount.clear()
         
         self.payment_method.blockSignals(True); 
         self.payment_method.setCurrentText("Cash"); 
@@ -2318,8 +2873,11 @@ class CreateSalesWidget(QWidget):
         
         self.table.setRowCount(0)
         
-        self.populate_customer()
+        self.populate_customers()
         
+        # set focus back to combobox
+        self.item.setCurrentIndex(-1)
+        self.item.setFocus()
         
         
 
@@ -2571,6 +3129,20 @@ class CreateSalesWidget(QWidget):
             os.system(f"lp '{filename}'")
         elif system == "Windows":
             os.startfile(filename, "print")
+            
+    
+    
+    def clear_product_field(self):
+        
+        self.item.blockSignals(True)
+
+        self.item.setCurrentIndex(-1)
+        self.item.lineEdit().clear()
+
+        if self.item.completer():
+            self.item.completer().popup().hide()
+
+        self.item.blockSignals(False)
 
     
     
@@ -2602,4 +3174,78 @@ class MyTable(QTableWidget):
             super().keyPressEvent(event)
             
     
+   
+   
+   
+from PySide6.QtCore import QObject, QEvent, QTimer
+from PySide6.QtWidgets import QMessageBox
+from PySide6.QtSql import QSqlQuery
+
+
+class QtyValidationFilter(QObject):
+    def __init__(self, parent_page, qty_edit, product_combo):
+        super().__init__(qty_edit)
+        self.parent_page = parent_page
+        self.qty_edit = qty_edit
+        self.product_combo = product_combo
+
+    def eventFilter(self, obj, event):
+        if obj == self.qty_edit and event.type() == QEvent.FocusOut:
+            self.validate_qty()
+        return super().eventFilter(obj, event)
+
+    def validate_qty(self):
+        text = self.qty_edit.text().strip()
+
+        if not text:
+            return
+
+        try:
+            entered_qty = int(text)
+        except ValueError:
+            QMessageBox.warning(
+                self.parent_page,
+                "Invalid Quantity",
+                "Quantity must be a whole number."
+            )
+            self.qty_edit.clear()
+            QTimer.singleShot(0, self.qty_edit.setFocus)
+            return
+
+        product_id = (self.product_combo.currentData() or {}).get("product_id")
+        if not product_id:
+            return
+        
+        print(f"product Id isL {product_id}")
+        available_qty = self.get_available_qty(product_id)
+        
+        print(f"Available Qty is: {available_qty}")
+
+        if entered_qty > available_qty:
+            QMessageBox.warning(
+                self.parent_page,
+                "Insufficient Stock",
+                f"Entered quantity ( {entered_qty} ) is greater than available stock ( {available_qty} )."
+            )
+            self.qty_edit.clear()
+            QTimer.singleShot(0, self.qty_edit.setFocus)
+
+    def get_available_qty(self, product_id):
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT COALESCE(SUM(quantity_remaining), 0)
+            FROM batch
+            WHERE product_id = ?
+        """)
+        query.addBindValue(product_id)
+
+        if query.exec() and query.next():
+            return int(query.value(0) or 0)
+
+        return 0
+    
+    
+    
+    
+   
    
