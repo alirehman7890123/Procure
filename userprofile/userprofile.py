@@ -2,6 +2,7 @@ from PySide6.QtWidgets import QWidget,QApplication, QFrame, QPushButton, QVBoxLa
 from PySide6.QtGui import QColor
 from PySide6.QtCore import QSize, Qt, QFile, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
+from utilities.permissions import Permissions
 
 
 import os
@@ -44,8 +45,8 @@ class ProfileWidget(QWidget):
         print("Opening Profile Page")
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
         
         
          # === Header Row ===
@@ -54,20 +55,18 @@ class ProfileWidget(QWidget):
         
         self.userlist = QPushButton("Users List", objectName="TopRightButton")
         self.userlist.setCursor(Qt.PointingHandCursor)
-        self.userlist.setFixedWidth(200)
         
         self.changepassword = QPushButton("Change Password", objectName="TopRightButton")
         self.changepassword.setCursor(Qt.PointingHandCursor)
-        self.changepassword.setFixedWidth(200)
         
         self.edit_btn = QPushButton("Edit", objectName="TopRightButton")
         self.edit_btn.setCursor(Qt.PointingHandCursor)
-        self.edit_btn.setFixedWidth(100)
         self.edit_btn.clicked.connect(self.toggle_edit_mode)
         header_layout.addWidget(self.edit_btn)
         self.edit_mode = False  # Track whether we are in edit mode or not
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.userlist)
         header_layout.addWidget(self.changepassword)
 
@@ -160,6 +159,7 @@ class ProfileWidget(QWidget):
         
     
     # === Toggle Edit Mode ===
+    @Permissions.require_permission('profile.update')
     def toggle_edit_mode(self):
         self.edit_mode = not self.edit_mode
         if self.edit_mode:
@@ -254,6 +254,7 @@ class ProfileWidget(QWidget):
 
         
     # === Save Changes ===
+    @Permissions.require_permission('profile.update')
     def save_changes(self):
         
         if not self.user_id:
@@ -286,5 +287,4 @@ class ProfileWidget(QWidget):
         
 
    
-
 

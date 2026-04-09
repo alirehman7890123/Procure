@@ -20,14 +20,14 @@ class PurchaseReturnDetailWidget(QWidget):
         grid_widget.setLayout(grid_layout)
 
         
-        heading = QLabel("Purchase Return Detail", objectName='myheading')
-        self.purchasereturnlist = QPushButton('Purchse Return List', objectName='supplierlist')
+        heading = QLabel("Purchase Return Detail", objectName="SectionTitle")
+        self.purchasereturnlist = QPushButton("Purchase Return List", objectName="TopRightButton")
         
         grid_layout.addWidget(heading, 0,0,1,7)
         grid_layout.addWidget(self.purchasereturnlist, 0,7,1,1)
         
-        orderlabel = QLabel("Purchase Invoice Id")
-        sellerorderlabel = QLabel("Seller Invoice Id")
+        orderlabel = QLabel("Purchase Return Id")
+        sellerorderlabel = QLabel("Seller Rep")
         supplierlabel = QLabel("Supplier")
         datelabel = QLabel("Return Date")
 
@@ -132,9 +132,9 @@ class PurchaseReturnDetailWidget(QWidget):
         
         
         subtotallabel = QLabel("Sub Total")
-        discountlabel = QLabel("Total Discount")
-        taxlabel = QLabel("Total Tax")
-        roundofflabel = QLabel("Roundoff")
+        discountlabel = QLabel("Received")
+        taxlabel = QLabel("Remaining")
+        roundofflabel = QLabel("Write-Off")
         finalamountlabel = QLabel("Grand Total")
 
         grid_layout.addWidget(subtotallabel, 8, 0)
@@ -234,10 +234,13 @@ class PurchaseReturnDetailWidget(QWidget):
             SELECT 
                 id,
                 supplier,
+                rep,
                 creation_date,
                 subtotal,
-                roundoff,
-                total
+                total,
+                received,
+                remaining,
+                writeoff
             FROM purchase_return
             WHERE id = ?
         """)
@@ -249,10 +252,13 @@ class PurchaseReturnDetailWidget(QWidget):
 
         order_id     = query.value(0)
         supplier_id  = query.value(1)
-        invoice_date = query.value(2)
-        subtotal     = query.value(3)
-        roundoff     = query.value(4)
-        total        = query.value(5)
+        rep_id       = query.value(2)
+        invoice_date = query.value(3)
+        subtotal     = float(query.value(4) or 0)
+        total        = float(query.value(5) or 0)
+        received     = float(query.value(6) or 0)
+        remaining    = float(query.value(7) or 0)
+        writeoff     = float(query.value(8) or 0)
 
         # Format date safely
         if isinstance(invoice_date, QDate):
@@ -263,9 +269,11 @@ class PurchaseReturnDetailWidget(QWidget):
         # Set header fields
         self.orderid.setText(str(order_id))
         self.dateandtime.setText(invoice_date)
-        self.subtotal.setText(str(subtotal))
-        self.roundoff.setText(str(roundoff))
-        self.finalamount.setText(str(total))
+        self.subtotal.setText(f"{subtotal:.2f}")
+        self.discount.setText(f"{received:.2f}")
+        self.tax.setText(f"{remaining:.2f}")
+        self.roundoff.setText(f"{writeoff:.2f}")
+        self.finalamount.setText(f"{total:.2f}")
 
         # Load supplier name (single query, properly executed)
         supplier_name = "Unknown Supplier"
@@ -279,6 +287,16 @@ class PurchaseReturnDetailWidget(QWidget):
                 supplier_name = supplier_query.value(0)
 
         self.supplier.setText(supplier_name)
+
+        rep_name = "-"
+        if rep_id not in (None, "", 0):
+            rep_query = QSqlQuery()
+            rep_query.prepare("SELECT name FROM rep WHERE id = ?")
+            rep_query.addBindValue(rep_id)
+            if rep_query.exec() and rep_query.next():
+                rep_name = rep_query.value(0) or "-"
+
+        self.sellerorder.setText(str(rep_name))
 
         # Load associated items
         self.load_items_into_table(purchase_return_id)
@@ -368,8 +386,6 @@ class MyTable(QTableWidget):
         
         
         
-
-
 
 
 

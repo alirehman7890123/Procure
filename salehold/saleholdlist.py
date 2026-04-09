@@ -1,10 +1,10 @@
-from PySide6.QtWidgets import QWidget, QComboBox,QMessageBox, QGridLayout, QLabel, QPushButton, QHeaderView, QSizePolicy, QVBoxLayout, QTableWidget, QTableWidgetItem
-from PySide6.QtCore import QFile, Qt, QDate, Signal
-from PySide6.QtSql import QSqlDatabase, QSqlQuery
+from PySide6.QtWidgets import QWidget, QGridLayout, QLabel, QPushButton, QHeaderView, QSizePolicy, QVBoxLayout, QTableWidget, QTableWidgetItem
+from PySide6.QtCore import Qt, QDate, Signal
+from PySide6.QtSql import QSqlQuery
 from functools import partial
-from datetime import date
 
 from utilities.stylus import load_stylesheets
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -37,7 +37,7 @@ class SaleHoldListWidget(QWidget):
         
         self.supplier_table.setColumnCount(6)
         self.supplier_table.setHorizontalHeaderLabels([
-            "#", "Customer", "SalesMan", "Status", "Date", "Details"
+            "#", "Customer", "User", "Status", "Date", "Details"
         ])
         self.supplier_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
@@ -91,7 +91,7 @@ class SaleHoldListWidget(QWidget):
             
             holding_id = int(query.value(0))
             customer = int(query.value(1))
-            salesman = str(query.value(2))
+            salesman = query.value(2)
             status = query.value(3)
             creation = query.value(4)
             
@@ -110,17 +110,24 @@ class SaleHoldListWidget(QWidget):
                     customer = str(query2.value(0))
 
 
-            salesman_query = QSqlQuery()
-            salesman_query.prepare("SELECT name FROM employee WHERE id = ?")
-            salesman_query.addBindValue(salesman)
-            
+            salesman_name = "-"
+            if salesman is not None:
+                salesman_query = QSqlQuery()
+                salesman_query.prepare("SELECT username FROM auth WHERE id = ?")
+                salesman_query.addBindValue(int(salesman))
 
-            if salesman_query.exec() and salesman_query.next():
-                salesman = str(salesman_query.value(0))
+                if salesman_query.exec() and salesman_query.next():
+                    salesman_name = str(salesman_query.value(0) or "-")
+                else:
+                    salesman_query = QSqlQuery()
+                    salesman_query.prepare("SELECT name FROM employee WHERE id = ?")
+                    salesman_query.addBindValue(int(salesman))
+                    if salesman_query.exec() and salesman_query.next():
+                        salesman_name = str(salesman_query.value(0) or "-")
                 
             holding_id = str(holding_id)
             customer = str(customer)
-            salesman = str(salesman)
+            salesman = str(salesman_name)
             status = str(status)
             orderdate = creation
             
@@ -145,13 +152,8 @@ class SaleHoldListWidget(QWidget):
             self.supplier_table.setItem(row, 4, orderdate)
             
             detail = QPushButton('Details')
-            detail.setStyleSheet("""
-                                 
-                    background-color: #777;
-                    color: blue;              
-                    font-weight: 600;
-                
-            """)
+            detail.setObjectName("EntryButton")
+            detail.setCursor(Qt.PointingHandCursor)
             
             self.supplier_table.setCellWidget(row, 5, detail)
             print("Holding ID:", holding_id)
@@ -159,4 +161,7 @@ class SaleHoldListWidget(QWidget):
             detail.clicked.connect(partial(self.holddetailsignal.emit, holding_id))
             
             row += 1
+
+        if query.lastError().isValid():
+            AppMessageBox.error(self, "Error", query.lastError().text())
         

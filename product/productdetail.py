@@ -1,10 +1,14 @@
-from PySide6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QDialog, QApplication, QHBoxLayout, QButtonGroup, QCheckBox, QFrame,QMessageBox,QTableWidget, QHeaderView, QTableWidgetItem, QLabel, QLineEdit, QGridLayout, QTableWidgetItem, QSpacerItem, QSizePolicy
+from PySide6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QDialog, QApplication, QHBoxLayout, QButtonGroup, QCheckBox, QFrame,QMessageBox,QTableWidget, QHeaderView, QTableWidgetItem, QLabel, QLineEdit, QGridLayout, QTableWidgetItem, QSpacerItem, QSizePolicy, QComboBox
 from PySide6.QtCore import QFile, Qt, QDate, QDateTime, Signal
 from PySide6.QtSql import  QSqlQuery, QSqlDatabase
 from PySide6.QtGui import QColor
 from functools import partial
+from datetime import datetime
 
 from utilities.stylus import load_stylesheets
+from utilities.activity_logger import log_activity
+from utilities.permissions import Permissions
+from utilities.app_messagebox import AppMessageBox
 
 
 class ProductDetailWidget(QWidget):
@@ -19,23 +23,22 @@ class ProductDetailWidget(QWidget):
 
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Product Detail", objectName="SectionTitle")
         self.productlist = QPushButton("Products List", objectName="TopRightButton")
         self.productlist.setCursor(Qt.PointingHandCursor)
-        self.productlist.setFixedWidth(200)
         
         self.edit_btn = QPushButton("Edit", objectName="TopRightButton")
         self.edit_btn.setCursor(Qt.PointingHandCursor)
-        self.edit_btn.setFixedWidth(100)
         self.edit_btn.clicked.connect(self.toggle_edit_mode)
         
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.productlist)
         header_layout.addWidget(self.edit_btn)
 
@@ -58,7 +61,7 @@ class ProductDetailWidget(QWidget):
         self.layout.addSpacing(20)
         
         labels = ["Product Name", "Code/Barcode", "Brand", 
-                   "Formula", "Pack Size", "Units", "Pack Price", "Unit Price"]
+                   "Formula", "Pack Size", "Units", "Pack Price", "Unit Price", "Discount Group", "Tax Group"]
 
         self.product = QLabel() ; self.productedit = QLineEdit()
         self.code = QLabel() ; self.codeedit = QLineEdit()
@@ -70,6 +73,10 @@ class ProductDetailWidget(QWidget):
         self.units = QLabel(); 
         self.sale_price = QLabel() ; self.sale_price_edit = QLineEdit()
         self.unit_price = QLabel()
+        self.discount_group = QLabel() ; self.discount_group_edit = QComboBox()
+        self.populate_discount_groups()
+        self.tax_group = QLabel() ; self.tax_group_edit = QComboBox()
+        self.populate_tax_groups()
         
         self.field_pairs = [
             (self.product, self.productedit),
@@ -79,7 +86,9 @@ class ProductDetailWidget(QWidget):
             (self.packsize, self.packsizeedit),
             (self.units, None),
             (self.sale_price, self.sale_price_edit),
-            (self.unit_price, None)
+            (self.unit_price, None),
+            (self.discount_group, self.discount_group_edit),
+            (self.tax_group, self.tax_group_edit)
             
         ]
         
@@ -112,8 +121,8 @@ class ProductDetailWidget(QWidget):
         # Create Product Batch Table
         self.row_height = 40
 
-        self.table = MyTable(column_ratios=[1, 2, 2, 2, 2, 2, 2], parent=self)
-        headers = ["Id", "Batch No", "Expiry","Received Qty", "Remaining", "Source", "Date/Time"]
+        self.table = MyTable(column_ratios=[1, 2, 2, 2, 2, 2, 2, 2, 2], parent=self)
+        headers = ["Id", "Batch No", "Expiry", "Received Qty", "Remaining", "Unit Cost", "Source", "Date/Time", "Status"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         
@@ -140,6 +149,22 @@ class ProductDetailWidget(QWidget):
         self.table.setSelectionMode(QTableWidget.SingleSelection)
 
         self.layout.addWidget(self.table)
+
+        summary_layout = QHBoxLayout()
+        self.total_batches_label = QLabel("Batches: 0")
+        self.active_batches_label = QLabel("Active: 0")
+        self.near_expiry_label = QLabel("Near Expiry: 0")
+        self.expired_batches_label = QLabel("Expired: 0")
+        self.sold_out_batches_label = QLabel("Sold Out: 0")
+
+        summary_layout.addWidget(self.total_batches_label)
+        summary_layout.addWidget(self.active_batches_label)
+        summary_layout.addWidget(self.near_expiry_label)
+        summary_layout.addWidget(self.expired_batches_label)
+        summary_layout.addWidget(self.sold_out_batches_label)
+        summary_layout.addStretch()
+
+        self.layout.addLayout(summary_layout)
         
         self.layout.addStretch()
         
@@ -149,11 +174,55 @@ class ProductDetailWidget(QWidget):
         
         self.setStyleSheet(load_stylesheets())
 
+    def populate_discount_groups(self):
+        self.discount_group_edit.clear()
+        self.discount_group_edit.addItem("None", None)
+        query = QSqlQuery("""
+            SELECT id, name, discount_percent
+            FROM discount_group
+            WHERE status = 'active'
+            ORDER BY name
+        """)
+        while query.next():
+            group_id = query.value(0)
+            name = str(query.value(1) or "").strip()
+            percent = float(query.value(2) or 0.0)
+            self.discount_group_edit.addItem(f"{name} ({percent:.2f}%)", group_id)
+
+    def populate_tax_groups(self):
+        self.tax_group_edit.clear()
+        self.tax_group_edit.addItem("None", None)
+        query = QSqlQuery("""
+            SELECT id, name, tax_percent
+            FROM tax_group
+            WHERE status = 'active'
+            ORDER BY name
+        """)
+        while query.next():
+            group_id = query.value(0)
+            name = str(query.value(1) or "").strip()
+            percent = float(query.value(2) or 0.0)
+            self.tax_group_edit.addItem(f"{name} ({percent:.2f}%)", group_id)
+
+    def get_edit_widget_text(self, widget):
+        if isinstance(widget, QComboBox):
+            return widget.currentText()
+        return widget.text() if hasattr(widget, "text") else ""
+
+    def set_edit_widget_text(self, widget, text):
+        if isinstance(widget, QComboBox):
+            index = widget.findText(str(text), Qt.MatchExactly)
+            widget.setCurrentIndex(index if index >= 0 else 0)
+            return
+        if hasattr(widget, "setText"):
+            widget.setText(str(text))
+
 
 
         
         
     # === Toggle Edit Mode ===
+    @Permissions.require_permission('product.update')
     def toggle_edit_mode(self):
         self.edit_mode = not self.edit_mode
         if self.edit_mode:
@@ -161,7 +230,7 @@ class ProductDetailWidget(QWidget):
             # Switch to QLineEdit
             for lbl, edit in self.field_pairs:
                 if edit:
-                    edit.setText(lbl.text())
+                    self.set_edit_widget_text(edit, lbl.text())
                     lbl.hide()
                     edit.show()
         else:
@@ -170,7 +239,7 @@ class ProductDetailWidget(QWidget):
             # Switch back to QLabel
             for lbl, edit in self.field_pairs:
                 if edit:
-                    lbl.setText(edit.text())
+                    lbl.setText(self.get_edit_widget_text(edit))
                     edit.hide()
                     lbl.show()
     
@@ -186,7 +255,7 @@ class ProductDetailWidget(QWidget):
             self.edit_btn.setText("Edit")
             for lbl, edit in self.field_pairs:
                 if edit:
-                    lbl.setText(edit.text())
+                    lbl.setText(self.get_edit_widget_text(edit))
                     edit.hide()
                     lbl.show()
 
@@ -200,7 +269,7 @@ class ProductDetailWidget(QWidget):
         self.product_id = id
         print("Loading Detail ID:", self.product_id)
         query = QSqlQuery()
-        query.prepare("SELECT display_name, code, generic_name, brand FROM product WHERE id = ?")
+        query.prepare("SELECT display_name, code, generic_name, brand, discount_group_id, tax_group_id FROM product WHERE id = ?")
         query.addBindValue(self.product_id)
         
         if query.exec() and query.next():
@@ -209,6 +278,14 @@ class ProductDetailWidget(QWidget):
             self.code.setText(query.value(1))
             self.formula.setText(query.value(2))
             self.brand.setText(query.value(3))
+            discount_group_id = query.value(4)
+            tax_group_id = query.value(5)
+            discount_index = self.discount_group_edit.findData(discount_group_id)
+            self.discount_group_edit.setCurrentIndex(discount_index if discount_index >= 0 else 0)
+            self.discount_group.setText(self.discount_group_edit.currentText() or "None")
+            tax_index = self.tax_group_edit.findData(tax_group_id)
+            self.tax_group_edit.setCurrentIndex(tax_index if tax_index >= 0 else 0)
+            self.tax_group.setText(self.tax_group_edit.currentText() or "None")
             
         
         else:
@@ -242,7 +319,13 @@ class ProductDetailWidget(QWidget):
         # Load Price Data
         
         price_query = QSqlQuery()
-        price_query.prepare("SELECT pack_size, pack_price, unit_price FROM price_pack WHERE product_id = ?")
+        price_query.prepare("""
+            SELECT pack_size, pack_price, unit_price
+            FROM price_pack
+            WHERE product_id = ?
+            ORDER BY is_default DESC, id DESC
+            LIMIT 1
+        """)
         price_query.addBindValue(self.product_id)
         
         if price_query.exec() and price_query.next():
@@ -264,7 +347,7 @@ class ProductDetailWidget(QWidget):
         
         batch_query = QSqlQuery()
         batch_query.prepare("""
-                            SELECT id, batch_no, expiry_date, total_received, quantity_remaining, source, received_at
+                            SELECT id, batch_no, expiry_date, total_received, quantity_remaining, unit_cost, source, received_at
                             FROM batch
                             WHERE product_id = ?
                             ORDER BY expiry_date ASC
@@ -274,28 +357,94 @@ class ProductDetailWidget(QWidget):
             
             self.table.setRowCount(0)
             row = 0
+            total_batches = 0
+            active_batches = 0
+            near_expiry_batches = 0
+            expired_batches = 0
+            sold_out_batches = 0
             
             while batch_query.next():
                 
                 print("Batch:", batch_query.value(0), batch_query.value(1), batch_query.value(2),
-                      batch_query.value(3), batch_query.value(4), batch_query.value(5), batch_query.value(6))
+                      batch_query.value(3), batch_query.value(4), batch_query.value(5), batch_query.value(6), batch_query.value(7))
                 
                 self.table.insertRow(row)
+
+                remaining_qty = int(batch_query.value(4) or 0)
+                status = self.get_batch_status(str(batch_query.value(2) or ""), remaining_qty)
+
+                if status == "Expired":
+                    expired_batches += 1
+                elif status == "Near Expiry":
+                    near_expiry_batches += 1
+                elif status == "Sold Out":
+                    sold_out_batches += 1
+                else:
+                    active_batches += 1
+
+                total_batches += 1
                 
-                for col in range(7):
+                for col in range(8):
                     item = QTableWidgetItem(str(batch_query.value(col)))
                     item.setFlags(item.flags() ^ Qt.ItemIsEditable)  # make item non-editable
                     self.table.setItem(row, col, item)
+
+                status_item = QTableWidgetItem(status)
+                status_item.setFlags(status_item.flags() ^ Qt.ItemIsEditable)
+                self.table.setItem(row, 8, status_item)
                 
                 row += 1
             
             print(f"[OK] Loaded {row} batches for product ID {self.product_id}")
+
+            self.total_batches_label.setText(f"Batches: {total_batches}")
+            self.active_batches_label.setText(f"Active: {active_batches}")
+            self.near_expiry_label.setText(f"Near Expiry: {near_expiry_batches}")
+            self.expired_batches_label.setText(f"Expired: {expired_batches}")
+            self.sold_out_batches_label.setText(f"Sold Out: {sold_out_batches}")
             
             # Colour rows by status
-            self.color_rows_by_status(self.table, status_column=3)
+            self.color_rows_by_status(self.table, status_column=8)
             
         
 
+
+
+    def get_batch_status(self, expiry_text: str, remaining_qty: int) -> str:
+        if remaining_qty <= 0:
+            return "Sold Out"
+
+        parsed_expiry = self.parse_expiry_date(expiry_text)
+        if parsed_expiry is None:
+            return "No Expiry"
+
+        today = QDate.currentDate()
+        if parsed_expiry < today:
+            return "Expired"
+
+        days_to_expiry = today.daysTo(parsed_expiry)
+        if days_to_expiry <= 180:
+            return "Near Expiry"
+
+        return "Healthy"
+
+
+    def parse_expiry_date(self, expiry_text: str):
+        if not expiry_text:
+            return None
+
+        expiry_text = expiry_text.strip()
+        if not expiry_text:
+            return None
+
+        for fmt in ("%Y-%m-%d", "%d-%m-%Y"):
+            try:
+                parsed = datetime.strptime(expiry_text, fmt)
+                return QDate(parsed.year, parsed.month, parsed.day)
+            except ValueError:
+                continue
+
+        return None
 
 
     def color_rows_by_status(self, table, status_column: int = 3):
@@ -316,7 +465,11 @@ class ProductDetailWidget(QWidget):
             if status == "expired":
                 color = QColor(255, 120, 120)  # red
             elif status == "near expiry":
-                color = QColor(255, 255, 150)  # yellow
+                color = QColor(255, 224, 178)  # orange
+            elif status == "sold out":
+                color = QColor(224, 224, 224)  # gray
+            elif status == "healthy":
+                color = QColor(220, 245, 220)  # green
             else:
                 color = None
 
@@ -331,12 +484,21 @@ class ProductDetailWidget(QWidget):
     
     
             
+    @Permissions.require_permission('product.update')
     def save_changes(self):
         
         if not self.product_id:
             print("[ERROR] No Product loaded.")
-            QMessageBox.warning(None, "Error", "No product loaded.")
+            AppMessageBox.warning(None, "Error", "No product loaded.")
             return
+
+        # Read old values for audit BEFORE starting the transaction
+        old_price_query = QSqlQuery()
+        old_price_query.prepare("SELECT pack_price FROM price_pack WHERE product_id = ? LIMIT 1")
+        old_price_query.addBindValue(self.product_id)
+        old_pack_price = None
+        if old_price_query.exec() and old_price_query.next():
+            old_pack_price = float(old_price_query.value(0) or 0)
 
         try:
             db = QSqlDatabase.database()
@@ -361,7 +523,7 @@ class ProductDetailWidget(QWidget):
             product_query = QSqlQuery()
             product_query.prepare("""
                 UPDATE product
-                SET display_name = ?, code = ?, brand = ?, generic_name = ?
+                SET display_name = ?, code = ?, brand = ?, generic_name = ?, discount_group_id = ?, tax_group_id = ?
                 WHERE id = ?
             """)
 
@@ -372,13 +534,16 @@ class ProductDetailWidget(QWidget):
             product_query.addBindValue(code)
             product_query.addBindValue(brand)
             product_query.addBindValue(formula)
+            product_query.addBindValue(self.discount_group_edit.currentData())
+            product_query.addBindValue(self.tax_group_edit.currentData())
             product_query.addBindValue(self.product_id)
 
             if not product_query.exec():
                 raise Exception(f"Product update failed: {product_query.lastError().text()}")
 
-
             print(f"[OK] Product updated. Rows affected: {product_query.numRowsAffected()}")
+            self.discount_group.setText(self.discount_group_edit.currentText() or "None")
+            self.tax_group.setText(self.tax_group_edit.currentText() or "None")
             
             
             
@@ -409,13 +574,54 @@ class ProductDetailWidget(QWidget):
                 raise Exception(f"Commit failed: {db.lastError().text()}")
 
             print("[SUCCESS] Transaction committed.")
-            QMessageBox.information(None, "Success", "All updates were successful")
+
+            if old_pack_price is not None and old_pack_price != sale:
+                price_change_query = QSqlQuery()
+                price_change_query.prepare("""
+                    INSERT INTO price_changes (
+                        product_id,
+                        previous_price,
+                        new_price,
+                        source,
+                        user_id,
+                        username
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """)
+                app = QApplication.instance()
+                change_user_id = app.property("user_id") if app else None
+                change_username = (app.property("username") or "") if app else ""
+                price_change_query.addBindValue(self.product_id)
+                price_change_query.addBindValue(old_pack_price)
+                price_change_query.addBindValue(sale)
+                price_change_query.addBindValue("product_detail")
+                price_change_query.addBindValue(change_user_id)
+                price_change_query.addBindValue(change_username)
+
+                if not price_change_query.exec():
+                    raise Exception(f"Price change audit insert failed: {price_change_query.lastError().text()}")
+
+                # Audit log — price change (non-blocking)
+                log_activity(
+                    category="price",
+                    action="price_updated",
+                    entity_type="product",
+                    entity_id=self.product_id,
+                    note=(
+                        f"Selling price updated for {product} (Product ID {self.product_id}). "
+                        f"Pack price changed from {old_pack_price} to {sale} from the Product Detail screen."
+                    ),
+                    previous_value=str(old_pack_price),
+                    new_value=str(sale)
+                )
+
+            AppMessageBox.information(None, "Success", "All updates were successful")
 
         except Exception as e:
             db.rollback()
             error_msg = f"[ROLLBACK] {type(e).__name__}: {e}"
             print(error_msg)
-            QMessageBox.critical(None, "Error", error_msg)
+            AppMessageBox.critical(None, "Error", error_msg)
         
     
 
@@ -451,4 +657,3 @@ class MyTable(QTableWidget):
         
        
         
-

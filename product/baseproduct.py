@@ -4,6 +4,7 @@ from product.addproduct import AddProductWidget
 from product.productlist import ProductListWidget
 from product.productdetail import ProductDetailWidget
 from utilities.basepage import BasePage
+from utilities.permissions import Permissions
 
 
 class BaseProductWidget(BasePage):
@@ -21,6 +22,7 @@ class BaseProductWidget(BasePage):
         # Add product Widget
         self.addproduct_widget = AddProductWidget()
         self.addproduct_widget.productlist.clicked.connect(self.set_productlist_widget)
+        self.addproduct_widget.detailpagesignal.connect(self.set_productdetail_widget)
 
 
         # List product Widget
@@ -49,14 +51,17 @@ class BaseProductWidget(BasePage):
         self.productdetail_widget.open_modal_window(batch_id)
         
 
+    @Permissions.require_permission('product.create')
     def set_addproduct_widget(self):
         self.stacked_layout.setCurrentWidget(self.addproduct_widget)
 
     
+    @Permissions.require_permission('product.view')
     def set_productlist_widget(self):
         self.stacked_layout.setCurrentWidget(self.productlist_widget)
 
 
+    @Permissions.require_permission('product.view')
     def set_productdetail_widget(self, id):
         self.productdetail_widget.load_product_data(id)
         self.stacked_layout.setCurrentWidget(self.productdetail_widget)
@@ -65,4 +70,7 @@ class BaseProductWidget(BasePage):
 
     # 🔑 reset method
     def reset_to_default(self):
-        self.stacked_layout.setCurrentWidget(self.productlist_widget)
+        if Permissions.has_permission('product.view'):
+            self.stacked_layout.setCurrentWidget(self.productlist_widget)
+        elif Permissions.has_permission('product.create'):
+            self.stacked_layout.setCurrentWidget(self.addproduct_widget)

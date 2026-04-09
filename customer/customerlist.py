@@ -3,6 +3,7 @@ from PySide6.QtCore import QFile, Qt, Signal
 from PySide6.QtSql import QSqlQuery
 from functools import partial
 from utilities.stylus import load_stylesheets
+from utilities.table_helpers import centered_cell_widget, style_table_action_button
 
 
 
@@ -18,17 +19,17 @@ class CustomerListWidget(QWidget):
 
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Customer Information", objectName="SectionTitle")
         self.addcustomer = QPushButton("Add Customer", objectName="TopRightButton")
         self.addcustomer.setCursor(Qt.PointingHandCursor)
-        self.addcustomer.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.addcustomer)
 
         self.layout.addLayout(header_layout)
@@ -50,6 +51,8 @@ class CustomerListWidget(QWidget):
         
         # Search Field
         search_layout = QHBoxLayout()
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.setSpacing(10)
         search_edit = QLineEdit()
         search_edit.setPlaceholderText("Search Customer...")
         search_edit.textChanged.connect(self.search_rows)
@@ -57,10 +60,10 @@ class CustomerListWidget(QWidget):
         self.layout.addLayout(search_layout)
         self.layout.addSpacing(10)
         
-        self.row_height = 40
+        self.row_height = 35
 
-        self.table = MyTable(column_ratios=[0.05, 0.20, 0.10, 0.20, 0.15, 0.10, 0.10, 0.10])
-        headers = ["No.", "Name", "Contact", "Email", "Status", "Payable", "Receiveable", "Detail"]
+        self.table = MyTable(column_ratios=[0.05, 0.18, 0.10, 0.18, 0.11, 0.10, 0.10, 0.10, 0.08])
+        headers = ["No.", "Name", "Contact", "Email", "Status", "Payable", "Receiveable", "Credit Limit", "Detail"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         
@@ -77,7 +80,7 @@ class CustomerListWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)   
 
-        self.table.setMinimumWidth(1000)
+        self.table.setMinimumWidth(900)
         
         # Hide vertical header (row numbers)
         self.table.verticalHeader().setVisible(False)
@@ -115,7 +118,7 @@ class CustomerListWidget(QWidget):
         
         
         query = QSqlQuery()
-        query.exec("SELECT id, name, contact, email, status, payable, receiveable FROM customer")
+        query.exec("SELECT id, name, contact, email, status, payable, receiveable, credit_limit FROM customer")
 
         self.table.setRowCount(0)  # Clear existing rows
 
@@ -133,6 +136,7 @@ class CustomerListWidget(QWidget):
             status = query.value(4)
             payable = query.value(5)
             receiveable = query.value(6)
+            credit_limit = query.value(7)
             
             
             row_no_item = QTableWidgetItem(str(row_no))
@@ -142,6 +146,7 @@ class CustomerListWidget(QWidget):
             status = QTableWidgetItem(status)
             payable = QTableWidgetItem(str(payable))
             receiveable = QTableWidgetItem(str(receiveable))
+            credit_limit = QTableWidgetItem(str(credit_limit))
             
             self.table.setItem(row, 0, row_no_item)
             self.table.setItem(row, 1, name)
@@ -150,28 +155,10 @@ class CustomerListWidget(QWidget):
             self.table.setItem(row, 4, status)
             self.table.setItem(row, 5, payable)
             self.table.setItem(row, 6, receiveable)
+            self.table.setItem(row, 7, credit_limit)
 
-            detail = QPushButton('Details')
-            detail.setStyleSheet("""
-                    QPushButton {
-                        background-color: transparent;
-                        color: #333;
-                        padding: 4px 12px;
-                        border-radius: 2px;
-                        font-weight: 600;
-                    }
-                    QPushButton:hover {
-                        background-color: #244A62;
-                        color: #fff;
-                    }
-                    QPushButton:pressed {
-                        background-color: #2F5D7C;
-                        color: #fff;
-                    }
-                
-            """)
-            
-            self.table.setCellWidget(row, 7, detail)
+            detail = style_table_action_button(QPushButton('Details'))
+            self.table.setCellWidget(row, 8, centered_cell_widget(detail))
             detail.clicked.connect(partial(self.detailpagesignal.emit, cust_id))
             
             row += 1
@@ -259,4 +246,3 @@ class MyTable(QTableWidget):
 
 
         
-

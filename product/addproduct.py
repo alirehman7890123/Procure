@@ -1,16 +1,19 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QDialog, QPushButton,QComboBox, QDialogButtonBox, QTableWidgetItem, QCompleter,QTableWidget, QFileDialog, QMessageBox, QGridLayout, QLineEdit, QFrame, QDateEdit, QLabel, QSpacerItem, QSizePolicy, QHBoxLayout, QGraphicsDropShadowEffect
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QDialog, QPushButton,QComboBox, QDialogButtonBox, QTableWidgetItem, QCompleter,QTableWidget, QFileDialog, QMessageBox, QGridLayout, QLineEdit, QFrame, QDateEdit, QLabel, QSpacerItem, QSizePolicy, QHBoxLayout, QGraphicsDropShadowEffect, QHeaderView, QApplication
 from PySide6.QtGui import QColor
-from PySide6.QtCore import QSize, Qt, QFile, QDate, QEvent, QStringListModel
+from PySide6.QtCore import QSize, Qt, QFile, QDate, QEvent, QStringListModel, Signal, QTimer
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from datetime import date, datetime
+from utilities.product_search_widget import ProductSearchBox
 import sys
 import pandas as pd  # <-- for reading CSV/Excel easily
 
 from utilities.stylus import load_stylesheets
+from utilities.permissions import Permissions
 
 
 
 class AddProductWidget(QWidget):
+    detailpagesignal = Signal(int)
 
     def __init__(self, parent=None):
 
@@ -18,8 +21,8 @@ class AddProductWidget(QWidget):
         
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
         
         
         # === Header Row ===
@@ -32,21 +35,20 @@ class AddProductWidget(QWidget):
         
         self.productlist = QPushButton("Products List", objectName="TopRightButton")
         self.productlist.setCursor(Qt.PointingHandCursor)
-        self.productlist.setFixedWidth(200)
 
         self.import_file_button = QPushButton("Import File", objectName="TopRightButton")
         self.import_file_button.setCursor(Qt.PointingHandCursor)
-        self.import_file_button.setFixedWidth(200)
 
         self.import_file_button.clicked.connect(self.import_file)
     
 
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.estimate_cost_btn)
         
         header_layout.addWidget(self.productlist)
-        header_layout.addWidget(self.import_file_button)
+        # header_layout.addWidget(self.import_file_button)
 
         self.layout.addLayout(header_layout)
         
@@ -63,9 +65,20 @@ class AddProductWidget(QWidget):
             """)
 
         self.layout.addWidget(line)
-        self.layout.addSpacing(20)
+        self.layout.addSpacing(8)
         
         self.indicators = {}
+        self.recent_entry_status = {}
+        self.last_recent_batch_id = None
+        self.section_widgets = {}
+
+        # Card container for product entry form (same section style as sales page)
+        self.form_frame = QFrame()
+        self.form_frame.setObjectName("sectionCard")
+        self.form_layout = QVBoxLayout(self.form_frame)
+        self.form_layout.setContentsMargins(14, 12, 14, 12)
+        self.form_layout.setSpacing(12)
+        self.layout.addWidget(self.form_frame, 0)
         
         
         self.populate_product_fields()
@@ -78,16 +91,23 @@ class AddProductWidget(QWidget):
         self.pack_size_input.textChanged.connect(self.calculate_unit_price)
         
         
-        self.layout.addSpacing(20)
-        
-        
-        
+        # === Action Buttons ===
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(10)
 
-        # === Add Button ===
-        save_button = QPushButton("Save Product", objectName="SaveButton")
-        save_button.setCursor(Qt.PointingHandCursor)
+        self.save_button = QPushButton("Save Product", objectName="SaveButton")
+        self.save_button.setCursor(Qt.PointingHandCursor)
 
-        self.layout.addWidget(save_button)
+        self.clear_button = QPushButton("Clear Fields", objectName="TopRightButton")
+        self.clear_button.setCursor(Qt.PointingHandCursor)
+
+        action_row.addWidget(self.save_button, 1)
+        action_row.addWidget(self.clear_button)
+
+        self.layout.addLayout(action_row)
+        self.layout.addSpacing(12)
+        self.build_recent_products_section()
         self.layout.addStretch()
         
         
@@ -101,24 +121,203 @@ class AddProductWidget(QWidget):
         self.setStyleSheet(load_stylesheets())
 
         
-        save_button.clicked.connect(lambda: self.save_product(  
-                                                                self.name_input, 
-                                                                self.brand_input,
-                                                                self.formula_input,
-                                                                self.code_input, 
-                                                                
-                                                                self.quantity_input, 
-                                                                self.unit_cost_input, 
-                                                                self.batch_input, 
-                                                                self.expiry_input,
-                                                                
-                                                                self.pack_price_input,
-                                                                self.pack_size_input, 
-                                                            
-                                                            ))
+        self.save_button.clicked.connect(self.save_product)
+        self.clear_button.clicked.connect(self.confirm_clear_fields)
+        self.setup_enter_navigation()
+
+    def field_label(self, text, align_right=False):
+        label = QLabel(text)
+        label.setMinimumWidth(82)
+        if align_right:
+            label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        else:
+            label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        label.setStyleSheet("font-size: 12px; font-weight: 600; padding-left: 0;")
+        return label
+
+    def section_divider(self):
+        line = QFrame()
+        line.setObjectName("lineSeparator")
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        line.setStyleSheet("""
+                QFrame#lineSeparator {
+                    border: none;
+                    border-top: 1px solid #D3DDE6;
+                }
+            """)
+        return line
+
+    def create_entry_section(self):
+        frame = QFrame()
+        frame.setObjectName("productEntrySection")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(0)
+        self.apply_section_highlight(frame, False)
+        self.form_layout.addWidget(frame)
+        return frame, layout
+
+    def apply_section_highlight(self, frame, active):
+        background = "#DCE7F0" if active else "#E7EFF6"
+        border = "#B9CBD9" if active else "#C9D8E4"
+        frame.setStyleSheet(f"""
+            QFrame#productEntrySection {{
+                background-color: {background};
+                border: 1px solid {border};
+                border-radius: 4px;
+            }}
+        """)
+
+    def register_section_focus(self, frame, widgets):
+        tracked = []
+        for widget in widgets:
+            if widget is None:
+                continue
+            tracked.append(widget)
+            widget.installEventFilter(self)
+            line_edit = getattr(widget, "lineEdit", None)
+            if callable(line_edit):
+                child = line_edit()
+                if child is not None:
+                    tracked.append(child)
+                    child.installEventFilter(self)
+        self.section_widgets[frame] = tracked
+
+    def eventFilter(self, watched, event):
+        if event.type() in (QEvent.FocusIn, QEvent.FocusOut):
+            QTimer.singleShot(0, self.update_section_highlight_from_focus)
+        return super().eventFilter(watched, event)
+
+    def update_section_highlight_from_focus(self):
+        focus_widget = QApplication.focusWidget()
+        for frame, widgets in self.section_widgets.items():
+            active = focus_widget in widgets
+            self.apply_section_highlight(frame, active)
+
+    def build_recent_products_section(self):
+        recent_title = QLabel("Recently Added Products", objectName="SubSectionTitle")
+        recent_title.setStyleSheet("margin-top: 0; margin-bottom: 4px;")
+        self.layout.addWidget(recent_title)
+
+        self.recent_products_table = QTableWidget(0, 8)
+        self.recent_products_table.setObjectName("StandardTable")
+        self.recent_products_table.setHorizontalHeaderLabels([
+            "Type", "Product", "Manufacturer", "Batch", "Expiry", "Qty", "Pack Size", "Price"
+        ])
+        self.recent_products_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.recent_products_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.recent_products_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.recent_products_table.verticalHeader().setVisible(False)
+        self.recent_products_table.setAlternatingRowColors(True)
+        self.recent_products_table.setFixedHeight(150)
+        self.recent_products_table.horizontalHeader().setStretchLastSection(False)
+        self.recent_products_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.recent_products_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.recent_products_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        for col in range(3, 8):
+            self.recent_products_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeToContents)
+        self.recent_products_table.cellDoubleClicked.connect(self.open_recent_product_detail)
+        self.layout.addWidget(self.recent_products_table)
+        self.refresh_recent_products_table()
+
+    def default_expiry_date(self):
+        return QDate.currentDate()
+
+    def refresh_recent_products_table(self, highlight_batch_id=None):
+        if not hasattr(self, "recent_products_table"):
+            return
+
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT
+                b.id,
+                p.id,
+                p.display_name,
+                COALESCE(m.name, '-'),
+                COALESCE(b.batch_no, '-'),
+                b.expiry_date,
+                b.total_received,
+                COALESCE((
+                    SELECT pp.pack_size
+                    FROM price_pack pp
+                    WHERE pp.product_id = p.id
+                    ORDER BY pp.is_default DESC, pp.id DESC
+                    LIMIT 1
+                ), ''),
+                COALESCE((
+                    SELECT pp.pack_price
+                    FROM price_pack pp
+                    WHERE pp.product_id = p.id
+                    ORDER BY pp.is_default DESC, pp.id DESC
+                    LIMIT 1
+                ), 0)
+            FROM batch b
+            JOIN product p ON p.id = b.product_id
+            LEFT JOIN manufacturer m ON m.id = p.manufacturer_id
+            ORDER BY b.id DESC
+            LIMIT 5
+        """)
+
+        rows = []
+        if query.exec():
+            while query.next():
+                batch_id = int(query.value(0))
+                product_id = int(query.value(1))
+                expiry_value = query.value(5)
+                expiry_text = "-"
+                if expiry_value:
+                    try:
+                        expiry_text = datetime.fromisoformat(str(expiry_value)).strftime("%d %b %Y")
+                    except Exception:
+                        expiry_text = str(expiry_value)
+
+                rows.append([
+                    self.recent_entry_status.get(batch_id, "-"),
+                    str(query.value(2) or "-"),
+                    str(query.value(3) or "-"),
+                    str(query.value(4) or "-"),
+                    expiry_text,
+                    f"{float(query.value(6) or 0):.0f}",
+                    str(query.value(7) or "-"),
+                    f"{float(query.value(8) or 0):.2f}",
+                    batch_id,
+                    product_id,
+                ])
+
+        self.recent_products_table.setRowCount(len(rows))
+        for row_index, row_values in enumerate(rows):
+            batch_id = row_values[-2]
+            product_id = row_values[-1]
+            for col_index, value in enumerate(row_values[:-2]):
+                item = QTableWidgetItem(value)
+                if col_index == 0:
+                    item.setTextAlignment(Qt.AlignCenter)
+                if col_index == 1:
+                    item.setData(Qt.UserRole, product_id)
+                    item.setData(Qt.UserRole + 1, batch_id)
+                if highlight_batch_id is not None and batch_id == highlight_batch_id:
+                    item.setBackground(QColor("#E4F1FB"))
+                    item.setForeground(QColor("#1F3E57"))
+                self.recent_products_table.setItem(row_index, col_index, item)
+        if highlight_batch_id is not None:
+            self.last_recent_batch_id = highlight_batch_id
+
+    def open_recent_product_detail(self, row, _column):
+        item = self.recent_products_table.item(row, 1)
+        if not item:
+            return
+        product_id = item.data(Qt.UserRole)
+        if product_id is None:
+            return
+        try:
+            self.detailpagesignal.emit(int(product_id))
+        except (TypeError, ValueError):
+            return
 
 
 
+    @Permissions.require_permission('inventory.adjust')
     def set_estimate_cost(self):
         
         dialog = QDialog(self)
@@ -162,17 +361,17 @@ class AddProductWidget(QWidget):
             try:
                 new_cost = float(cost_input.text())
             except ValueError:
-                QMessageBox.warning(dialog, "Invalid Input", "Enter a valid numeric value.")
+                AppMessageBox.warning(dialog, "Invalid Input", "Enter a valid numeric value.")
                 return
 
             admin_password = password_input.text().strip()
 
             if not admin_password:
-                QMessageBox.warning(dialog, "Authentication Required", "Admin password is required.")
+                AppMessageBox.warning(dialog, "Authentication Required", "Admin password is required.")
                 return
 
             if not self.verify_admin_password(admin_password):
-                QMessageBox.critical(dialog, "Access Denied", "Invalid admin password.")
+                AppMessageBox.critical(dialog, "Access Denied", "Invalid admin password.")
                 return
 
             # Insert or Update id = 1
@@ -188,10 +387,10 @@ class AddProductWidget(QWidget):
             query.addBindValue(new_cost)
 
             if not query.exec():
-                QMessageBox.critical(dialog, "Error", query.lastError().text())
+                AppMessageBox.critical(dialog, "Error", query.lastError().text())
                 return
 
-            QMessageBox.information(dialog, "Success", "Estimated cost updated successfully.")
+            AppMessageBox.information(dialog, "Success", "Estimated cost updated successfully.")
             dialog.accept()
 
         save_button.clicked.connect(handle_save)
@@ -281,9 +480,8 @@ class AddProductWidget(QWidget):
 
         
         
-        self.name_input = QComboBox()
-        self.name_input.setEditable(True)
-        
+        self.name_input = ProductSearchBox(self)
+        self.name_input.lineEdit().textEdited.connect(self.force_uppercase)
         self.name_input.setStyleSheet("""
             QComboBox QAbstractItemView {
                 background-color: white;
@@ -300,38 +498,11 @@ class AddProductWidget(QWidget):
                 image: none;
             }
             """)
-        
-        line_edit = self.name_input.lineEdit()
-        line_edit.textEdited.connect(self.force_uppercase)
-        
-        
-        self.completer = QCompleter()
-        self.completer.setCompletionMode(QCompleter.PopupCompletion)
-
-        self.name_input.lineEdit().setCompleter(self.completer)
-
-        self.name_input.lineEdit().completer().popup().setStyleSheet("""QVBoxLayout,
-            QListView {
-                padding: 5px;
-                background-color: white;
-                border: 1px solid gray;
-                color: #333;
-            }
-            QListView::item {
-                padding: 6px 10px;
-            }
-            QListView::item:selected {
-                background-color: #5A9EC9;
-                color: white;
-            }
-        """)
-
-
-        self.name_input.lineEdit().textEdited.connect(self.load_product_suggestions)
-        self.completer.activated.connect(self.on_item_selected)
-        
-        self.product_model = QStringListModel(self)
-        self.completer.setModel(self.product_model)
+        self.name_input.product_selected.connect(
+            lambda pid, name: self.on_item_selected(name)
+        )
+        self.name_input.activated[int].connect(self.on_name_index_activated)
+        self.name_input.lineEdit().returnPressed.connect(self.on_name_enter_pressed)
         
         
         
@@ -391,90 +562,76 @@ class AddProductWidget(QWidget):
         self.code_input = QLineEdit()
         
         
-        # --- Name and Brand on same row ---
-        name_brand_row = QHBoxLayout()
-        
-        product_label = QLabel("Product")
-        name_brand_row.addWidget(product_label, 1)
-        name_brand_row.addWidget(self.name_input, 4)
-        
-        
-        name_brand_row.addWidget(self.dosage, 1)
-        name_brand_row.addWidget(self.form, 1)
-        
-        
-        
-        brand_label = QLabel("Manufacturer")
-        # align label to right
-        brand_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        name_brand_row.addWidget(brand_label, 1)
-        name_brand_row.addWidget(self.brand_input, 5)
-        
-        self.layout.addLayout(name_brand_row)
-        
-        self.layout.addSpacing(10)
-        
-        # --- Formula and Code on same row ---
-        formula_code_row = QHBoxLayout()
-        
-        formula_label = QLabel("Formula")
-        formula_code_row.addWidget(formula_label, 1)
-        formula_code_row.addWidget(self.formula_input, 6)
-        
-        code_label = QLabel("Code")
-        code_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        formula_code_row.addWidget(code_label, 1)
-        formula_code_row.addWidget(self.code_input, 5)
-        
-        self.layout.addLayout(formula_code_row)
-        
-        
-        
-        
-        
-        # --- Spacer Line ---
-        self.layout.addSpacing(20)
-        line = QFrame()
-        line.setObjectName("lineSeparator")
+        self.name_input.setPlaceholderText("Product name")
+        self.dosage.setPlaceholderText("Dosage")
+        self.form.setPlaceholderText("Form")
+        self.brand_input.setPlaceholderText("Manufacturer")
+        self.formula_input.setPlaceholderText("Formula")
+        self.code_input.setPlaceholderText("Code")
 
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
-        line.setStyleSheet("""
-                QFrame#lineSeparator {
-                    border: none;
-                    border-top: 2px solid #333;
-                }
-            """)
+        section_frame, section_layout = self.create_entry_section()
 
-        self.layout.addWidget(line)
-        self.layout.addSpacing(20)
+        main_grid = QGridLayout()
+        main_grid.setContentsMargins(0, 0, 0, 0)
+        main_grid.setHorizontalSpacing(10)
+        main_grid.setVerticalSpacing(8)
+
+        product_label = self.field_label("Product")
+        main_grid.addWidget(product_label, 0, 0)
+        main_grid.addWidget(self.name_input, 0, 1)
+        main_grid.addWidget(self.dosage, 0, 2)
+        main_grid.addWidget(self.form, 0, 3)
+        manufacturer_label = self.field_label("Manufacturer", align_right=True)
+        main_grid.addWidget(manufacturer_label, 0, 4)
+        main_grid.addWidget(self.brand_input, 0, 5)
+
+        formula_label = self.field_label("Formula")
+        main_grid.addWidget(formula_label, 1, 0)
+        main_grid.addWidget(self.formula_input, 1, 1, 1, 3)
+
+        code_label = self.field_label("Code", align_right=True)
+        main_grid.addWidget(code_label, 1, 4)
+        main_grid.addWidget(self.code_input, 1, 5)
+
+        main_grid.setColumnStretch(1, 5)
+        main_grid.setColumnStretch(2, 2)
+        main_grid.setColumnStretch(3, 2)
+        main_grid.setColumnStretch(4, 1)
+        main_grid.setColumnStretch(5, 4)
+
+        section_layout.addLayout(main_grid)
+        self.register_section_focus(section_frame, [
+            self.name_input, self.dosage, self.form, self.brand_input,
+            self.formula_input, self.code_input
+        ])
         
 
     def populate_stock_and_batch_fields(self):
-        
-        batch_row = QHBoxLayout()
-        
-        # --- Stock, Cost, Batch, Expiry on same row ---
-        
-        quantity_label = QLabel("Qty (units)")
+        section_frame, section_layout = self.create_entry_section()
+
+        batch_grid = QGridLayout()
+        batch_grid.setContentsMargins(0, 0, 0, 0)
+        batch_grid.setHorizontalSpacing(10)
+        batch_grid.setVerticalSpacing(8)
+
+        quantity_label = self.field_label("Qty")
         self.quantity_input = QLineEdit()
-        batch_row.addWidget(quantity_label, 1)
-        batch_row.addWidget(self.quantity_input, 2)
+        batch_grid.addWidget(quantity_label, 0, 0)
+        batch_grid.addWidget(self.quantity_input, 0, 1)
         
-        unit_cost_label = QLabel("Unit Cost")
-        unit_cost_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        unit_cost_label = self.field_label("Cost", align_right=True)
         self.unit_cost_input = QLineEdit()
-        batch_row.addWidget(unit_cost_label, 1)
-        
-        batch_row.addWidget(self.unit_cost_input, 2)
-        
-        
+        self.unit_cost_input.setPlaceholderText("purchase price per pack")
+        batch_grid.addWidget(unit_cost_label, 0, 2)
+        batch_grid.addWidget(self.unit_cost_input, 0, 3)
+
+
         self.batch_input = QLineEdit()
         self.expiry_input = QDateEdit()
         self.expiry_input.setCalendarPopup(True)
-        self.expiry_input.setDisplayFormat("dd MMM yyyy")
-        self.expiry_input.setMinimumDate(QDate.currentDate())
-        self.expiry_input.setDate(self.expiry_input.minimumDate()) 
+        self.expiry_input.setDisplayFormat("dd-MM-yy")
+        self.expiry_input.setMinimumDate(self.default_expiry_date())
+        self.expiry_input.setDate(self.default_expiry_date())
 
         self.expiry_input.setStyleSheet("""
             QDateEdit {
@@ -500,33 +657,23 @@ class AddProductWidget(QWidget):
         
         self.expiry_input.setKeyboardTracking(False)
 
-        batch_label = QLabel("Batch No")
-        batch_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        batch_row.addWidget(batch_label, 1)
-        batch_row.addWidget(self.batch_input, 2)
-        
-        batch_row.addWidget(self.expiry_input, 3)
-        
-        self.layout.addLayout(batch_row)
-        self.layout.setSpacing(20)
-        
-        
-        # --- Spacer Line ---
-        self.layout.addSpacing(20)
-        line = QFrame()
-        line.setObjectName("lineSeparator")
+        batch_label = self.field_label("Batch", align_right=True)
+        batch_grid.addWidget(batch_label, 0, 4)
+        batch_grid.addWidget(self.batch_input, 0, 5)
 
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
-        line.setStyleSheet("""
-                QFrame#lineSeparator {
-                    border: none;
-                    border-top: 2px solid #333;
-                }
-            """)
+        expiry_label = self.field_label("Expiry", align_right=True)
+        batch_grid.addWidget(expiry_label, 0, 6)
+        batch_grid.addWidget(self.expiry_input, 0, 7)
 
-        self.layout.addWidget(line)
-        self.layout.addSpacing(20)
+        batch_grid.setColumnStretch(1, 3)
+        batch_grid.setColumnStretch(3, 3)
+        batch_grid.setColumnStretch(5, 3)
+        batch_grid.setColumnStretch(7, 3)
+
+        section_layout.addLayout(batch_grid)
+        self.register_section_focus(section_frame, [
+            self.quantity_input, self.unit_cost_input, self.batch_input, self.expiry_input
+        ])
         
         
     def force_uppercase(self, text):
@@ -589,29 +736,57 @@ class AddProductWidget(QWidget):
 
    
     def populate_pricing_fields(self):
-        
-        
-        # --- Pack Price, Pack Size, Unit Price on same row ---
-        pricing_row = QHBoxLayout()
-        
-        pack_price_label = QLabel("Pack Sale Price")
-        self.pack_price_input = QLineEdit()
-        pricing_row.addWidget(pack_price_label, 1)
-        pricing_row.addWidget(self.pack_price_input, 2)
-        
+        section_frame, section_layout = self.create_entry_section()
+
+        pricing_grid = QGridLayout()
+        pricing_grid.setContentsMargins(0, 0, 0, 0)
+        pricing_grid.setHorizontalSpacing(10)
+        pricing_grid.setVerticalSpacing(8)
+
+        pack_size_label = self.field_label("Pack Size")
         self.pack_size_input = QLineEdit()
         self.pack_size_input.setPlaceholderText("Pack Size")
-        pricing_row.addWidget(self.pack_size_input, 1)
-        
-        unit_price_label = QLabel("Unit Sale Price:")
-        unit_price_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        pricing_grid.addWidget(pack_size_label, 0, 0)
+        pricing_grid.addWidget(self.pack_size_input, 0, 1)
+
+        pack_price_label = self.field_label("Price", align_right=True)
+        self.pack_price_input = QLineEdit()
+        pricing_grid.addWidget(pack_price_label, 0, 2)
+        pricing_grid.addWidget(self.pack_price_input, 0, 3)
+
+        unit_price_label = self.field_label("Unit Price", align_right=True)
         self.unit_price_input = QLabel()
-        
-        pricing_row.addWidget(unit_price_label, 1)
-        pricing_row.addWidget(self.unit_price_input, 7)
-        
-        self.layout.addLayout(pricing_row)
-        self.layout.setSpacing(10)
+        self.unit_price_input.setStyleSheet("font-size: 12px; font-weight: 700; color: #2F5D7C; padding-left: 0;")
+        pricing_grid.addWidget(unit_price_label, 0, 4)
+        pricing_grid.addWidget(self.unit_price_input, 0, 5)
+
+        discount_group_label = self.field_label("Discount")
+        self.discount_group_combo = QComboBox()
+        self.populate_discount_group_combobox(self.discount_group_combo)
+        pricing_grid.addWidget(discount_group_label, 1, 0)
+        pricing_grid.addWidget(self.discount_group_combo, 1, 1)
+
+        tax_group_label = self.field_label("Tax", align_right=True)
+        self.tax_group_combo = QComboBox()
+        self.populate_tax_group_combobox(self.tax_group_combo)
+        pricing_grid.addWidget(tax_group_label, 1, 2)
+        pricing_grid.addWidget(self.tax_group_combo, 1, 3)
+
+        reorder_label = self.field_label("Reorder", align_right=True)
+        self.reorder_level = QLineEdit()
+        self.reorder_level.setPlaceholderText("Reorder Level (units)")
+        pricing_grid.addWidget(reorder_label, 1, 4)
+        pricing_grid.addWidget(self.reorder_level, 1, 5)
+
+        pricing_grid.setColumnStretch(1, 3)
+        pricing_grid.setColumnStretch(3, 3)
+        pricing_grid.setColumnStretch(5, 3)
+
+        section_layout.addLayout(pricing_grid)
+        self.register_section_focus(section_frame, [
+            self.pack_size_input, self.pack_price_input, self.discount_group_combo,
+            self.tax_group_combo, self.reorder_level
+        ])
         
         
         
@@ -636,6 +811,36 @@ class AddProductWidget(QWidget):
         combo.lineEdit().editingFinished.connect(
             lambda: self.handle_new_manufacturer_entry(combo)
         )
+
+    def populate_tax_group_combobox(self, combo: QComboBox):
+        combo.clear()
+        combo.addItem("None", None)
+        query = QSqlQuery("""
+            SELECT id, name, tax_percent
+            FROM tax_group
+            WHERE status = 'active'
+            ORDER BY name
+        """)
+        while query.next():
+            group_id = query.value(0)
+            group_name = str(query.value(1) or "").strip()
+            tax_percent = float(query.value(2) or 0.0)
+            combo.addItem(f"{group_name} ({tax_percent:.2f}%)", group_id)
+
+    def populate_discount_group_combobox(self, combo: QComboBox):
+        combo.clear()
+        combo.addItem("None", None)
+        query = QSqlQuery("""
+            SELECT id, name, discount_percent
+            FROM discount_group
+            WHERE status = 'active'
+            ORDER BY name
+        """)
+        while query.next():
+            group_id = query.value(0)
+            group_name = str(query.value(1) or "").strip()
+            discount_percent = float(query.value(2) or 0.0)
+            combo.addItem(f"{group_name} ({discount_percent:.2f}%)", group_id)
         
         
     
@@ -644,7 +849,27 @@ class AddProductWidget(QWidget):
         subheading = QLabel(text, objectName="SubSectionTitle")
         subheading.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         subheading.setStyleSheet("margin-top: 20px; margin-bottom: 10px;")
-        self.layout.addWidget(subheading)
+        self.form_layout.addWidget(subheading)
+
+    def focus_next_field(self, widget):
+        widget.setFocus()
+        if hasattr(widget, "selectAll"):
+            widget.selectAll()
+
+    def setup_enter_navigation(self):
+        # Traverse fields in order using Enter key.
+        self.dosage.returnPressed.connect(lambda: self.focus_next_field(self.form))
+        self.form.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.brand_input))
+        self.brand_input.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.formula_input))
+        self.formula_input.returnPressed.connect(lambda: self.focus_next_field(self.code_input))
+        self.code_input.returnPressed.connect(lambda: self.focus_next_field(self.quantity_input))
+        self.quantity_input.returnPressed.connect(lambda: self.focus_next_field(self.unit_cost_input))
+        self.unit_cost_input.returnPressed.connect(lambda: self.focus_next_field(self.batch_input))
+        self.batch_input.returnPressed.connect(lambda: self.focus_next_field(self.expiry_input))
+        self.expiry_input.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.pack_size_input))
+        self.pack_size_input.returnPressed.connect(lambda: self.focus_next_field(self.pack_price_input))
+        self.pack_price_input.returnPressed.connect(lambda: self.focus_next_field(self.reorder_level))
+        self.reorder_level.returnPressed.connect(self.save_button.click)
     
 
     def on_item_selected(self, text):
@@ -659,10 +884,113 @@ class AddProductWidget(QWidget):
 
         data = self.name_input.itemData(index)
         print("Selected text is:", text, data)
-        
-        
-        # move the cursor to qty field
-        self.qty_input.setFocus()
+
+        # Existing product selected: autofill known details and focus quantity.
+        if data is not None:
+            try:
+                product_id = int(data)
+            except (TypeError, ValueError):
+                product_id = None
+
+            if product_id is not None:
+                self.autofill_existing_product_details(product_id)
+                self.quantity_input.setFocus()
+                self.quantity_input.selectAll()
+
+    def on_name_index_activated(self, index):
+        if index < 0:
+            return
+        text = self.name_input.itemText(index).strip()
+        if text:
+            self.on_item_selected(text)
+
+    def on_name_enter_pressed(self):
+        text = self.name_input.lineEdit().text().strip()
+        if not text:
+            self.focus_next_field(self.dosage)
+            return
+
+        index = self.name_input.findText(text, Qt.MatchFixedString)
+        if index >= 0 and self.name_input.itemData(index) is not None:
+            self.on_item_selected(text)
+        else:
+            # Product not found: keep existing new-product flow.
+            self.focus_next_field(self.dosage)
+
+
+    def autofill_existing_product_details(self, product_id):
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT
+                generic_name,
+                manufacturer_id,
+                strength,
+                discount_group_id,
+                tax_group_id,
+                (
+                    SELECT pack_size
+                    FROM price_pack
+                    WHERE product_id = product.id
+                    ORDER BY is_default DESC, id DESC
+                    LIMIT 1
+                ) AS pack_size,
+                (
+                    SELECT pack_price
+                    FROM price_pack
+                    WHERE product_id = product.id
+                    ORDER BY is_default DESC, id DESC
+                    LIMIT 1
+                ) AS pack_price
+            FROM product
+            WHERE id = ?
+            LIMIT 1
+        """)
+        query.addBindValue(product_id)
+
+        if not query.exec() or not query.next():
+            print("Failed to load selected product details:", query.lastError().text())
+            return
+
+        generic_name = str(query.value(0) or "").strip()
+        manufacturer_id = query.value(1)
+        strength = str(query.value(2) or "").strip()
+        discount_group_id = query.value(3)
+        tax_group_id = query.value(4)
+        pack_size = query.value(5)
+        pack_price = query.value(6)
+
+        # Autofill formula if available, otherwise clear stale text.
+        self.formula_input.setText(generic_name)
+        self.dosage.setText(strength)
+
+        # Autofill pack size when available and clear stale value otherwise.
+        self.pack_size_input.setText(str(pack_size) if pack_size not in (None, "") else "")
+
+        # Autofill pack sale price when available and clear stale value otherwise.
+        self.pack_price_input.setText(str(pack_price) if pack_price not in (None, "") else "")
+
+        # Autofill manufacturer when available.
+        if manufacturer_id is None:
+            self.brand_input.setCurrentIndex(-1)
+        else:
+            idx = self.brand_input.findData(manufacturer_id)
+            if idx >= 0:
+                self.brand_input.setCurrentIndex(idx)
+            else:
+                # Manufacturer might be missing from current combobox list (e.g. inactive).
+                m_query = QSqlQuery()
+                m_query.prepare("SELECT name FROM manufacturer WHERE id = ? LIMIT 1")
+                m_query.addBindValue(manufacturer_id)
+                if m_query.exec() and m_query.next():
+                    m_name = str(m_query.value(0) or "").strip()
+                    if m_name:
+                        self.brand_input.addItem(m_name, manufacturer_id)
+                        self.brand_input.setCurrentIndex(self.brand_input.count() - 1)
+
+        discount_index = self.discount_group_combo.findData(discount_group_id)
+        self.discount_group_combo.setCurrentIndex(discount_index if discount_index >= 0 else 0)
+        tax_index = self.tax_group_combo.findData(tax_group_id)
+        self.tax_group_combo.setCurrentIndex(tax_index if tax_index >= 0 else 0)
     
     
     
@@ -694,64 +1022,86 @@ class AddProductWidget(QWidget):
     
     
 
-    def save_product(
-            self,
-            product_combo,
-            brand_combo,
-            formula_input,
-            code_input,
-            qty_input,
-            unit_cost_input,
-            batch_input,
-            expiry_input,
-            pack_price_input,
-            pack_size_input,
-        ):
+    @Permissions.require_permission('product.create')
+    def save_product(self):
         
         print("Going to save the product")
 
         # ---------- Read input ----------
-        existing_product_id = product_combo.currentData()
-        display_name = product_combo.currentText().strip()
+        existing_product_id = self.name_input.currentData()
+        display_name = self.name_input.currentText().strip()
         
         print(display_name, existing_product_id)
 
-        manufacturer_id = brand_combo.currentData()
-        generic_name = formula_input.text().strip() or None
-        code = code_input.text().strip() or None
+        manufacturer_id = self.brand_input.currentData()
+        discount_group_id = self.discount_group_combo.currentData()
+        tax_group_id = self.tax_group_combo.currentData()
+        generic_name = self.formula_input.text().strip() or None
+        code = self.code_input.text().strip() or None
 
-        qty_text = qty_input.text().strip()
-        unit_cost_text = unit_cost_input.text().strip()
-        batch_no = batch_input.text().strip() or None
-        pack_size = pack_size_input.text().strip() or None
-        pack_price_text = pack_price_input.text().strip()
-
+        qty_text = self.quantity_input.text().strip()
+        unit_cost_text = self.unit_cost_input.text().strip()
+        batch_no = self.batch_input.text().strip() or None
+        pack_size = self.pack_size_input.text().strip() or None
+        pack_price_text = self.pack_price_input.text().strip()
+        reorder_level = self.reorder_level.text()
         quantity = float(qty_text) if qty_text else 0.0
-        unit_cost = float(unit_cost_text) if unit_cost_text else None
+        pack_cost_entered = float(unit_cost_text) if unit_cost_text else None
         pack_price = float(pack_price_text) if pack_price_text else 0.0
+        reorder_level = float(reorder_level) if reorder_level else 0
+        
 
         # ---------- Expiry ----------
         expiry_date = None
-        qdate = expiry_input.date()
-        if qdate.isValid():
-            parsed_expiry = qdate.toPython()
-            if parsed_expiry > date.today():
-                expiry_date = parsed_expiry.isoformat()
+        qdate = self.expiry_input.date()
+        if qdate.isValid() and qdate > QDate.currentDate():
+            expiry_date = qdate.toPython().isoformat()
 
         # ---------- Validation ----------
         if not display_name:
-            QMessageBox.information(None, "Missing Data", "Product name is required.")
+            AppMessageBox.information(None, "Missing Data", "Product name is required.")
+            return
+
+        if not qty_text:
+            AppMessageBox.information(None, "Missing Data", "Quantity is required.")
+            return
+
+        if quantity <= 0:
+            AppMessageBox.information(None, "Missing Data", "Quantity must be greater than 0.")
+            return
+
+        if not pack_size:
+            AppMessageBox.information(None, "Missing Data", "Pack size is required.")
+            return
+
+        try:
+            pack_size_num = float(pack_size)
+        except Exception:
+            AppMessageBox.information(None, "Missing Data", "Pack size must be a valid number.")
+            return
+
+        if pack_size_num <= 0:
+            AppMessageBox.information(None, "Missing Data", "Pack size must be greater than 0.")
+            return
+
+        if not pack_price_text:
+            AppMessageBox.information(None, "Missing Data", "Sale price is required.")
+            return
+
+        if pack_price <= 0:
+            AppMessageBox.information(None, "Missing Data", "Sale price must be greater than 0.")
             return
 
         db = QSqlDatabase.database()
         if not db.transaction():
-            QMessageBox.information(None, "Error", "Failed to start transaction.")
+            AppMessageBox.information(None, "Error", "Failed to start transaction.")
             return
 
         try:
             # ==================================================
             # 1. Resolve product_id
             # ==================================================
+            created_new_product = False
             if existing_product_id is not None:
                 
                 product_id = int(existing_product_id)
@@ -774,9 +1124,12 @@ class AddProductWidget(QWidget):
                         form,
                         strength,
                         packing,
-                        manufacturer_id
+                        manufacturer_id,
+                        discount_group_id,
+                        tax_group_id,
+                        status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """)
                 
                 
@@ -794,11 +1147,28 @@ class AddProductWidget(QWidget):
                 product_query.addBindValue(strength)
                 product_query.addBindValue(packing)
                 product_query.addBindValue(manufacturer_id)
+                product_query.addBindValue(discount_group_id)
+                product_query.addBindValue(tax_group_id)
+                product_query.addBindValue("used")
 
                 if not product_query.exec():
                     raise Exception(product_query.lastError().text())
 
                 product_id = int(product_query.lastInsertId())
+                created_new_product = True
+
+            # Ensure product is marked as used for both existing and new saves.
+            status_query = QSqlQuery(db)
+            status_query.prepare("""
+                UPDATE product
+                SET status = 'used', discount_group_id = ?, tax_group_id = ?
+                WHERE id = ?
+            """)
+            status_query.addBindValue(discount_group_id)
+            status_query.addBindValue(tax_group_id)
+            status_query.addBindValue(product_id)
+            if not status_query.exec():
+                raise Exception(status_query.lastError().text())
 
             # ==================================================
             # 2. Insert batch
@@ -823,25 +1193,39 @@ class AddProductWidget(QWidget):
             batch_query.addBindValue(quantity)
             batch_query.addBindValue(quantity)
             batch_query.addBindValue(quantity)
+            unit_cost = round(pack_cost_entered / pack_size_num, 6) if pack_cost_entered and pack_size_num > 0 else pack_cost_entered
             batch_query.addBindValue(unit_cost)
             batch_query.addBindValue("OPENING")
 
             if not batch_query.exec():
                 raise Exception(batch_query.lastError().text())
+            batch_id = int(batch_query.lastInsertId())
+            self.recent_entry_status[batch_id] = "New" if created_new_product else "Existing"
 
             print("Batch stored")
 
             # ==================================================
-            # 3. Insert price_pack
+            # 3. Save current default price_pack
             # ==================================================
+            reset_default_query = QSqlQuery(db)
+            reset_default_query.prepare("""
+                UPDATE price_pack
+                SET is_default = 0
+                WHERE product_id = ?
+            """)
+            reset_default_query.addBindValue(product_id)
+            if not reset_default_query.exec():
+                raise Exception(reset_default_query.lastError().text())
+
             price_query = QSqlQuery(db)
             price_query.prepare("""
-                INSERT INTO price_pack (product_id, pack_size, pack_price)
-                VALUES (?, ?, ?)
+                INSERT INTO price_pack (product_id, pack_size, pack_price, reorder_level, is_default)
+                VALUES (?, ?, ?, ?, 1)
             """)
             price_query.addBindValue(product_id)
             price_query.addBindValue(pack_size)
             price_query.addBindValue(pack_price)
+            price_query.addBindValue(reorder_level)
 
             if not price_query.exec():
                 raise Exception(price_query.lastError().text())
@@ -854,87 +1238,53 @@ class AddProductWidget(QWidget):
             if not db.commit():
                 raise Exception("Transaction commit failed.")
 
-            QMessageBox.information(None, "Success", "Product saved successfully.")
+            AppMessageBox.information(None, "Success", "Product saved successfully.")
+            self.refresh_recent_products_table(highlight_batch_id=batch_id)
             self.clear_product_fields()
 
         except Exception as e:
             db.rollback()
-            QMessageBox.information(None, "Failed", str(e))
+            AppMessageBox.information(None, "Failed", str(e))
 
     
 
-    def load_product_suggestions(self):
-        
-        current_text = self.name_input.lineEdit().text().strip()
-
-        if not current_text:
-            self.name_input.blockSignals(True)
-            self.name_input.clear()
-            self.name_input.setCurrentIndex(-1)
-            self.name_input.blockSignals(False)
-            self.product_model.setStringList([])
-            self.completer.popup().hide()
-            return
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT id, display_name
-            FROM product
-            WHERE display_name LIKE ?
-            LIMIT 10
-        """)
-        query.addBindValue(f"%{current_text}%")
-
-        products = []
-        product_data = []
-
-        if not query.exec():
-            print("Something wrong happened...", query.lastError().text())
-            return
-
-        while query.next():
-            product_id = query.value(0)
-            display_name = str(query.value(1)).strip()
-            products.append(display_name)
-            product_data.append((display_name, product_id))
-
-        self.name_input.blockSignals(True)
-        self.name_input.clear()
-
-        for name, product_id in product_data:
-            self.name_input.addItem(name, product_id)
-
-        self.name_input.setCurrentIndex(-1)
-        self.name_input.lineEdit().setText(current_text)
-        self.name_input.blockSignals(False)
-
-        self.product_model.setStringList(products)
-        self.completer.setCaseSensitivity(Qt.CaseInsensitive)
-        self.completer.setCompletionPrefix(current_text)
-
-        if products:
-            self.completer.complete()
-        else:
-            self.completer.popup().hide()
-
-
-
     def clear_product_fields(self):
 
+        self.dosage.clear()
         self.name_input.setCurrentIndex(-1)
+        self.name_input.lineEdit().clear()
         self.code_input.clear()
-        self.brand_input.clear()
+        self.brand_input.setCurrentIndex(-1)
+        self.brand_input.lineEdit().clear()
         self.pack_size_input.clear()
         
-        self.qty_input.clear()
+        self.quantity_input.clear()
         
         self.formula_input.clear()
         self.batch_input.clear()
-        self.expiry_input.setDate(QDate.currentDate())
+        self.expiry_input.setMinimumDate(self.default_expiry_date())
+        self.expiry_input.setDate(self.default_expiry_date())
         
         self.unit_cost_input.clear()
         self.pack_price_input.clear()
         self.unit_price_input.setText('0.0')
+        self.discount_group_combo.setCurrentIndex(0)
+        self.tax_group_combo.setCurrentIndex(0)
+        self.reorder_level.clear()
+        self.name_input.setFocus()
+        if self.name_input.lineEdit() is not None:
+            self.name_input.lineEdit().selectAll()
+
+    def confirm_clear_fields(self):
+        _, accepted = AppMessageBox.confirm(
+            self,
+            "Clear Product Form",
+            "Clear the current product entry fields?",
+            confirm_label="Clear Fields",
+            cancel_label="Keep Editing",
+        )
+        if accepted:
+            self.clear_product_fields()
         
         
     
@@ -1096,7 +1446,7 @@ class ImportDialog(QDialog):
         db = QSqlDatabase.database()
 
         if not db.isValid() or not db.isOpen():
-            QMessageBox.critical(self, "DB Error", "Database is not open.")
+            AppMessageBox.critical(self, "DB Error", "Database is not open.")
             return
 
         def get_cell_text(row, col):
@@ -1140,7 +1490,7 @@ class ImportDialog(QDialog):
 
         missing = [h for h in expected_headers if h not in header_map]
         if missing:
-            QMessageBox.critical(
+            AppMessageBox.critical(
                 self,
                 "Import Error",
                 f"Missing required columns:\n{', '.join(missing)}"
@@ -1148,7 +1498,7 @@ class ImportDialog(QDialog):
             return
 
         if not db.transaction():
-            QMessageBox.critical(self, "DB Error", "Could not start transaction.")
+            AppMessageBox.critical(self, "DB Error", "Could not start transaction.")
             return
 
         errors = []
@@ -1212,7 +1562,7 @@ class ImportDialog(QDialog):
 
         if errors:
             db.rollback()
-            QMessageBox.warning(
+            AppMessageBox.warning(
                 self,
                 "Import Failed",
                 "\n".join(errors[:20]) + ("\n..." if len(errors) > 20 else "")
@@ -1221,10 +1571,10 @@ class ImportDialog(QDialog):
 
         if not db.commit():
             db.rollback()
-            QMessageBox.critical(self, "DB Error", "Failed to commit import.")
+            AppMessageBox.critical(self, "DB Error", "Failed to commit import.")
             return
 
-        QMessageBox.information(
+        AppMessageBox.information(
             self,
             "Import Successful",
             f"Imported {inserted_count} products successfully."
@@ -1234,233 +1584,7 @@ class ImportDialog(QDialog):
     
     
 
-    # def accept(self):
-    #     """Save imported products + stock + batch (handles optional category)."""
-    #     # 1) build mapping from headers (if headers present)
-    #     hdr_map = _build_header_map(self.table)
-
-    #     # fallback positional orders
-    #     # order_with_category (15 cols)
-    #     order_with_cat = ["name","code","category","formula","brand","form","strength",
-    #                       "packsize","packs","units","reorder","costprice","saleprice","purchaseitem","batch","expiry"]
-        
-    #     col_count = self.table.columnCount()
-    #     if not hdr_map:
-    #         # no useful headers found; choose positional mapping if col count matches
-    #         if col_count == len(order_with_cat):
-    #             for i, fld in enumerate(order_with_cat):
-    #                 hdr_map.setdefault(fld, i)
-            
-    #         else:
-    #             # best-effort: map available columns by index to order_no_cat (trim or pad)
-    #             for i in range(col_count):
-    #                 if i < len(order_with_cat):
-    #                     hdr_map.setdefault(order_with_cat[i], i)
-
-    #     # 2) collect rows into list of dicts
-    #     rows = []
-    #     for r in range(self.table.rowCount()):
-    #         rd = {}
-    #         for fld in ["name","code","category","formula","brand","form","strength",
-    #                     "packsize","packs","units","reorder","costprice", "saleprice","purchaseitem","batch","expiry"]:
-    #             if fld in hdr_map:
-    #                 col = hdr_map[fld]
-    #                 item = self.table.item(r, col)
-    #                 rd[fld] = item.text().strip() if item else ""
-    #             else:
-    #                 rd[fld] = ""  # missing column -> blank
-    #         rows.append(rd)
-
-    #     # 3) DB insertion (in a transaction)
-    #     db = QSqlDatabase.database()
-    #     if not db.isValid() or not db.isOpen():
-    #         QMessageBox.critical(self, "DB Error", "Database is not open.")
-    #         return
-
-    #     if not db.transaction():
-    #         # proceed anyway but warn
-    #         print("Warning: could not start transaction, proceeding without transaction.")
-
-    #     errors = []
-    #     q = QSqlQuery()
-    #     for r in rows:
-    #         # prepare data and conversions
-    #         name = r.get("name") or None
-    #         code = r.get("code") or None
-    #         category = r.get("category") or None
-    #         formula = r.get("formula") or None
-    #         brand = r.get("brand") or None
-    #         form = r.get("form") or None
-    #         strength = r.get("strength") or None
-
-    #         # numeric conversions with safe fallback
-    #         def to_int(x):
-    #             try:
-    #                 return int(float(x))
-    #             except Exception:
-    #                 return None
-    #         def to_float(x):
-    #             try:
-    #                 return float(x)
-    #             except Exception:
-    #                 return None
-                
-    #         def to_int_or_none(x):
-    #             if x is None:
-    #                 return None
-    #             if isinstance(x, float) and math.isnan(x):
-    #                 return None
-    #             try:
-    #                 return int(x)
-    #             except Exception:
-    #                 return None
-                
-
-    #         packsize = to_int(r.get("packsize") or 0)
-    #         packs = to_int(r.get("packs") or 0)
-    #         units = to_int(r.get("units") or 0)
-            
-    #         if packsize is None:
-    #             packsize = 0
-    #         if packs is None:
-    #             packs = 0
-    #         if units is None:
-    #             units = 0
-            
-    #         units = (packsize * packs) + units
-    #         reorder = to_int(r.get("reorder") or 0)
-    #         costprice = to_float(r.get("costprice") or 0.0)
-    #         saleprice = to_float(r.get("saleprice") or 0.0)
-
-    #         purchaseitem = to_int_or_none(r.get("purchaseitem"))
-    #         batch_val = r.get("batch") or None
-    #         expiry_iso = r.get("expiry") or ""
-    #         # expiry_iso = _parse_date_iso(r.get("expiry") or "")
-
-    #         # 3.a Insert or get product id (ON CONFLICT by code; requires unique constraint on product.code)
-    #         # Use RETURNING id for Postgres; if DB doesn't return it, fallback to SELECT.
-    #         now = datetime.now()
-    #         # q.prepare("""
-    #         #     INSERT INTO product (name, code, category, brand, formula, form, strength, status)
-    #         #     VALUES (:name, :code, :category, :brand, :formula, :form, :strength, :status)
-    #         #     ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
-    #         #     RETURNING id
-    #         # """)
-            
-    #         q.prepare("""
-    #             INSERT OR IGNORE INTO product (name, code, category, brand, formula, form, strength, status)
-    #             VALUES (:name, :code, :category, :brand, :formula, :form, :strength, :status)
-    #         """)
-            
-            
-    #         q.bindValue(":name", name)
-    #         q.bindValue(":code", code)
-    #         q.bindValue(":category", category)
-    #         q.bindValue(":brand", brand)
-    #         q.bindValue(":formula", formula)
-    #         q.bindValue(":form", form)
-    #         q.bindValue(":strength", strength)
-
-    #         if not q.exec():
-    #             errors.append(f"Product insert failed (code={code}): {q.lastError().text()}")
-    #             # try to continue to next row
-    #             continue
-            
-    #         else:
-                
-    #             print("Product inserted/exists for code=", code)
-    #             product_id = q.lastInsertId()
-            
-    #         # sel = QSqlQuery()
-    #         # sel.prepare("SELECT id FROM product WHERE code = :code LIMIT 1")
-    #         # sel.bindValue(":code", code)
-            
-            
-    #         # if sel.exec() and sel.next():
-    #         #     product_id = sel.value(0)
-    #         # else:
-    #         #     errors.append(f"Could not determine product id for code={code}")
-    #         #     continue
-
-
-    #         # 3.b Insert stock
-    #         saleprice_raw = r.get("saleprice") or "0"
-    #         print("Sale Price is: ", saleprice_raw)
-    #         try:
-    #             saleprice = float(saleprice_raw)
-    #         except Exception:
-    #             saleprice = 0.0
-
-    #         q2 = QSqlQuery()
-    #         q2.prepare("""
-    #             INSERT INTO stock (product, packsize, units, reorder, saleprice)
-    #             VALUES (:product, :packsize, :units, :reorder, :saleprice)
-    #         """)
-            
-    #         q2.bindValue(":product", product_id)
-    #         q2.bindValue(":packsize", packsize if packsize is not None else 0)
-    #         q2.bindValue(":units", units if units is not None else 0)
-    #         q2.bindValue(":reorder", reorder if reorder is not None else 0)
-    #         q2.bindValue(":saleprice", saleprice)
-
-
-    #         if not q2.exec():
-    #             errors.append(f"Stock insert failed for code={code}: {q2.lastError().text()}")
-
-
-
-    #         print("Total Cost is: ", costprice)
-    #         # --- Insert into stockcost ---
-    #         stockcost_query = QSqlQuery()
-    #         stockcost_query.prepare("""
-    #             INSERT INTO stockcost (product, qty, totalcost, stocktype)
-    #             VALUES (?, ?, ?, ?)
-    #         """)
-            
-    #         # units = int(packsize) * int(packs)
-    #         # units = str(units)
-    #         stockcost_query.addBindValue(product_id)
-    #         stockcost_query.addBindValue(units)   
-    #         stockcost_query.addBindValue(costprice)
-    #         stockcost_query.addBindValue('onhand')
-
-    #         if not stockcost_query.exec():
-    #             errors.append(f"Batch insert failed for code={code} {stockcost_query.lastError().text()}")
-                
-
-    #         # 3.c Insert batch (if batch provided)
-    #         if batch_val:
-    #             q3 = QSqlQuery()
-    #             q3.prepare("""
-    #                 INSERT INTO batch (purchaseitem, product, batch, expiry)
-    #                 VALUES (:purchaseitem, :product, :batch, :expiry)
-    #             """)
-    #             q3.bindValue(":purchaseitem", purchaseitem or None)
-    #             q3.bindValue(":product", product_id)
-    #             q3.bindValue(":batch", batch_val)
-    #             q3.bindValue(":expiry", expiry_iso or None)
-
-    #             if not q3.exec():
-    #                 errors.append(f"Batch insert failed for code={code}, batch={batch_val}: {q3.lastError().text()}")
-
-    #     # commit/rollback
-    #     if errors:
-    #         try:
-    #             db.rollback()
-    #         except Exception:
-    #             pass
-    #         QMessageBox.warning(self, "Import completed with errors", "\n".join(errors))
-    #     else:
-    #         try:
-    #             db.commit()
-    #         except Exception:
-    #             pass
-    #         QMessageBox.information(self, "Import successful", f"Imported {len(rows)} rows successfully.")
-
-    #     super().accept()
-        
-        
-        
+   
         
         
         
@@ -1469,6 +1593,7 @@ class ImportDialog(QDialog):
          
 import math
 from PySide6.QtWidgets import QDialog, QDialogButtonBox
+from utilities.app_messagebox import AppMessageBox
 
 class EstimateDialog(QDialog):
     
@@ -1547,7 +1672,3 @@ class EstimateDialog(QDialog):
                     match = True
                     break
             self.stocktable.setRowHidden(row, not match)
-
-
-
-

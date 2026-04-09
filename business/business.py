@@ -17,8 +17,8 @@ class BusinessWidget(QWidget):
         print("Opening Business Page")
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
         
         
          # === Header Row ===
@@ -27,12 +27,12 @@ class BusinessWidget(QWidget):
         
         self.edit_btn = QPushButton("Edit", objectName="TopRightButton")
         self.edit_btn.setCursor(Qt.PointingHandCursor)
-        self.edit_btn.setFixedWidth(100)
         self.edit_btn.clicked.connect(self.toggle_edit_mode)
         header_layout.addWidget(self.edit_btn)
         self.edit_mode = False  # Track whether we are in edit mode or not
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
 
         self.layout.addLayout(header_layout)
         
@@ -196,6 +196,7 @@ class BusinessWidget(QWidget):
 
         
     # === Save Changes ===
+    @Permissions.require_permission('business.update')
     def save_changes(self):
         
         if not self.business_id:
@@ -235,5 +236,4 @@ class BusinessWidget(QWidget):
         
 
    
-
 

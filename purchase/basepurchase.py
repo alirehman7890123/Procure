@@ -91,8 +91,10 @@ class BasePurchaseWidget(BasePage):
 
     # 🔑 reset method
     def reset_to_default(self):
-        self.stacked_layout.setCurrentWidget(self.addpurchase_widget)
-
+        if Permissions.has_permission('purchase.view'):
+            self.stacked_layout.setCurrentWidget(self.purchaselist_widget)
+        elif Permissions.has_permission('purchase.create'):
+            self.stacked_layout.setCurrentWidget(self.addpurchase_widget)
 
 
 

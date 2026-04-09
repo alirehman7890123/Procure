@@ -4,6 +4,7 @@ from PySide6.QtSql import QSqlQuery
 from functools import partial
 
 from utilities.stylus import load_stylesheets
+from utilities.table_helpers import centered_cell_widget, style_table_action_button
 
 
 
@@ -17,17 +18,17 @@ class SupplierListWidget(QWidget):
         
         
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Supplier Information", objectName="SectionTitle")
         self.addsupplier = QPushButton("Add Supplier", objectName="TopRightButton")
         self.addsupplier.setCursor(Qt.PointingHandCursor)
-        self.addsupplier.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.addsupplier)
 
         self.layout.addLayout(header_layout)
@@ -54,6 +55,8 @@ class SupplierListWidget(QWidget):
         
         # Search Field
         search_layout = QHBoxLayout()
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.setSpacing(10)
         search_edit = QLineEdit()
         search_edit.setPlaceholderText("Search Supplier...")
         search_edit.textChanged.connect(self.search_rows)
@@ -89,7 +92,7 @@ class SupplierListWidget(QWidget):
         # self.layout.addWidget(table)
 
 
-        self.row_height = 40
+        self.row_height = 35
 
         self.table = MyTable(column_ratios=[0.05, 0.25, 0.15, 0.20, 0.15, 0.10, 0.10])
         headers = ["No.", "Name", "Contact", "Email", "Website", "Status", "Detail"]
@@ -109,7 +112,7 @@ class SupplierListWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)   
 
-        self.table.setMinimumWidth(1000)
+        self.table.setMinimumWidth(900)
         
         # Hide vertical header (row numbers)
         self.table.verticalHeader().setVisible(False)
@@ -190,28 +193,9 @@ class SupplierListWidget(QWidget):
             self.table.setItem(row, 4, website)
             self.table.setItem(row, 5, status)
             
-            detail = QPushButton('Details')
+            detail = style_table_action_button(QPushButton('Details'))
             detail.setCursor(Qt.PointingHandCursor)
-            detail.setStyleSheet("""
-                    QPushButton {
-                        background-color: transparent;
-                        color: #333;
-                        padding: 4px 12px;
-                        border-radius: 2px;
-                        font-weight: 600;
-                    }
-                    QPushButton:hover {
-                        background-color: #244A62;
-                        color: #fff;
-                    }
-                    QPushButton:pressed {
-                        background-color: #2F5D7C;
-                        color: #fff;
-                    }
-                
-            """)
-            
-            self.table.setCellWidget(row, 6, detail)
+            self.table.setCellWidget(row, 6, centered_cell_widget(detail))
             
             detail.clicked.connect(partial(self.detailpagesignal.emit, suppid))
             

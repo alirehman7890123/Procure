@@ -4,6 +4,7 @@ from PySide6.QtSql import QSqlQuery
 from functools import partial
 
 from utilities.stylus import load_stylesheets
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -18,17 +19,17 @@ class CustomerTransactionListWidget(QWidget):
         super().__init__(parent)
         
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Transaction List", objectName="SectionTitle")
         self.transaction_list = QPushButton("All Customer Transactions", objectName="TopRightButton")
         self.transaction_list.setCursor(Qt.PointingHandCursor)
-        self.transaction_list.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.transaction_list)
 
         self.layout.addLayout(header_layout)
@@ -47,10 +48,10 @@ class CustomerTransactionListWidget(QWidget):
             """)
 
         self.layout.addWidget(line)
-        self.layout.addSpacing(20)
+        self.layout.addSpacing(10)
 
 
-        self.row_height = 40
+        self.row_height = 35
 
         self.table = MyTable(column_ratios=[0.05, 0.25, 0.15, 0.20, 0.15, 0.10, 0.10])
         headers = ["#", "Customer", "Type", "Paid", "Received", "Date", "Detail"]
@@ -72,7 +73,7 @@ class CustomerTransactionListWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)   
 
-        self.table.setMinimumWidth(1000)
+        self.table.setMinimumWidth(900)
         
         # Hide vertical header (row numbers)
         self.table.verticalHeader().setVisible(False)
@@ -109,7 +110,7 @@ class CustomerTransactionListWidget(QWidget):
     #     query.prepare("SELECT id, customer, transaction_type, paid, received, creation_date FROM customer_transaction")
 
     #     if not query.exec():
-    #         QMessageBox.critical(self, "Error", "Failed to load customers: " + query.lastError().text())
+    #         AppMessageBox.critical(self, "Error", "Failed to load customers: " + query.lastError().text())
     #         print("Error executing query:", query.lastError().text())
     #         return
         
@@ -202,7 +203,7 @@ class CustomerTransactionListWidget(QWidget):
             """)
 
         if not query.exec():
-            QMessageBox.critical(
+            AppMessageBox.critical(
                 self,
                 "Error",
                 "Failed to load transactions: " + query.lastError().text()

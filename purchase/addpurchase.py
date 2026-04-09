@@ -1,4 +1,3 @@
-from datetime import datetime
 from PySide6.QtWidgets import QWidget, QCompleter,QAbstractItemView, QVBoxLayout, QHBoxLayout, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget, QStyledItemDelegate
 from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, QTimer, Signal, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
@@ -6,10 +5,15 @@ from PySide6.QtGui import QPalette, QColor, QKeyEvent
 from functools import partial
 from PySide6.QtGui import QKeySequence, QShortcut
 
-from utilities.get_session import get_current_session
+from utilities.session_gate import require_open_session
+from utilities.session_service import get_active_session_id
 
 from utilities.stylus import load_stylesheets
 from utilities.payment_handler import PaymentMethodHandler
+from utilities.activity_logger import log_activity
+from utilities.permissions import Permissions
+from utilities.app_messagebox import AppMessageBox
+from utilities.product_search_widget import ProductSearchBox
 
 
 
@@ -64,8 +68,9 @@ class AddPurchaseWidget(QWidget):
         
         
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(20, 20, 20, 20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
         self.layout.setSpacing(10)
+        self.layout.setAlignment(Qt.AlignTop)
         
         
         # === Header Row ===
@@ -74,9 +79,9 @@ class AddPurchaseWidget(QWidget):
         heading.setStyleSheet('color: #2F5D7C')
         self.invoicelist = QPushButton("Invoice List", objectName="TopRightButton")
         self.invoicelist.setCursor(Qt.PointingHandCursor)
-        self.invoicelist.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.invoicelist)
 
         self.layout.addLayout(header_layout)
@@ -120,14 +125,15 @@ class AddPurchaseWidget(QWidget):
         supplier_frame = QFrame()
         supplier_frame.setObjectName("sectionCard")
         self.supplier_frame = supplier_frame
+        supplier_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
 
         supplier_layout = QVBoxLayout(supplier_frame)
-        supplier_layout.setContentsMargins(15, 10, 15, 10)
-        supplier_layout.setSpacing(8)
+        supplier_layout.setContentsMargins(10, 10, 10, 10)
+        supplier_layout.setSpacing(10)
 
         # Top Row Layout
         top_row = QHBoxLayout()
-        top_row.setSpacing(15)
+        top_row.setSpacing(10)
 
         supplier = QLabel("Supplier")
         rep = QLabel("Seller Rep")
@@ -219,8 +225,8 @@ class AddPurchaseWidget(QWidget):
         dialog.setMinimumWidth(350)
 
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
 
         title = QLabel("New Supplier")
         title.setAlignment(Qt.AlignCenter)
@@ -254,7 +260,7 @@ class AddPurchaseWidget(QWidget):
             contact = contact_edit.text().strip()
 
             if not name:
-                QMessageBox.warning(dialog, "Validation Error", "Supplier name is required.")
+                AppMessageBox.warning(dialog, "Validation Error", "Supplier name is required.")
                 return
 
             query = QSqlQuery()
@@ -269,14 +275,14 @@ class AddPurchaseWidget(QWidget):
             query.addBindValue(contact if contact else None)
 
             if not query.exec():
-                QMessageBox.critical(
+                AppMessageBox.critical(
                     dialog,
                     "Database Error",
                     f"Failed to save supplier:\n{query.lastError().text()}"
                 )
                 return
 
-            QMessageBox.information(dialog, "Success", "Supplier added successfully.")
+            AppMessageBox.information(dialog, "Success", "Supplier added successfully.")
             dialog.accept()
 
             if hasattr(self, "populate_suppliers"):
@@ -296,8 +302,8 @@ class AddPurchaseWidget(QWidget):
         dialog.setMinimumWidth(380)
 
         layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
 
         title = QLabel("New Sales Rep")
         title.setAlignment(Qt.AlignCenter)
@@ -349,11 +355,11 @@ class AddPurchaseWidget(QWidget):
             contact = contact_edit.text().strip()
 
             if supplier_id is None:
-                QMessageBox.warning(dialog, "Validation Error", "Supplier is required.")
+                AppMessageBox.warning(dialog, "Validation Error", "Supplier is required.")
                 return
 
             if not name:
-                QMessageBox.warning(dialog, "Validation Error", "Rep name is required.")
+                AppMessageBox.warning(dialog, "Validation Error", "Rep name is required.")
                 return
 
             query = QSqlQuery()
@@ -370,14 +376,14 @@ class AddPurchaseWidget(QWidget):
             query.addBindValue(contact if contact else None)
 
             if not query.exec():
-                QMessageBox.critical(
+                AppMessageBox.critical(
                     dialog,
                     "Database Error",
                     f"Failed to save rep:\n{query.lastError().text()}"
                 )
                 return
 
-            QMessageBox.information(dialog, "Success", "Rep added successfully.")
+            AppMessageBox.information(dialog, "Success", "Rep added successfully.")
             dialog.accept()
 
             if hasattr(self, "load_reps"):
@@ -448,15 +454,13 @@ class AddPurchaseWidget(QWidget):
         # update the total label
         total = float(qty) * float(rate) - flat_discount + tax_amount
         self.amount_edit.setText(f"{total:.2f}")
-        
-    
-    
+
     def populate_totals_section(self):
         
         field_style = """
             QLabel {
                 margin: 0;
-                padding-left: 5px;
+                padding-left: 0;
                 font-size: 12px;
             }
 
@@ -467,6 +471,7 @@ class AddPurchaseWidget(QWidget):
                 border-radius: 4px;
                 font-size: 12px;
                 background-color: #f9f9f9;
+                color: #333333;
             }
 
             QComboBox {
@@ -476,6 +481,7 @@ class AddPurchaseWidget(QWidget):
                 border-radius: 4px;
                 font-size: 12px;
                 background-color: #f9f9f9;
+                color: #333333;
             }
             
             QLineEdit:focus,
@@ -483,6 +489,7 @@ class AddPurchaseWidget(QWidget):
             QDateEdit:focus {
                 border: 2px solid #5B8FB8;
                 background: #F2F8FC;
+                color: #333333;
             }
 
             KeyUpLineEdit {
@@ -492,6 +499,7 @@ class AddPurchaseWidget(QWidget):
                 border-radius: 4px;
                 font-size: 12px;
                 background-color: #f9f9f9;
+                color: #333333;
             }
         """
 
@@ -499,10 +507,11 @@ class AddPurchaseWidget(QWidget):
         totals_frame = QFrame()
         totals_frame.setObjectName("sectionCard")
         self.totals_frame = totals_frame
+        totals_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
 
         totals_layout = QVBoxLayout(totals_frame)
-        totals_layout.setContentsMargins(15, 15, 15, 15)
-        totals_layout.setSpacing(12)
+        totals_layout.setContentsMargins(10, 10, 10, 10)
+        totals_layout.setSpacing(10)
 
         grid = QGridLayout()
         grid.setHorizontalSpacing(14)
@@ -548,6 +557,11 @@ class AddPurchaseWidget(QWidget):
         self.payment_method = QComboBox()
         self.payment_method.addItems(["Cash", "Bank Transfer", "EasyPaisa", "JazzCash"])
         self.payment_method.currentTextChanged.connect(self.on_payment_method_changed)
+
+        self.due_date_combo = QComboBox()
+        self.due_date_combo.addItems(["None", "+15 days", "+30 days", "+45 days", "+60 days", "+90 days"])
+        self.due_date_combo.setCurrentText("None")
+        self.due_date_combo.setEnabled(False)
         
 
         grid.addWidget(gross_label,        0, 0)
@@ -593,10 +607,14 @@ class AddPurchaseWidget(QWidget):
         grid.addWidget(self.paid_label,    2, 6)
         grid.addWidget(self.remaining_label, 2, 7)
 
+        due_date_label = QLabel("Due Date")
+        grid.addWidget(due_date_label, 2, 0)
+
         grid.addWidget(self.cn_adjustment_entry, 3, 4)
         grid.addWidget(self.final_amount,        3, 5)
         grid.addWidget(self.paid_amount,         3, 6)
         grid.addWidget(self.remainingdata,       3, 7)
+        grid.addWidget(self.due_date_combo,      3, 0)
 
         grid.addWidget(self.writeoff_check,      3, 8)
 
@@ -618,6 +636,8 @@ class AddPurchaseWidget(QWidget):
         self.cn_adjustment_entry.textChanged.connect(self.update_total_amount)
 
         self.paid_amount.textChanged.connect(self.calculate_payment)
+        self.paid_amount.textChanged.connect(self.update_due_date_availability)
+        self.writeoff_check.toggled.connect(self.update_due_date_availability)
 
         # -----------------------------
         # Add totals frame
@@ -628,13 +648,20 @@ class AddPurchaseWidget(QWidget):
         # Save button
         # -----------------------------
         save_row = QHBoxLayout()
+        save_row.addStretch()
+        self.clear_purchase_button = QPushButton("Clear Invoice", objectName="TopRightButton")
+        self.clear_purchase_button.setCursor(Qt.PointingHandCursor)
+        save_row.addWidget(self.clear_purchase_button)
+
         addpurchase = QPushButton("Save Purchase Invoice", objectName="SaveButton")
         addpurchase.setCursor(Qt.PointingHandCursor)
+        addpurchase.setFixedWidth(220)
         save_row.addWidget(addpurchase)
         self.save_purchase_button = addpurchase
 
         self.layout.addLayout(save_row)
 
+        self.clear_purchase_button.clicked.connect(self.confirm_clear_purchase)
         addpurchase.clicked.connect(self.save_purchase)
     
     
@@ -656,7 +683,7 @@ class AddPurchaseWidget(QWidget):
         self.table.setTabKeyNavigation(False)
         
         
-        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.table.verticalHeader().setDefaultSectionSize(self.row_height)
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         
@@ -670,7 +697,7 @@ class AddPurchaseWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)   
         
-        self.table.setMinimumWidth(1000)
+        self.table.setMinimumWidth(900)
         self.table.setMinimumHeight(0)
         
         # Hide vertical header (row numbers)
@@ -694,18 +721,18 @@ class AddPurchaseWidget(QWidget):
         label_entry_frame = QFrame()
         
         label_entry_frame.setObjectName("sectionCard")
-        label_entry_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        label_entry_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         self.label_entry_frame = label_entry_frame
 
         label_entry_layout = QVBoxLayout(label_entry_frame)
-        label_entry_layout.setContentsMargins(15, 10, 15, 20)
-        label_entry_layout.setSpacing(8)
+        label_entry_layout.setContentsMargins(10, 10, 10, 10)
+        label_entry_layout.setSpacing(10)
         self.label_entry_layout = label_entry_layout
 
         field_style = """
             QLabel {
                 margin: 0;
-                padding-left: 5px;
+                padding-left: 0;
                 font-size: 12px;
             }
 
@@ -716,6 +743,7 @@ class AddPurchaseWidget(QWidget):
                 border-radius: 4px;
                 font-size: 12px;
                 background-color: #f9f9f9;
+                color: #333333;
             }
 
             QComboBox {
@@ -725,6 +753,7 @@ class AddPurchaseWidget(QWidget):
                 border-radius: 4px;
                 font-size: 12px;
                 background-color: #f9f9f9;
+                color: #333333;
             }
             
             QLineEdit:focus,
@@ -732,6 +761,7 @@ class AddPurchaseWidget(QWidget):
             QDateEdit:focus {
                 border: 2px solid #5B8FB8;
                 background: #F2F8FC;
+                color: #333333;
             }
 
             KeyUpLineEdit {
@@ -741,13 +771,14 @@ class AddPurchaseWidget(QWidget):
                 border-radius: 4px;
                 font-size: 12px;
                 background-color: #f9f9f9;
+                color: #333333;
             }
         """
 
         grid = QGridLayout()
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(8)
-        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setContentsMargins(10, 10, 10, 10)
         self.entry_grid = grid
 
         # -----------------------------
@@ -786,44 +817,14 @@ class AddPurchaseWidget(QWidget):
         # -----------------------------
         # Entry widgets
         # -----------------------------
-        self.item = QComboBox()
+        self.item = ProductSearchBox(self, placeholder="select product")
         self.item.wheelEvent = lambda event: event.ignore()
-        self.item.setPlaceholderText("select product")
-        self.item.setEditable(True)
-
-        line_edit = SelectAllLineEdit()
-        self.item.setLineEdit(line_edit)
-
+        self.item.setLineEdit(SelectAllLineEdit())
         self.item.lineEdit().editingFinished.connect(
             lambda c=self.item: self.handle_editing_finished(c)
         )
-
-        completer = QCompleter()
-        self.item.setCompleter(completer)
-        completer.setCompletionMode(QCompleter.PopupCompletion)
-
-        completer.activated[str].connect(
-            lambda text, c=self.item: self.on_completer_selected(text, c)
-        )
-
-        self.item.lineEdit().completer().popup().setStyleSheet("""
-            QListView {
-                padding: 5px;
-                background-color: white;
-                border: 1px solid gray;
-                color: #333;
-            }
-            QListView::item {
-                padding: 6px 10px;
-            }
-            QListView::item:selected {
-                background-color: #5A9EC9;
-                color: white;
-            }
-        """)
-
-        self.item.lineEdit().textEdited.connect(
-            lambda text: self.load_product_suggestions(self.item, completer)
+        self.item.product_selected.connect(
+            lambda pid, name: self.on_completer_selected(name, self.item)
         )
         self.item.setStyleSheet(field_style)
 
@@ -972,10 +973,8 @@ class AddPurchaseWidget(QWidget):
         
         label_entry_layout.addSpacing(10)
         label_entry_layout.addWidget(table)
-        label_entry_layout.setStretch(2, 1)
         
         self.layout.addWidget(label_entry_frame)
-        self.layout.setStretch(2, 1)
             
         
     
@@ -1062,6 +1061,35 @@ class AddPurchaseWidget(QWidget):
         
         remaining = finalamount - paid
         self.remainingdata.setText(str(remaining))
+
+    def update_due_date_availability(self):
+        """Enable due date only when there is an unpaid payable balance and not written off."""
+        remaining_text = self.remainingdata.text().strip()
+        remaining = float(remaining_text) if remaining_text else 0.0
+        should_enable = remaining > 0 and not self.writeoff_check.isChecked()
+
+        self.due_date_combo.setEnabled(should_enable)
+        if not should_enable:
+            self.due_date_combo.setCurrentText("None")
+
+    def compute_due_date(self):
+        """Return due date string (yyyy-MM-dd) based on selected offset, or None."""
+        selected = self.due_date_combo.currentText().strip()
+        if selected == "None":
+            return None
+
+        offset_map = {
+            "+15 days": 15,
+            "+30 days": 30,
+            "+45 days": 45,
+            "+60 days": 60,
+            "+90 days": 90,
+        }
+        days = offset_map.get(selected)
+        if days is None:
+            return None
+
+        return QDate.currentDate().addDays(days).toString("yyyy-MM-dd")
         
     
 
@@ -1074,6 +1102,14 @@ class AddPurchaseWidget(QWidget):
         text = combo.currentText().strip()
         if not text:
             return
+
+        if text.isdigit():
+            match = combo.lookup_product_by_code(text)
+            if match:
+                product_id, display_name = match
+                combo.select_result(display_name, product_id)
+                self.focus_next_field(self.batch_edit)
+                return
 
         index = combo.findText(text, Qt.MatchFixedString)
 
@@ -1092,6 +1128,14 @@ class AddPurchaseWidget(QWidget):
         text = combo.currentText().strip()
         if not text:
             return
+
+        if text.isdigit():
+            match = combo.lookup_product_by_code(text)
+            if match:
+                product_id, display_name = match
+                combo.select_result(display_name, product_id)
+                self.focus_next_field(self.batch_edit)
+                return
 
         index = combo.findText(text, Qt.MatchFixedString)
 
@@ -1135,12 +1179,12 @@ class AddPurchaseWidget(QWidget):
         
         if product_name == '':
             print("Please Select a product first")
-            QMessageBox.information(self, 'Error', "Please Select a product first")
+            AppMessageBox.information(self, 'Error', "Please Select a product first")
             product_combo.setFocus()
             return
         elif product_id is None:
             print("Entered product is not available... Please Add this product first")
-            QMessageBox.information(self, 'Error', "Entered product is not available... Please Add this product first")
+            AppMessageBox.information(self, 'Error', "Entered product is not available... Please Add this product first")
             product_combo.setFocus()
             return
         
@@ -1164,20 +1208,13 @@ class AddPurchaseWidget(QWidget):
         bonus_data = self.bonus_edit.text()
         rate_data = self.rate_edit.text()
         batch_data = self.batch_edit.text()
-        expiry_data = self.expiry_edit.date().toString("dd-MM-yyyy")
+        expiry_data = ""
+        qdate = self.expiry_edit.date()
+        if qdate.isValid() and qdate > QDate.currentDate():
+            expiry_data = qdate.toString("yyyy-MM-dd")
         discount_data = self.discount_edit.text()
         tax_data = self.tax_edit.text()
         total_data = self.amount_edit.text()
-        
-        
-        if expiry_data:
-            try:
-                expiry_date = datetime.strptime(expiry_data, "%d-%m-%Y").date()
-                if expiry_date <= datetime.now().date():
-                    expiry_data = ''  
-                    print("Expiry date cannot be in the past. Setting it to empty.")
-            except ValueError:
-                expiry_data = ''  # If the date is invalid, set it to empty string
         
         
         if discount_data == "":
@@ -1194,7 +1231,7 @@ class AddPurchaseWidget(QWidget):
         # quantity check
         if qty_data == "" or qty_data == "0" or rate_data == "" or rate_data == "0":
             print("Quantity or Rate cannot be empty or zero.")
-            QMessageBox.information(self, 'Error', "Quantity or Rate cannot be empty or zero.")
+            AppMessageBox.information(self, 'Error', "Quantity or Rate cannot be empty or zero.")
             return
             
         
@@ -1332,6 +1369,7 @@ class AddPurchaseWidget(QWidget):
         )
 
         frame_height = max(240, available_label_frame_height)
+        frame_height = min(frame_height, 500)
         self.label_entry_frame.setMaximumHeight(frame_height)
 
         frame_margins = self.label_entry_layout.contentsMargins()
@@ -1348,6 +1386,7 @@ class AddPurchaseWidget(QWidget):
 
         min_table_height = self.table.horizontalHeader().height() + (self.row_height * self.min_visible_rows) + 8
         table_height = max(min_table_height, table_height)
+        table_height = min(table_height, 360)
 
         self.table.setMinimumHeight(table_height)
         self.table.setMaximumHeight(table_height)
@@ -1361,7 +1400,7 @@ class AddPurchaseWidget(QWidget):
 
         query = QSqlQuery()
         if not query.exec("SELECT id, name FROM supplier WHERE status = 'active' ORDER BY name;"):
-            QMessageBox.information(self, "Error", query.lastError().text())
+            AppMessageBox.information(self, "Error", query.lastError().text())
             self.supplier_edit.blockSignals(False)
             self.rep_edit.clear()
             return
@@ -1405,7 +1444,7 @@ class AddPurchaseWidget(QWidget):
         query.addBindValue(int(supplier_id))
 
         if not query.exec():
-            QMessageBox.information(self, "Error", query.lastError().text())
+            AppMessageBox.information(self, "Error", query.lastError().text())
             return
 
         found = False
@@ -1434,21 +1473,26 @@ class AddPurchaseWidget(QWidget):
     
     
     
+    @Permissions.require_permission('purchase.create')
     def save_purchase(self):
+        if not require_open_session(self):
+            return
+
         self.show_price_review_dialog()
 
         # ------------------------------------------------------------
         # 1) Ask user whether they really want to save the purchase
         # ------------------------------------------------------------
-        confirmation = QMessageBox.question(
+        _, accepted = AppMessageBox.confirm(
             self,
             "Confirm Save",
-            "Would you like to save the Purchase Order?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            "Would you like to save the Purchase Invoice?",
+            confirm_label="Save Purchase",
+            cancel_label="Cancel",
+            kind="question",
         )
 
-        if confirmation != QMessageBox.Yes:
+        if not accepted:
             return
 
         # ------------------------------------------------------------
@@ -1457,7 +1501,7 @@ class AddPurchaseWidget(QWidget):
         db = QSqlDatabase.database()
 
         if not db.transaction():
-            QMessageBox.critical(self, "Database Error", "Could not start database transaction.")
+            AppMessageBox.error(self, "Database Error", "Could not start database transaction.")
             return
 
         try:
@@ -1515,7 +1559,7 @@ class AddPurchaseWidget(QWidget):
             # --------------------------------------------------------
             db.rollback()
             print("Transaction rolled back due to error:", str(e))
-            QMessageBox.critical(
+            AppMessageBox.error(
                 self,
                 "Error",
                 f"An error occurred while saving the purchase:\n{str(e)}"
@@ -1527,11 +1571,11 @@ class AddPurchaseWidget(QWidget):
         # ------------------------------------------------------------
         if not db.commit():
             db.rollback()
-            QMessageBox.critical(self, "Database Error", "Could not commit the purchase transaction.")
+            AppMessageBox.error(self, "Database Error", "Could not commit the purchase transaction.")
             return
 
         print("Transaction committed successfully")
-        QMessageBox.information(self, "Success", "Purchase saved successfully.")
+        AppMessageBox.success(self, "Success", "Purchase saved successfully.")
         self.clear_fields()
         
         
@@ -1597,7 +1641,7 @@ class AddPurchaseWidget(QWidget):
         # ------------------------------------------------------------
         # 4) Calculate header net amount exactly in your style
         # ------------------------------------------------------------
-        header_net_amount = (-discount - tax_236g + tax_236h + sales_tax - cn_adjustment)
+        header_net_amount = (-discount + tax_236g - tax_236h + sales_tax - cn_adjustment)
 
         print("Header Net Amount: ", header_net_amount)
 
@@ -1655,7 +1699,12 @@ class AddPurchaseWidget(QWidget):
         # ------------------------------------------------------------
         # 8) Get session_id
         # ------------------------------------------------------------
-        session_id = get_current_session(self)
+        due_date = self.compute_due_date() if payable > 0 else None
+
+        if payable > 0 and due_date is None:
+            print("No due date selected for payable purchase. It will be tracked in No Due Date bucket.")
+
+        session_id = get_active_session_id(strict=True)
         if session_id is None:
             raise Exception("No active session found.")
 
@@ -1681,6 +1730,7 @@ class AddPurchaseWidget(QWidget):
             "writeoff": writeoff,
             "payable": payable,
             "receivable": receivable,
+            "due_date": due_date,
             "session_id": session_id,
             "header_net_amount": header_net_amount,
         }
@@ -1708,9 +1758,10 @@ class AddPurchaseWidget(QWidget):
                 writeoff,
                 payable,
                 receivable,
+                due_date,
                 session_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """)
 
         # ------------------------------------------------------------
@@ -1732,6 +1783,7 @@ class AddPurchaseWidget(QWidget):
         query.addBindValue(data["writeoff"])
         query.addBindValue(data["payable"])
         query.addBindValue(data["receivable"])
+        query.addBindValue(data["due_date"])
         query.addBindValue(data["session_id"])
 
         # ------------------------------------------------------------
@@ -1751,8 +1803,8 @@ class AddPurchaseWidget(QWidget):
         # Some drivers return QVariant-like values, so force int if needed
         try:
             purchase_id = int(purchase_id)
-        except Exception:
-            pass
+        except (TypeError, ValueError):
+            raise Exception("Purchase header saved, but returned purchase ID was invalid.")
 
         print("Purchase header saved successfully.")
         print("Purchase ID:", purchase_id)
@@ -1827,6 +1879,13 @@ class AddPurchaseWidget(QWidget):
 
             batch = batch_edit.text().strip()
             expiry = expiry_edit.text().strip()
+            if expiry:
+                parsed = QDate.fromString(expiry, "yyyy-MM-dd")
+                if not parsed.isValid():
+                    parsed = QDate.fromString(expiry, "dd-MM-yyyy")
+                if not parsed.isValid():
+                    parsed = QDate.fromString(expiry, "dd MMM yyyy")
+                expiry = parsed.toString("yyyy-MM-dd") if parsed.isValid() else ""
 
             qty = qty_edit.text().strip()
             bonus = bonus_edit.text().strip()
@@ -1916,6 +1975,55 @@ class AddPurchaseWidget(QWidget):
             # --------------------------------------------------------
             # 11) Insert into purchaseitem
             # --------------------------------------------------------
+            # Calculate landing cost proportion for this line
+            # Landing Cost = Item Total * (Final Total with Fees / Line Subtotal)
+            
+            # Calculate line subtotal (sum of all item_total)
+            line_subtotal = 0.0
+            for check_row in range(row_count):
+                check_product_combo = self.table.cellWidget(check_row, 1)
+                if check_product_combo is not None and check_product_combo.currentData() is not None:
+                    check_total_edit = self.table.cellWidget(check_row, 9)
+                    if check_total_edit is not None:
+                        try:
+                            line_subtotal += float(check_total_edit.text() or 0)
+                        except ValueError:
+                            pass
+            
+            # Get header adjustments for landing cost distribution
+            try:
+                header_discount = float(self.discount_entry.text() or 0)
+            except ValueError:
+                header_discount = 0.0
+            try:
+                header_tax_236g = float(self.tax_236g_entry.text() or 0)
+            except (ValueError, AttributeError):
+                header_tax_236g = 0.0
+            try:
+                header_tax_236h = float(self.tax_236h_entry.text() or 0)
+            except (ValueError, AttributeError):
+                header_tax_236h = 0.0
+            try:
+                header_sales_tax = float(self.sales_tax_entry.text() or 0)
+            except (ValueError, AttributeError):
+                header_sales_tax = 0.0
+            try:
+                cn_adjust = float(self.cn_adjustment_entry.text() or 0)
+            except (ValueError, AttributeError):
+                cn_adjust = 0.0
+            
+            # Calculate total with all header adjustments
+            header_adjustments = (-header_discount + header_tax_236g - header_tax_236h + header_sales_tax - cn_adjust)
+            total_with_fees = line_subtotal + header_adjustments
+            
+            # Distribution factor for this line
+            if line_subtotal > 0:
+                distribution_factor = total_with_fees / line_subtotal
+            else:
+                distribution_factor = 1.0
+            
+            landing_cost = item_total * distribution_factor
+            
             item_query = QSqlQuery()
             item_query.prepare("""
                 INSERT INTO purchaseitem (
@@ -1926,9 +2034,10 @@ class AddPurchaseWidget(QWidget):
                     rate,
                     discount,
                     tax,
-                    total
+                    total,
+                    landing_cost
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
 
             item_query.addBindValue(purchase_id)
@@ -1939,6 +2048,7 @@ class AddPurchaseWidget(QWidget):
             item_query.addBindValue(item_discount)
             item_query.addBindValue(item_tax)
             item_query.addBindValue(item_total)
+            item_query.addBindValue(landing_cost)
 
             if not item_query.exec():
                 raise Exception(
@@ -1953,8 +2063,8 @@ class AddPurchaseWidget(QWidget):
 
             try:
                 purchase_item_id = int(purchase_item_id)
-            except Exception:
-                pass
+            except (TypeError, ValueError):
+                raise Exception(f"Purchase item saved in row {row + 1}, but returned item ID was invalid.")
 
             print("Purchase item saved with ID:", purchase_item_id)
 
@@ -2002,10 +2112,16 @@ class AddPurchaseWidget(QWidget):
             batch_query.addBindValue(product)
             batch_query.addBindValue(purchase_item_id if purchase_item_id else None)
             
+            unit_cost_per_unit = (
+                round(landing_cost / received_qty, 6)
+                if received_qty and received_qty > 0
+                else landing_cost
+            )
+
             batch_query.addBindValue(received_qty)
             batch_query.addBindValue(paid_qty)
             batch_query.addBindValue(received_qty)
-            batch_query.addBindValue(rate)
+            batch_query.addBindValue(unit_cost_per_unit)
             batch_query.addBindValue('PURCHASE')
             
             print("Batch query lastError before exec:", batch_query.lastError().text())
@@ -2022,6 +2138,20 @@ class AddPurchaseWidget(QWidget):
                 )
 
             print(f"Batch saved successfully for row {row + 1}")
+
+            # Mark product as used once stock is successfully saved for it.
+            status_query = QSqlQuery()
+            status_query.prepare("""
+                UPDATE product
+                SET status = 'used'
+                WHERE id = ?
+            """)
+            status_query.addBindValue(product)
+            if not status_query.exec():
+                raise Exception(
+                    f"Failed to update product status in row {row + 1}: "
+                    f"{status_query.lastError().text()}"
+                )
 
             saved_rows += 1
 
@@ -2159,62 +2289,6 @@ class AddPurchaseWidget(QWidget):
     
     
     
-    def load_product_suggestions(self, item, completer):
-        
-        current_text = item.lineEdit().text().strip()
-        print("Current Text is:", current_text)
-
-        if not current_text:
-            item.blockSignals(True)
-            item.clear()
-            item.setCurrentIndex(-1)
-            item.blockSignals(False)
-            return
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT id, display_name
-            FROM product
-            WHERE display_name LIKE ?
-            LIMIT 10
-        """)
-        query.addBindValue(f"%{current_text}%")
-
-        products = []
-        product_data = []
-
-        if not query.exec():
-            print("Something wrong happened...", query.lastError().text())
-            return
-
-        while query.next():
-            product_id = query.value(0)
-            name = str(query.value(1)).strip()
-
-            products.append(name)
-            product_data.append((name, product_id))
-
-        item.blockSignals(True)
-        item.clear()
-
-        for name, product_id in product_data:
-            item.addItem(name, product_id)
-
-        item.setCurrentIndex(-1)
-        item.lineEdit().setText(current_text)
-        item.blockSignals(False)
-
-        model = QStringListModel(products)
-        completer.setModel(model)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-
-        # force popup to appear
-        completer.complete()
-        
-    
-    
-    
-      
     def on_completer_selected(self, text, item):
         
         text = text.strip()
@@ -2271,14 +2345,40 @@ class AddPurchaseWidget(QWidget):
         self.remainingdata.clear()
         
         self.writeoff_check.setChecked(False)        
+
+        self.due_date_combo.setCurrentText("None")
+        self.due_date_combo.setEnabled(False)
         
         self.table.setRowCount(0)
+
+        self.qty_edit.clear()
+        self.bonus_edit.clear()
+        self.rate_edit.clear()
+        self.batch_edit.clear()
+        self.expiry_edit.setDate(QDate.currentDate())
+        self.discount_edit.clear()
+        self.tax_edit.clear()
+        self.item.setCurrentIndex(-1)
         
         self.payment_method.blockSignals(True); 
         self.payment_method.setCurrentIndex(0) 
         self.payment_method.blockSignals(False)
         
         self.populate_suppliers()
+        self.item.setFocus()
+
+    def confirm_clear_purchase(self):
+        _, accepted = AppMessageBox.confirm(
+            self,
+            "Clear Purchase Invoice",
+            "Clear the current purchase invoice and remove all entered rows?",
+            confirm_label="Clear Invoice",
+            cancel_label="Keep Editing",
+            kind="question",
+        )
+        if not accepted:
+            return
+        self.clear_fields()
         
        
 
@@ -2322,9 +2422,10 @@ class AddPurchaseWidget(QWidget):
                     form,
                     strength,
                     packing,
-                    manufacturer_id
+                    manufacturer_id,
+                    status
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
             
             code = ''
@@ -2342,13 +2443,14 @@ class AddPurchaseWidget(QWidget):
             product_query.addBindValue(item_packing)
             product_query.addBindValue(packing)
             product_query.addBindValue(manufacturer)
+            product_query.addBindValue("used")
 
             if not product_query.exec():
                 raise Exception(product_query.lastError().text())
 
             else:
                 
-                QMessageBox.information(None, "Success", "Product added successfully")
+                AppMessageBox.information(None, "Success", "Product added successfully")
                 product_id = product_query.lastInsertId()
                 print("New Product ID is: ", product_id)
                 
@@ -2460,7 +2562,7 @@ class AddPurchaseWidget(QWidget):
         dialog.resize(700, 400)
 
         main_layout = QVBoxLayout(dialog)
-        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
 
         title = QLabel("Review Sale Price")
@@ -2500,7 +2602,7 @@ class AddPurchaseWidget(QWidget):
         row_count = self.populate_price_review_table(table)
 
         if row_count == 0:
-            QMessageBox.information(
+            AppMessageBox.information(
                 self,
                 "No Items",
                 "No purchased items were found to review prices for."
@@ -2534,7 +2636,7 @@ class AddPurchaseWidget(QWidget):
         db = QSqlDatabase.database()
 
         if not db.transaction():
-            QMessageBox.critical(self, "Database Error", "Could not start price update transaction.")
+            AppMessageBox.critical(self, "Database Error", "Could not start price update transaction.")
             return
 
         try:
@@ -2542,6 +2644,7 @@ class AddPurchaseWidget(QWidget):
 
             for row in range(table.rowCount()):
                 product_id_item = table.item(row, 0)
+                product_name_item = table.item(row, 1)
                 previous_price_item = table.item(row, 2)
                 new_price_item = table.item(row, 3)
 
@@ -2553,6 +2656,7 @@ class AddPurchaseWidget(QWidget):
                     continue
 
                 product_id = int(product_id_item.text().strip())
+                product_name = product_name_item.text().strip() if product_name_item else f"Product {product_id}"
                 previous_price = float(previous_price_item.text().strip() or 0)
 
                 try:
@@ -2589,16 +2693,38 @@ class AddPurchaseWidget(QWidget):
                     INSERT INTO price_changes (
                         product_id,
                         previous_price,
-                        new_price
+                        new_price,
+                        source,
+                        user_id,
+                        username
                     )
-                    VALUES (?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?)
                 """)
+                app = QApplication.instance()
+                change_user_id = app.property("user_id") if app else None
+                change_username = (app.property("username") or "") if app else ""
                 change_query.addBindValue(product_id)
                 change_query.addBindValue(previous_price)
                 change_query.addBindValue(new_price)
+                change_query.addBindValue("purchase_price_review")
+                change_query.addBindValue(change_user_id)
+                change_query.addBindValue(change_username)
 
                 if not change_query.exec():
                     raise Exception(f"Failed to log price change in row {row + 1}: {change_query.lastError().text()}")
+
+                log_activity(
+                    category="price",
+                    action="price_updated",
+                    entity_type="product",
+                    entity_id=product_id,
+                    note=(
+                        f"Selling price updated for {product_name} (Product ID {product_id}). "
+                        f"Pack price changed from {previous_price} to {new_price} during purchase price review."
+                    ),
+                    previous_value=str(previous_price),
+                    new_value=str(new_price)
+                )
 
                 updated_rows += 1
 
@@ -2612,7 +2738,7 @@ class AddPurchaseWidget(QWidget):
 
         except Exception as e:
             db.rollback()
-            QMessageBox.critical(self, "Error", str(e))
+            AppMessageBox.critical(self, "Error", str(e))
              
 
 
@@ -2670,7 +2796,7 @@ class ImportDialog(QDialog):
         self.resize(600, 400)
 
         self.layout = QVBoxLayout()
-        self.layout.setContentsMargins(40, 40, 40, 40)
+        self.layout.setContentsMargins(10, 10, 10, 10)
         self.indicators = {}
         self.insert_subheading("PRODUCT Does Not Exist... Add INFORMATION")
         
@@ -2825,7 +2951,7 @@ class ImportDialog(QDialog):
         # avoid duplicate connections if method is called again
         try:
             combo.lineEdit().editingFinished.disconnect()
-        except:
+        except (RuntimeError, TypeError):
             pass
 
         combo.lineEdit().editingFinished.connect(

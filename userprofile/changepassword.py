@@ -3,6 +3,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtCore import QSize, Qt, QFile, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 import bcrypt
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -18,6 +19,12 @@ def load_stylesheet(filename):
     return css
 
 
+def validate_password_strength(password):
+    if len(password or "") < 8:
+        return "Password must be at least 8 characters long."
+    return None
+
+
 
 class ChangePasswordWidget(QWidget):
 
@@ -26,8 +33,8 @@ class ChangePasswordWidget(QWidget):
         super().__init__(parent)
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
         
         
          # === Header Row ===
@@ -35,9 +42,9 @@ class ChangePasswordWidget(QWidget):
         heading = QLabel("Change Password", objectName="SectionTitle")
         self.profilebutton = QPushButton("Profile Page", objectName="TopRightButton")
         self.profilebutton.setCursor(Qt.PointingHandCursor)
-        self.profilebutton.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.profilebutton)
 
         self.layout.addLayout(header_layout)
@@ -91,7 +98,7 @@ class ChangePasswordWidget(QWidget):
             row.addWidget(field, 8)
 
             self.layout.addLayout(row)
-            self.layout.setSpacing(15)  # reduce space between rows
+            self.layout.setSpacing(10)  # reduce space between rows
             
             # Keep mapping
             self.indicators[field] = indicator
@@ -135,7 +142,7 @@ class ChangePasswordWidget(QWidget):
         
         if oldpass == '' or newpass == '' or confirmpass == '':
             
-            QMessageBox.information(None, 'Password Change', 'All the fields are required...')
+            AppMessageBox.information(None, 'Password Change', 'All the fields are required...')
             
         else:
             
@@ -150,16 +157,21 @@ class ChangePasswordWidget(QWidget):
                 
                 user_id = query.value(0)
                 stored_hash = query.value(1)
-                stored_salt = query.value(2)
 
-                # Hash the input password using the stored salt
-                input_hash = bcrypt.hashpw(oldpass.encode(), stored_salt.encode()).decode()
+                try:
+                    current_password_ok = bcrypt.checkpw(oldpass.encode(), stored_hash.encode())
+                except Exception:
+                    current_password_ok = False
 
-                if input_hash == stored_hash:
+                if current_password_ok:
                     
                     print("Current password is correct... proceeding")
                     
                     if newpass == confirmpass:
+                        password_error = validate_password_strength(newpass)
+                        if password_error:
+                            AppMessageBox.information(None, 'Password Change', password_error)
+                            return
                         
                         new_password = newpass  # from user input
                         new_salt = bcrypt.gensalt()
@@ -174,7 +186,7 @@ class ChangePasswordWidget(QWidget):
 
                         if update_query.exec():
                             print("Password updated successfully.")
-                            QMessageBox.information(None, 'Password Change', 'Password Updated Succesfully...')
+                            AppMessageBox.information(None, 'Password Change', 'Password Updated Succesfully...')
                         else:
                             print("Failed to update password:", update_query.lastError().text())
                     
@@ -182,13 +194,13 @@ class ChangePasswordWidget(QWidget):
                     
                     else:
                         print("Password do not match...")
-                        QMessageBox.information(None, 'Password Change', 'New Passwords do not match...')
+                        AppMessageBox.information(None, 'Password Change', 'New Passwords do not match...')
                     
                     
                     
                     
                 else:
-                    QMessageBox.information(None, 'Password Change', 'Current Password is Incorrect...')
+                    AppMessageBox.information(None, 'Password Change', 'Current Password is Incorrect...')
             else:
                 print("User not found or query failed")
             

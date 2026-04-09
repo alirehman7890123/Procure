@@ -4,6 +4,7 @@ from PySide6.QtCore import QFile, Qt, Signal, QDate, QDateTime
 from PySide6.QtSql import QSqlQuery
 from functools import partial
 from utilities.stylus import load_stylesheets
+from utilities.table_helpers import centered_cell_widget, style_table_action_button
 
 
 
@@ -18,17 +19,17 @@ class ExpenseListWidget(QWidget):
 
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Expense Information", objectName="SectionTitle")
         self.addexpense = QPushButton("Add Expense", objectName="TopRightButton")
         self.addexpense.setCursor(Qt.PointingHandCursor)
-        self.addexpense.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.addexpense)
 
         self.layout.addLayout(header_layout)
@@ -52,7 +53,7 @@ class ExpenseListWidget(QWidget):
         self.layout.addSpacing(20)
         
 
-        self.row_height = 40
+        self.row_height = 35
 
         self.table = MyTable(column_ratios=[0.05, 0.25, 0.15, 0.20, 0.15, 0.10])
         headers = ["No.", "Category", "Title", "Amount", "Date", "Detail"]
@@ -72,7 +73,7 @@ class ExpenseListWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)   
 
-        self.table.setMinimumWidth(1000)
+        self.table.setMinimumWidth(900)
         
         # Hide vertical header (row numbers)
         self.table.verticalHeader().setVisible(False)
@@ -154,28 +155,10 @@ class ExpenseListWidget(QWidget):
             self.table.setItem(row, 3, amount_item)
             self.table.setItem(row, 4, creation_date_item)
 
-            detail = QPushButton("Details")
+            detail = style_table_action_button(QPushButton("Details"))
             detail.setCursor(Qt.PointingHandCursor)
-            detail.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    color: #333;
-                    padding: 4px 12px;
-                    border-radius: 2px;
-                    font-weight: 600;
-                }
-                QPushButton:hover {
-                    background-color: #244A62;
-                    color: #fff;
-                }
-                QPushButton:pressed {
-                    background-color: #2F5D7C;
-                    color: #fff;
-                }
-            """)
-
             detail.clicked.connect(partial(self.detailpagesignal.emit, exp_id))
-            self.table.setCellWidget(row, 5, detail)
+            self.table.setCellWidget(row, 5, centered_cell_widget(detail))
 
             row += 1 
 
@@ -205,4 +188,3 @@ class MyTable(QTableWidget):
 
             
         
-

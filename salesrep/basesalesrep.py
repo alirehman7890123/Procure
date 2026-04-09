@@ -80,8 +80,10 @@ class BaseSalesRepWidget(BasePage):
 
     # 🔑 reset method
     def reset_to_default(self):
-        self.stacked_layout.setCurrentWidget(self.salesreplist_widget)
-
+        if Permissions.has_permission('rep.view'):
+            self.stacked_layout.setCurrentWidget(self.salesreplist_widget)
+        elif Permissions.has_permission('rep.create'):
+            self.stacked_layout.setCurrentWidget(self.addsalesrep_widget)
 
 
 

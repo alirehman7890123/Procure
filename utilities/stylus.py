@@ -19,7 +19,7 @@ def load_stylesheets():
     css_content = ""
 
     if os.path.exists(styles_dir):
-        for file in os.listdir(styles_dir):
+        for file in sorted(os.listdir(styles_dir)):
             if file.endswith(".css"):
                 css_file = os.path.join(styles_dir, file)
                 with open(css_file, "r") as f:

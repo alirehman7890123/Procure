@@ -4,6 +4,7 @@ from expense.addexpense import AddExpenseWidget
 from expense.expenselist import ExpenseListWidget
 from expense.expensedetail import ExpenseDetailWidget
 from utilities.basepage import BasePage
+from utilities.permissions import Permissions
 
 
 class BaseExpenseWidget(BasePage):
@@ -33,13 +34,15 @@ class BaseExpenseWidget(BasePage):
         self.setLayout(self.stacked_layout)
         
         
-
+    @Permissions.require_permission('expense.create')
     def set_addexpense_widget(self):
         self.stacked_layout.setCurrentWidget(self.addexpense_widget)
 
+    @Permissions.require_permission('expense.view')
     def set_expenselist_widget(self):
         self.stacked_layout.setCurrentWidget(self.expenselist_widget)
 
+    @Permissions.require_permission('expense.view')
     def set_expensedetail_widget(self, id):
         self.expensedetail_widget.load_expense_data(id)
         self.stacked_layout.setCurrentWidget(self.expensedetail_widget)
@@ -47,4 +50,7 @@ class BaseExpenseWidget(BasePage):
    
     # 🔑 reset method
     def reset_to_default(self):
-        self.stacked_layout.setCurrentWidget(self.expenselist_widget)
+        if Permissions.has_permission('expense.view'):
+            self.stacked_layout.setCurrentWidget(self.expenselist_widget)
+        elif Permissions.has_permission('expense.create'):
+            self.stacked_layout.setCurrentWidget(self.addexpense_widget)

@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QRegularExpression
 from PySide6.QtGui import QRegularExpressionValidator
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -47,7 +48,7 @@ class BankTransferDialog(QDialog):
 
         tx_widget = QWidget()
         tx_layout = QHBoxLayout(tx_widget)
-        tx_layout.setContentsMargins(0, 0, 0, 0)
+        tx_layout.setContentsMargins(10, 10, 10, 10)
 
         self.national_radio = QRadioButton("National")
         self.international_radio = QRadioButton("International")
@@ -124,17 +125,17 @@ class BankTransferDialog(QDialog):
         tx_type = "International" if self.international_radio.isChecked() else "National"
 
         if not bank:
-            QMessageBox.warning(self, "Missing Data", "Please enter bank name.")
+            AppMessageBox.warning(self, "Missing Data", "Please enter bank name.")
             return
 
         if tx_type == "National":
             if not self.local_regex.match(account_no).hasMatch():
-                QMessageBox.warning(self, "Invalid", "Enter a valid local account number.")
+                AppMessageBox.warning(self, "Invalid", "Enter a valid local account number.")
                 return
         else:
             account_no = account_no.upper()
             if not self.iban_regex.match(account_no).hasMatch():
-                QMessageBox.warning(self, "Invalid", "Enter a valid Pakistani IBAN.")
+                AppMessageBox.warning(self, "Invalid", "Enter a valid Pakistani IBAN.")
                 return
 
         self.result_data = {
@@ -213,7 +214,7 @@ class MobileWalletDialog(QDialog):
         phone_no = self.phone_edit.text().strip()
 
         if not self.phone_regex.match(phone_no).hasMatch():
-            QMessageBox.warning(self, "Invalid", "Enter a valid mobile number.")
+            AppMessageBox.warning(self, "Invalid", "Enter a valid mobile number.")
             return
 
         self.result_data = {

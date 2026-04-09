@@ -14,8 +14,8 @@ class ExpenseDetailWidget(QWidget):
         super().__init__(parent)
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
@@ -24,10 +24,10 @@ class ExpenseDetailWidget(QWidget):
 
         self.expenselist = QPushButton("Expenses List", objectName="TopRightButton")
         self.expenselist.setCursor(Qt.PointingHandCursor)
-        self.expenselist.setFixedWidth(200)
 
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.expenselist)
 
         self.layout.addLayout(header_layout)

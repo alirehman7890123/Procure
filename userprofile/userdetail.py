@@ -1,7 +1,6 @@
-from PySide6.QtWidgets import QWidget,QApplication, QFrame, QPushButton, QVBoxLayout, QLineEdit, QLabel,QMessageBox, QHBoxLayout, QSizePolicy, QFrame
-from PySide6.QtGui import QColor
-from PySide6.QtCore import QSize, Qt, QFile, QEvent
-from PySide6.QtSql import QSqlDatabase, QSqlQuery
+from PySide6.QtWidgets import QWidget, QFrame, QPushButton, QVBoxLayout, QLineEdit, QLabel, QHBoxLayout, QSizePolicy
+from PySide6.QtCore import Qt, QEvent
+from PySide6.QtSql import QSqlQuery
 from utilities.stylus import load_stylesheets
 
 
@@ -16,8 +15,8 @@ class UserDetailWidget(QWidget):
         print("Opening User Detail Page")
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
         
         
          # === Header Row ===
@@ -26,7 +25,6 @@ class UserDetailWidget(QWidget):
         
         self.userlist = QPushButton("Users List", objectName="TopRightButton")
         self.userlist.setCursor(Qt.PointingHandCursor)
-        self.userlist.setFixedWidth(200)
         
         # self.edit_btn = QPushButton("Edit", objectName="TopRightButton")
         # self.edit_btn.setCursor(Qt.PointingHandCursor)
@@ -37,6 +35,7 @@ class UserDetailWidget(QWidget):
         
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.userlist)
 
         self.layout.addLayout(header_layout)
@@ -61,9 +60,16 @@ class UserDetailWidget(QWidget):
         
         
         # Labels + Fields
-        labels = ["First Name", "Last Name", "Email", "Username", "Role", "Status"]
+        info_frame = QFrame()
+        info_frame.setObjectName("sectionCard")
+        info_layout = QVBoxLayout(info_frame)
+        info_layout.setContentsMargins(10, 10, 10, 10)
+        info_layout.setSpacing(8)
+
+        labels = ["User ID", "First Name", "Last Name", "Email", "Username", "Role", "Status"]
         
         
+        self.useriddata = QLabel("-")
         self.firstnamedata = QLabel(); self.firstnameedit = QLineEdit()
         self.lastnamedata = QLabel(); self.lastnameedit = QLineEdit()
         self.emaildata = QLabel(); self.emailedit = QLineEdit()
@@ -72,7 +78,7 @@ class UserDetailWidget(QWidget):
         self.statusdata = QLabel(); 
         
         self.field_pairs = [
-            
+            (self.useriddata, None),
             (self.firstnamedata, self.firstnameedit),
             (self.lastnamedata, self.lastnameedit),
             (self.emaildata, self.emailedit),
@@ -98,10 +104,10 @@ class UserDetailWidget(QWidget):
                 edit_field.hide()
                 row.addWidget(edit_field, 8)
 
-            self.layout.addLayout(row)
+            info_layout.addLayout(row)
             
         
-
+        self.layout.addWidget(info_frame)
         self.layout.addStretch()
        
         self.setStyleSheet(load_stylesheets())
@@ -159,12 +165,13 @@ class UserDetailWidget(QWidget):
             self.user_id = query.value(0)
             print("User ID:", self.user_id)
 
-            self.firstnamedata.setText(query.value(1))
-            self.lastnamedata.setText(query.value(2))
-            self.emaildata.setText(query.value(3))
-            self.usernamedata.setText(query.value(4))
-            self.roledata.setText(query.value(5))
-            self.statusdata.setText(query.value(6))
+            self.useriddata.setText(str(self.user_id))
+            self.firstnamedata.setText(str(query.value(1) or "-"))
+            self.lastnamedata.setText(str(query.value(2) or "-"))
+            self.emaildata.setText(str(query.value(3) or "-"))
+            self.usernamedata.setText(str(query.value(4) or "-"))
+            self.roledata.setText(str(query.value(5) or "-"))
+            self.statusdata.setText(str(query.value(6) or "-"))
             
             print("User data loaded successfully.")
             
@@ -204,5 +211,3 @@ class UserDetailWidget(QWidget):
         
 
    
-
-

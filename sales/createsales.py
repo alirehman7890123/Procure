@@ -1,18 +1,23 @@
-from PySide6.QtWidgets import QApplication, QWidget, QCompleter, QDateEdit, QVBoxLayout, QHBoxLayout, QDialog, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
-from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, Signal, QTimer, QEvent, QRectF
+from PySide6.QtWidgets import QApplication, QWidget, QDateEdit, QVBoxLayout, QHBoxLayout, QDialog, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
+from PySide6.QtCore import QFile, Qt, QDate, Signal, QTimer, QEvent, QRectF, QSizeF
+from utilities.product_search_widget import ProductSearchBox
 import os
 import sys
 import platform
+import subprocess
 
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtGui import QPalette, QColor, QKeyEvent, QPdfWriter, QKeySequence, QPainter, QPageSize, QFont, QTextOption, QPen, QColor
 from functools import partial
 import math
 from utilities.stylus import load_stylesheets
-from utilities.get_session import get_current_session
+from utilities.session_gate import require_open_session
+from utilities.session_service import get_active_session_id
 from PySide6.QtGui import QKeySequence, QShortcut
 
 from utilities.payment_handler import PaymentMethodHandler
+from utilities.permissions import Permissions
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -62,18 +67,23 @@ class CreateSalesWidget(QWidget):
         
         # === Main Vertical Layout ===
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(10, 10, 10, 10)
-        self.layout.setSpacing(10)
+        self.layout.setContentsMargins(8, 8, 8, 8)
+        self.layout.setSpacing(8)
         
         self.scan_timer = QTimer(self)
         self.scan_timer.setSingleShot(True)
         self._pending_scan = None
+        self._suppress_enter_once = False
         self.scan_timer.timeout.connect(lambda: self._run_pending_scan())
+        self.current_line_product_defaults = {}
+        self.line_discount_manual_override = False
+        self.line_tax_manual_override = False
         
         
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.reloading_sale = False
         self.order_modified = False
+        self.current_hold_sale_id = None
         self.row_height = 40
 
         
@@ -84,17 +94,20 @@ class CreateSalesWidget(QWidget):
         
         
         clear_btn = QPushButton('Clear Sale', objectName='TopRightButton')
-        clear_btn.setFixedWidth(150)
         clear_btn.setCursor(Qt.PointingHandCursor)
         clear_btn.clicked.connect(self.clear_fields)
         
+        self.heldsales_btn = QPushButton('Held Sales', objectName='TopRightButton')
+        self.heldsales_btn.setCursor(Qt.PointingHandCursor)
+        self.heldsales_btn.clicked.connect(self.load_hold_orders)
         
         self.invoicelist = QPushButton('SO List', objectName='TopRightButton')
-        self.invoicelist.setFixedWidth(150)
         self.invoicelist.setCursor(Qt.PointingHandCursor)
         
-        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
+        header_layout.addWidget(self.heldsales_btn)
         header_layout.addWidget(clear_btn)
         header_layout.addWidget(self.invoicelist)
         
@@ -147,10 +160,7 @@ class CreateSalesWidget(QWidget):
 
         self.item.setCurrentIndex(-1)
         self.item.lineEdit().clear()
-
-        if self.item.completer():
-            self.item.completer().popup().hide()
-
+        self.item.hidePopup()
         self.item.blockSignals(False)
         self.item.setFocus()
        
@@ -166,12 +176,12 @@ class CreateSalesWidget(QWidget):
         self.customer_frame = customer_frame
 
         customer_layout = QVBoxLayout(customer_frame)
-        customer_layout.setContentsMargins(15, 10, 15, 10)
-        customer_layout.setSpacing(8)
+        customer_layout.setContentsMargins(12, 8, 12, 8)
+        customer_layout.setSpacing(4)
 
         # Top Row Layout
         top_row = QHBoxLayout()
-        top_row.setSpacing(15)
+        top_row.setSpacing(10)
 
         top_row = QHBoxLayout()
         customerlabel = QLabel("CUSTOMER")
@@ -220,18 +230,53 @@ class CreateSalesWidget(QWidget):
         top_row.addWidget(spacer, 5)
         
         main_final_label = QLabel("Final Amount")
-        main_final_label.setStyleSheet("font-weight: 500; font-size: 14px;")   
+        main_final_label.setStyleSheet("font-weight: 500; font-size: 13px;")   
         
              
         self.main_final_amount = QLabel("0.00")
-        self.main_final_amount.setStyleSheet("font-weight: 700; font-size: 20px;")
+        self.main_final_amount.setStyleSheet("font-weight: 700; font-size: 18px;")
         top_row.addWidget(main_final_label)
         top_row.addWidget(self.main_final_amount)
         
         self.new_customer_btn.clicked.connect(self.open_customer_dialog)
+        self.customer.currentIndexChanged.connect(self.update_customer_credit_summary)
+        self.customer.currentIndexChanged.connect(self.apply_customer_pricing_groups)
+
+        self.active_discount_group_id = None
+        self.active_discount_group_name = ""
+        self.active_discount_percent = 0.0
+        self.active_tax_group_id = None
+        self.active_tax_group_name = ""
+        self.active_tax_percent = 0.0
+        self.discount_group_manual_override = False
+        self.tax_group_manual_override = False
         
         
         customer_layout.addLayout(top_row)
+
+        customer_meta_row = QHBoxLayout()
+        customer_meta_row.setContentsMargins(0, 0, 0, 0)
+        customer_meta_row.setSpacing(18)
+
+        self.customer_credit_summary = QLabel()
+        self.customer_credit_summary.setWordWrap(False)
+        self.customer_credit_summary.setStyleSheet(
+            "color: #546776; font-size: 10px; font-weight: 600; padding-left: 0; margin: 0;"
+        )
+        self.customer_credit_summary.setContentsMargins(0, 0, 0, 0)
+        customer_meta_row.addWidget(self.customer_credit_summary)
+
+        self.customer_pricing_summary = QLabel()
+        self.customer_pricing_summary.setWordWrap(False)
+        self.customer_pricing_summary.setStyleSheet(
+            "color: #6B7F8F; font-size: 10px; font-weight: 600; padding-left: 0; margin: 0;"
+        )
+        self.customer_pricing_summary.setContentsMargins(0, 0, 0, 0)
+        customer_meta_row.addWidget(self.customer_pricing_summary, 1)
+        customer_meta_row.addStretch()
+        customer_layout.addLayout(customer_meta_row)
+        self.update_customer_credit_summary()
+        self.apply_customer_pricing_groups()
 
         # Add frame to main layout
         self.layout.addWidget(customer_frame, 0, Qt.AlignTop)
@@ -282,7 +327,7 @@ class CreateSalesWidget(QWidget):
             contact = contact_edit.text().strip()
 
             if not name:
-                QMessageBox.warning(dialog, "Validation Error", "Customer name is required.")
+                AppMessageBox.warning(dialog, "Validation Error", "Customer name is required.")
                 return
 
             query = QSqlQuery()
@@ -297,14 +342,14 @@ class CreateSalesWidget(QWidget):
             query.addBindValue(contact if contact else None)
 
             if not query.exec():
-                QMessageBox.critical(
+                AppMessageBox.critical(
                     dialog,
                     "Database Error",
                     f"Failed to save customer:\n{query.lastError().text()}"
                 )
                 return
 
-            QMessageBox.information(dialog, "Success", "Customer added successfully.")
+            AppMessageBox.information(dialog, "Success", "Customer added successfully.")
             dialog.accept()
 
             if hasattr(self, "populate_customers"):
@@ -323,7 +368,7 @@ class CreateSalesWidget(QWidget):
         self.row_height = 30
 
         self.table = MyTable(column_ratios=[0.05, 0.35, 0.08, 0.08, 0.08, 0.08, 0.08, 0.03])
-        headers = ["#", " Product ", " Qty", "Rate", "Disc %", "Tax %", "Total", "X"]
+        headers = ["#", " Product ", " Qty", "Rate", "Disc", "Tax %", "Total", "X"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
 
@@ -339,7 +384,7 @@ class CreateSalesWidget(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         
-        visible_rows = 8
+        visible_rows = 6
         header_height = self.table.horizontalHeader().height()
 
         table_height = header_height + (self.row_height * visible_rows) + 2
@@ -358,8 +403,8 @@ class CreateSalesWidget(QWidget):
         
         
         product_entry_layout = QVBoxLayout(product_frame)
-        product_entry_layout.setContentsMargins(15, 10, 15, 20)
-        product_entry_layout.setSpacing(0)
+        product_entry_layout.setContentsMargins(12, 8, 12, 8)
+        product_entry_layout.setSpacing(2)
         self.product_entry_layout = product_entry_layout
         
         product_entry_layout.setAlignment(Qt.AlignTop)
@@ -374,46 +419,65 @@ class CreateSalesWidget(QWidget):
 
             QLineEdit {
                 margin: 0;
-                padding: 5px;
+                padding: 5px 10px;
                 border: 1px solid #ccc;
-                border-radius: 3px;
-                font-size: 12px;
+                border-radius: 5px;
+                font-size: 11px;
                 letter-spacing: 0.2px;
-                background-color: #f9f9f9;
+                background-color: #fbfcfd;
             }
 
             QComboBox {
                 margin: 0;
-                padding: 5px;
+                padding: 5px 10px;
+                padding-right: 30px;
                 border: 1px solid #ccc;
-                border-radius: 3px;
-                font-size: 12px;
+                border-radius: 5px;
+                font-size: 11px;
                 letter-spacing: 0.2px;
-                background-color: #f9f9f9;
+                background-color: #fbfcfd;
+            }
+
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 24px;
+                border: none;
+                border-left: 1px solid #d8e0e6;
+                background-color: #f1f5f8;
+                border-top-right-radius: 5px;
+                border-bottom-right-radius: 5px;
+            }
+
+            QComboBox::down-arrow {
+                image: url(res/rail_icons/chevron_down.svg);
+                width: 12px;
+                height: 12px;
             }
             
             QLineEdit:focus,
             QComboBox:focus,
             QDateEdit:focus {
-                border: 2px solid #5B8FB8;
+                border: 1px solid #5B8FB8;
                 background: #F2F8FC;
             }
 
             KeyUpLineEdit {
                 margin: 0;
-                padding: 5px;
+                padding: 5px 10px;
                 border: 1px solid #ccc;
-                border-radius: 4px;
-                font-size: 12px;
+                border-radius: 5px;
+                font-size: 11px;
                 letter-spacing: 0.2px;
-                background-color: #f9f9f9;
+                background-color: #fbfcfd;
             }
         """
 
         
         grid = QGridLayout()
-        grid.setHorizontalSpacing(8)
-        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(2)
+        grid.setContentsMargins(6, 4, 6, 2)
         self.entry_grid = grid
 
         # -----------------------------
@@ -436,54 +500,21 @@ class CreateSalesWidget(QWidget):
         product_label.setStyleSheet(field_style)
         
         
-        self.item = QComboBox()
+        self.item = ProductSearchBox(self, query_fn=self._sales_product_query_fn, placeholder="select product", defer_numeric_to_enter=True)
         self.item.wheelEvent = lambda event: event.ignore()
-        self.item.setEditable(True)
-        
-        
-
-        line_edit = SelectAllLineEdit()
-        self.item.setLineEdit(line_edit)
-
+        self.item.setLineEdit(SelectAllLineEdit())
         self.item.lineEdit().textEdited.connect(self.force_uppercase)
-
-        completer = QCompleter()
-        self.item.setCompleter(completer)
-        completer.setCompletionMode(QCompleter.PopupCompletion)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-
-        completer.activated[str].connect(
-            lambda text, c=self.item: self.on_completer_selected(text, c)
+        self.item.lineEdit().returnPressed.connect(
+            lambda: QTimer.singleShot(0, self.handle_product_enter)
         )
-
-        self.item.completer().popup().setStyleSheet("""
-            QListView {
-                padding: 5px;
-                background-color: white;
-                border: 1px solid gray;
-                color: #333;
-            }
-            QListView::item {
-                padding: 6px 10px;
-            }
-            QListView::item:selected {
-                background-color: #5A9EC9;
-                color: white;
-            }
-        """)
-
-        self.item.lineEdit().textEdited.connect(
-            lambda text: self.load_product_suggestions(self.item, completer)
-        )
-        
-        
         QShortcut(
             QKeySequence(Qt.Key_Escape),
             self.item,
             activated=self.clear_product_field
         )
-        
-        
+        self.item.product_selected_with_data.connect(
+            lambda pid, name, data, c=self.item: self.on_completer_selected(name, c, data)
+        )
         self.item.setStyleSheet(field_style)
         
         product_box_layout.addWidget(product_label, 0)
@@ -538,8 +569,15 @@ class CreateSalesWidget(QWidget):
         self.discount.setPlaceholderText("Disc %")
         self.discount.setStyleSheet(field_style)
 
+        self.discount_mode_combo = QComboBox()
+        self.discount_mode_combo.addItem("%", "percent")
+        self.discount_mode_combo.addItem("Amt", "amount")
+        self.discount_mode_combo.setStyleSheet(field_style)
+        self.discount_mode_combo.setFixedWidth(62)
+
         discount_box_layout.addWidget(discount_label)
         discount_box_layout.addWidget(self.discount)
+        discount_box_layout.addWidget(self.discount_mode_combo)
 
         grid.addLayout(discount_box_layout, 0, 4)
 
@@ -583,13 +621,25 @@ class CreateSalesWidget(QWidget):
         # ---- ACTION ----
         add_button = QPushButton("+", objectName="EntryButton")
         add_button.clicked.connect(self.add_row)
+        self.add_line_button = add_button
+
+        self.reset_line_defaults_btn = QPushButton("Reset", objectName="EntryButton")
+        self.reset_line_defaults_btn.clicked.connect(self.reset_current_line_defaults)
 
         action_box_layout = QHBoxLayout()
-        action_box_layout.setContentsMargins(0, 0, 0, 0)
+        action_box_layout.setContentsMargins(6, 6, 6, 6)
         action_box_layout.setSpacing(6)
         action_box_layout.addWidget(add_button)
+        action_box_layout.addWidget(self.reset_line_defaults_btn)
 
         grid.addLayout(action_box_layout, 0, 7)
+
+        self.line_pricing_hint = QLabel("Line Pricing: Waiting for product selection")
+        self.line_pricing_hint.setStyleSheet(
+            "color: #6B7F8F; font-size: 10px; font-weight: 600; padding-left: 0; margin: 0;"
+        )
+        self.line_pricing_hint.setWordWrap(True)
+        self.line_pricing_hint.setContentsMargins(0, 0, 0, 0)
         
         
         
@@ -608,10 +658,10 @@ class CreateSalesWidget(QWidget):
         
         
         
-        self.qty_edit.returnPressed.connect(lambda: self.focus_next_field(self.rate_edit))
-        self.rate_edit.returnPressed.connect(lambda: self.focus_next_field(self.discount))
+        self.qty_edit.returnPressed.connect(self.advance_after_qty_entry)
+        self.rate_edit.returnPressed.connect(lambda: self.focus_next_field(self.add_line_button))
         self.discount.returnPressed.connect(lambda: self.focus_next_field(self.tax))
-        self.tax.returnPressed.connect(lambda: self.focus_next_field(add_button))
+        self.tax.returnPressed.connect(lambda: self.focus_next_field(self.add_line_button))
         
 
         self.qty_edit.textChanged.connect(self.update_line_total)
@@ -619,6 +669,9 @@ class CreateSalesWidget(QWidget):
 
         self.discount.textChanged.connect(self.update_line_total)
         self.tax.textChanged.connect(self.update_line_total)
+        self.discount.textEdited.connect(self.on_line_discount_edited)
+        self.tax.textEdited.connect(self.on_line_tax_edited)
+        self.discount_mode_combo.currentIndexChanged.connect(self.on_discount_mode_changed)
         
         
         
@@ -635,7 +688,8 @@ class CreateSalesWidget(QWidget):
         
 
         product_entry_layout.addLayout(grid)
-        product_entry_layout.addSpacing(10)
+        product_entry_layout.addWidget(self.line_pricing_hint)
+        product_entry_layout.addSpacing(0)
 
         table = self.add_table()
         product_entry_layout.addWidget(table)
@@ -651,12 +705,14 @@ class CreateSalesWidget(QWidget):
 
         self.item.setCurrentIndex(-1)
         self.item.lineEdit().clear()
-
-        if self.item.completer():
-            self.item.completer().popup().hide()
-
+        self.item.hidePopup()
         self.item.blockSignals(False)
         self.item.setFocus()
+        if hasattr(self, "line_pricing_hint"):
+            self.line_pricing_hint.setText("Line Pricing: Waiting for product selection")
+        self.current_line_product_defaults = {}
+        self.line_discount_manual_override = False
+        self.line_tax_manual_override = False
     
     
     
@@ -668,18 +724,19 @@ class CreateSalesWidget(QWidget):
         self.totals_frame = totals_frame
 
         totals_layout = QVBoxLayout(totals_frame)
-        totals_layout.setContentsMargins(10, 10, 10, 10)
-        totals_layout.setSpacing(12)
+        totals_layout.setContentsMargins(8, 8, 8, 8)
+        totals_layout.setSpacing(6)
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(5)
+        main_grid = QGridLayout()
+        main_grid.setHorizontalSpacing(18)
+        main_grid.setVerticalSpacing(8)
 
         label_style = """
         QLabel {
-            font-size: 12px;
+            font-size: 11px;
             color: #555;
             font-weight: 600;
+            padding-left: 0;
         }
         """
 
@@ -695,11 +752,11 @@ class CreateSalesWidget(QWidget):
 
         final_amount_label = QLabel("Final Amount")
         final_amount_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        final_amount_label.setStyleSheet("font-size: 16px; font-weight:600; color: #666;")
+        final_amount_label.setStyleSheet("font-size: 14px; font-weight:600; color: #666;")
 
         received_label = QLabel("Received")
         received_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        received_label.setStyleSheet("font-size: 16px; font-weight: 600;")
+        received_label.setStyleSheet("font-size: 14px; font-weight: 600;")
 
         payment_method_label = QLabel("Payment Method")
         remaining_label = QLabel("Remaining Amount")
@@ -746,15 +803,22 @@ class CreateSalesWidget(QWidget):
         self.remainingdata.setReadOnly(True)
 
         self.writeoff_check = QCheckBox("Write-off Remaining")
-        self.writeoff_check.setStyleSheet("QCheckBox { color: #333; }")
+        self.writeoff_check.setStyleSheet("QCheckBox { color: #333; font-size: 11px; }")
+        self.writeoff_check.setChecked(False)
+        self.auto_print_check = QCheckBox("Auto Print")
+        self.auto_print_check.setStyleSheet("QCheckBox { color: #333; font-size: 11px; }")
+        self.auto_print_check.setChecked(True)
 
         self.payment_handler = PaymentMethodHandler(self)
 
         self.payment_method = QComboBox()
         self.payment_method.addItems(["Cash", "Bank Transfer", "EasyPaisa", "JazzCash"])
         self.payment_method.currentTextChanged.connect(self.on_payment_method_changed)
-        
-        
+
+        self.due_date_combo = QComboBox()
+        self.due_date_combo.addItems(["None", "+15 days", "+30 days", "+45 days", "+60 days", "+90 days"])
+        self.due_date_combo.setCurrentText("None")
+        self.due_date_combo.setEnabled(False)
         
         self.gross_entry.setAlignment(Qt.AlignRight)
         self.discount_entry.setAlignment(Qt.AlignRight)
@@ -768,85 +832,69 @@ class CreateSalesWidget(QWidget):
         self.discount_entry.textChanged.connect(self.update_total_amount)
         self.tax_entry.textChanged.connect(self.update_total_amount)
         self.additional_entry.textChanged.connect(self.update_total_amount)
+        self.discount_entry.textEdited.connect(self.on_discount_entry_edited)
+        self.tax_entry.textEdited.connect(self.on_tax_entry_edited)
         self.received_entry.textChanged.connect(self.calculate_payment)
+        self.received_entry.textChanged.connect(self.update_due_date_availability)
+        self.writeoff_check.toggled.connect(self.update_due_date_availability)
 
-        # -----------------------------
-        # Row 1
-        # subtotal-value, discount-value, tax-value,
-        # final_amount-value, then a space, then received-value
-        # -----------------------------
-        subtotal_layout = QHBoxLayout()
-        subtotal_layout.addWidget(gross_label)
-        subtotal_layout.addWidget(self.gross_entry)
-        grid.addLayout(subtotal_layout, 0, 0)
+        left_grid = QGridLayout()
+        left_grid.setHorizontalSpacing(10)
+        left_grid.setVerticalSpacing(8)
+        left_grid.addWidget(gross_label, 0, 0)
+        left_grid.addWidget(self.gross_entry, 0, 1)
+        left_grid.addWidget(discount_label, 0, 2)
+        left_grid.addWidget(self.discount_entry, 0, 3)
+        left_grid.addWidget(tax_label, 0, 4)
+        left_grid.addWidget(self.tax_entry, 0, 5)
+        left_grid.addWidget(additional_label, 0, 6)
+        left_grid.addWidget(self.additional_entry, 0, 7)
+        left_grid.addWidget(payment_method_label, 1, 6)
+        left_grid.addWidget(self.payment_method, 1, 7)
+        left_grid.setColumnMinimumWidth(0, 54)
+        left_grid.setColumnMinimumWidth(2, 54)
+        left_grid.setColumnMinimumWidth(4, 54)
+        left_grid.setColumnMinimumWidth(6, 110)
+        left_grid.setColumnStretch(1, 1)
+        left_grid.setColumnStretch(3, 1)
+        left_grid.setColumnStretch(5, 1)
+        left_grid.setColumnStretch(7, 1)
 
-        discount_layout = QHBoxLayout()
-        discount_layout.addWidget(discount_label)
-        discount_layout.addWidget(self.discount_entry)
-        grid.addLayout(discount_layout, 0, 1)
+        right_grid = QGridLayout()
+        right_grid.setHorizontalSpacing(10)
+        right_grid.setVerticalSpacing(8)
+        right_grid.addWidget(final_amount_label, 0, 0)
+        right_grid.addWidget(self.final_amount_entry, 0, 1)
+        right_grid.addWidget(received_label, 0, 2)
+        right_grid.addWidget(self.received_entry, 0, 3)
 
-        tax_layout = QHBoxLayout()
-        tax_layout.addWidget(tax_label)
-        tax_layout.addWidget(self.tax_entry)
-        grid.addLayout(tax_layout, 0, 2)
-        
-        additional_layout = QHBoxLayout()
-        
-        additional_layout.addWidget(additional_label)
-        additional_layout.addWidget(self.additional_entry)
-        grid.addLayout(additional_layout, 0, 3)
-        
-        space_label = QLabel()
-        grid.addWidget(space_label, 0, 4)
+        due_date_label = QLabel("Due Date")
+        due_date_label.setStyleSheet(label_style)
+        right_grid.addWidget(due_date_label, 1, 0)
+        right_grid.addWidget(self.due_date_combo, 1, 1)
+        right_grid.addWidget(remaining_label, 1, 2)
+        right_grid.addWidget(self.remainingdata, 1, 3)
 
-        final_amount_layout = QHBoxLayout()
-        final_amount_layout.setContentsMargins(10, 0, 0, 0)
-        final_amount_layout.addWidget(final_amount_label)
-        final_amount_layout.addWidget(self.final_amount_entry)
-        grid.addLayout(final_amount_layout, 0, 5)
-
-        # give layout left margin
-        
-
-        received_layout = QHBoxLayout()
-        received_layout.addWidget(received_label)
-        received_layout.addWidget(self.received_entry)
-        grid.addLayout(received_layout, 0, 6)
-
-        # -----------------------------
-        # Row 2
-        # under final_amount-value column make payment method-value,
-        # then space, then remaining-value
-        # -----------------------------
-        method_layout = QHBoxLayout()
-        method_layout.addWidget(payment_method_label)
-        method_layout.addWidget(self.payment_method)
-        grid.addLayout(method_layout, 1, 3)
-
-        space_label_2 = QLabel()
-        grid.addWidget(space_label_2, 1, 4)
-
-        remaining_layout = QHBoxLayout()
-        remaining_layout.addWidget(remaining_label)
-        remaining_layout.addWidget(self.remainingdata)
-        grid.addLayout(remaining_layout, 1, 6)
-
-        # -----------------------------
-        # Row 3
-        # checkbox at the end column
-        # -----------------------------
         checkbox_layout = QHBoxLayout()
+        checkbox_layout.setContentsMargins(0, 0, 0, 0)
+        checkbox_layout.setSpacing(10)
         checkbox_layout.addStretch()
+        checkbox_layout.addWidget(self.auto_print_check)
         checkbox_layout.addWidget(self.writeoff_check)
-        grid.addLayout(checkbox_layout, 2, 6)
+        right_grid.addLayout(checkbox_layout, 2, 0, 1, 4)
+        right_grid.setColumnMinimumWidth(0, 92)
+        right_grid.setColumnMinimumWidth(2, 118)
+        right_grid.setColumnStretch(1, 1)
+        right_grid.setColumnStretch(3, 1)
 
-        # -----------------------------
-        # Stretch
-        # -----------------------------
-        for col in range(7):
-            grid.setColumnStretch(col, 1)
+        main_grid.addLayout(left_grid, 0, 0)
+        section_gap = QSpacerItem(28, 10, QSizePolicy.Fixed, QSizePolicy.Minimum)
+        main_grid.addItem(section_gap, 0, 1)
+        main_grid.addLayout(right_grid, 0, 2)
+        main_grid.setColumnStretch(0, 3)
+        main_grid.setColumnStretch(2, 2)
 
-        totals_layout.addLayout(grid)
+        totals_layout.addLayout(main_grid)
 
         # -----------------------------
         # Add totals frame
@@ -859,259 +907,13 @@ class CreateSalesWidget(QWidget):
         save_row = QHBoxLayout()
         addreceipt = QPushButton("Save Sales Receipt", objectName="SaveButton")
         addreceipt.setCursor(Qt.PointingHandCursor)
+        addreceipt.setMinimumHeight(36)
         addreceipt.clicked.connect(lambda: self.save_receipt())
         save_row.addWidget(addreceipt, 1)
 
         self.layout.addLayout(save_row, 0)
         
-    
-    # def add_totals_section(self):
-    
-    #     totals_frame = QFrame()
-    #     totals_frame.setObjectName("sectionCard")
-    #     self.totals_frame = totals_frame
-
-    #     totals_layout = QVBoxLayout(totals_frame)
-    #     totals_layout.setContentsMargins(10, 10, 10, 10)
-    #     totals_layout.setSpacing(12)
-
-    #     grid = QGridLayout()
-    #     grid.setHorizontalSpacing(14)
-    #     grid.setVerticalSpacing(5)
         
-    #     label_style= """
-        
-    #     QLabel {
-    #         font-size: 12px;
-    #         color: #555; 
-    #         font-weight: 600;    
-    #     }
-        
-    #     """
-
-    #     # -----------------------------
-    #     # Create labels
-    #     # -----------------------------
-        
-        
-    #     subtotal_layout = QHBoxLayout()
-    #     gross_label = QLabel("Sub Total")
-    #     self.gross_entry = QLineEdit("0.00")
-    #     self.gross_entry.setReadOnly(True)
-        
-    #     subtotal_layout.addWidget(gross_label)
-    #     subtotal_layout.addWidget(self.gross_entry)
-    #     grid.addLayout(subtotal_layout, 0, 0)
-        
-        
-        
-        
-    #     discount_layout = QHBoxLayout()
-    #     discount_label = QLabel("Discount")
-    #     self.discount_entry = QLineEdit()
-        
-    #     discount_layout.addWidget(discount_label)
-    #     discount_layout.addWidget(self.discount_entry)
-        
-    #     grid.addLayout(discount_layout, 0, 1)
-        
-        
-        
-    #     tax_layout = QHBoxLayout()
-        
-    #     tax_label = QLabel("Sales Tax")
-    #     self.tax_entry = QLineEdit()
-        
-    #     tax_layout.addWidget(tax_label)
-    #     tax_layout.addWidget(self.tax_entry)
-        
-    #     grid.addLayout(tax_layout, 0, 2)
-        
-        
-        
-        
-        
-    #     additional_layout = QHBoxLayout()
-        
-    #     additional_label = QLabel("Additional Charges")
-    #     self.additional_entry = QLineEdit()
-        
-    #     additional_layout.addWidget(additional_label)
-    #     additional_layout.addWidget(self.additional_entry)
-        
-    #     grid.addLayout(additional_layout, 0, 3)
-
-        
-    #     taxable_label = QLabel("Taxable")
-        
-    #     net_amount_label = QLabel("Net Amount")
-    #     final_amount_label = QLabel("Final Amount")
-    #     final_amount_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-    #     final_amount_label.setStyleSheet("font-size: 16px; font-weight:600;")
-        
-        
-    #     gross_label.setStyleSheet(label_style)
-    #     discount_label.setStyleSheet(label_style)
-    #     taxable_label.setStyleSheet(label_style)
-    #     tax_label.setStyleSheet(label_style)
-    #     net_amount_label.setStyleSheet(label_style)
-    #     additional_label.setStyleSheet(label_style)
-
-        
-    #     change_label = QLabel("Change")
-    #     remaining_label = QLabel("Remaining Amount")
-        
-    #     remaining_label.setStyleSheet(label_style)
-    #     change_label.setStyleSheet(label_style)
-
-    #     # -----------------------------
-    #     # Create fields
-    #     # -----------------------------
-        
-        
-        
-    #     space_label = QLabel()
-    #     grid.addWidget(space_label, 0, 4)
-        
-        
-        
-    #     method_layout = QHBoxLayout()
-        
-    #     payment_method_label = QLabel("Payment Method")
-    #     payment_method_label.setStyleSheet(label_style)
-        
-    #     self.payment_handler = PaymentMethodHandler(self)
-
-    #     self.payment_method = QComboBox()
-    #     self.payment_method.addItems(["Cash", "Bank Transfer", "EasyPaisa", "JazzCash"])
-    #     self.payment_method.currentTextChanged.connect(self.on_payment_method_changed)
-        
-        
-    #     method_layout.addWidget(payment_method_label)
-    #     method_layout.addWidget(self.payment_method)
-        
-    #     grid.addLayout(method_layout, 1, 0)
-        
-        
-        
-    #     received_layout = QHBoxLayout()   
-        
-    #     received_label = QLabel("Received")
-    #     received_label.setStyleSheet(label_style)
-    #     received_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-    #     received_label.setStyleSheet('font-size: 16px; font-weight: 600;')
-        
-    #     self.received_entry = QLineEdit("0.00")
-    #     self.received_entry.setStyleSheet('font-size: 16px; font-weight: 600; padding: 5px;')
-        
-        
-    #     received_layout.addWidget(received_label)
-    #     received_layout.addWidget(self.received_entry)
-        
-    #     grid.addLayout(received_layout, 0, 7)
-        
-        
-
-
-
-        
-    #     self.taxable_entry = QLineEdit("0.00")
-    #     self.taxable_entry.setReadOnly(True)
-        
-
-    #     self.net_amount_entry = QLineEdit("0.00")
-    #     self.net_amount_entry.setReadOnly(True)
-
-
-
-        
-    #     self.final_amount_entry = QLabel("0.00")
-    #     self.final_amount_entry.setStyleSheet("font-size: 20px; font-weight: 700;")
-        
-        
-        
-        
-        
-        
-        
-        
-    #     self.change_entry = QLineEdit("0.00")
-    #     self.change_entry.setReadOnly(True)
-        
-    #     self.remainingdata = QLineEdit("0.00")
-    #     self.remainingdata.setReadOnly(True)
-
-        
-        
-        
-        
-
-    #     self.writeoff_check = QCheckBox("Write-off Remaining")
-    #     self.writeoff_check.setStyleSheet("QCheckBox { color: #333; }")
-
-    #     # -----------------------------
-    #     # Signals
-    #     # -----------------------------
-    #     self.discount_entry.textChanged.connect(self.update_total_amount)
-    #     self.tax_entry.textChanged.connect(self.update_total_amount)
-    #     self.additional_entry.textChanged.connect(self.update_total_amount)
-    #     self.received_entry.textChanged.connect(self.calculate_payment)
-
-
-        
-    #     final_amount_layout = QHBoxLayout()
-        
-        
-    #     final_amount_layout.addWidget(final_amount_label)
-    #     final_amount_layout.addWidget(self.final_amount_entry)
-    #     grid.addLayout(final_amount_layout, 0, 5)
-        
-        
-    #     grid.addWidget(payment_method_label, 2, 0)
-    #     grid.addWidget(self.payment_method,  2, 1)
-        
-        
-        
-        
-
-    #     grid.addWidget(remaining_label, 2, 5)
-    #     grid.addWidget(self.remainingdata,   2, 6)
-        
-        
-    #     grid.addWidget(self.writeoff_check,  3, 6)
-        
-
-        
-
-    #     # -----------------------------
-    #     # Stretch
-    #     # -----------------------------
-    #     for col in range(7):
-    #         grid.setColumnStretch(col, 1)
-
-        
-        
-        
-        
-    #     totals_layout.addLayout(grid)
-
-    #     # -----------------------------
-    #     # Add totals frame
-    #     # -----------------------------
-    #     self.layout.addWidget(totals_frame, 0)
-
-    #     # -----------------------------
-    #     # Save Button
-    #     # -----------------------------
-    #     save_row = QHBoxLayout()
-    #     addreceipt = QPushButton("Save Sales Receipt", objectName="SaveButton")
-    #     addreceipt.setCursor(Qt.PointingHandCursor)
-    #     addreceipt.clicked.connect(lambda: self.save_receipt())
-    #     save_row.addWidget(addreceipt, 1)
-
-    #     self.layout.addLayout(save_row, 0)
-        
-    
     
     
             
@@ -1121,6 +923,35 @@ class CreateSalesWidget(QWidget):
 
         if hasattr(widget, "selectAll"):
             widget.selectAll()
+
+    def has_auto_price_for_current_row(self):
+        product_data = self.item.currentData()
+        if not isinstance(product_data, dict):
+            return False
+
+        try:
+            unit_price = float(product_data.get("unit_price") or 0.0)
+        except (TypeError, ValueError):
+            unit_price = 0.0
+
+        return unit_price > 0
+
+    def advance_after_qty_entry(self):
+        rate_text = self.rate_edit.text().strip()
+
+        if self.has_auto_price_for_current_row():
+            self.focus_next_field(self.add_line_button)
+            return
+
+        if rate_text:
+            try:
+                if float(rate_text) > 0:
+                    self.focus_next_field(self.add_line_button)
+                    return
+            except ValueError:
+                pass
+
+        self.focus_next_field(self.rate_edit)
         
 
     
@@ -1150,52 +981,25 @@ class CreateSalesWidget(QWidget):
 
 
     def update_line_total(self):
-        
-        qty = self.qty_edit.text()
-        rate = self.rate_edit.text()
-        
-        
-        if qty == '':
-            qty = 0
-            
-        if rate == '':
-            rate = 0.00
-        
-        
-        discount = self.discount.text()
-        
-        if discount == "":
-            discount = 0.00
-        
-        # turn it into flat discount
-        flat_discount = 0.00
-        if discount:
-            try:
-                discount_value = float(discount)
-                subtotal = float(qty) * float(rate)
-                flat_discount = (subtotal * discount_value) / 100
-            except ValueError:
-                pass
-            
-            
-        # calculate tax amount
-        tax = self.tax.text()
-        
-        if tax == "":
-            tax = 0.00
-        
-        tax_amount = 0.00
-        if tax:
-            try:
-                tax_value = float(tax)
-                taxable_amount = (float(qty) * float(rate)) - flat_discount
-                tax_amount = (taxable_amount * tax_value) / 100
-            except ValueError:
-                pass
-        
-        # update the total label
-        total = float(qty) * float(rate) - flat_discount + tax_amount
-        self.amount_edit.setText(f"{total:.2f}")
+        qty_text = self.qty_edit.text().strip() or "0"
+        rate_text = self.rate_edit.text().strip() or "0.00"
+        discount_text = self.discount.text().strip() or "0.00"
+        tax_text = self.tax.text().strip() or "0.00"
+        discount_mode = self.discount_mode_combo.currentData() if hasattr(self, "discount_mode_combo") else "percent"
+
+        try:
+            qty = float(qty_text)
+        except ValueError:
+            qty = 0.0
+
+        try:
+            rate = float(rate_text)
+        except ValueError:
+            rate = 0.0
+
+        resolved = self.resolve_line_pricing(qty, rate, discount_text, discount_mode, tax_text)
+        self.amount_edit.setText(f"{resolved['line_total']:.2f}")
+        self.update_line_pricing_hint()
         
       
 
@@ -1213,6 +1017,86 @@ class CreateSalesWidget(QWidget):
             
         else:
             super().keyPressEvent(event)  # Propagate if not handled
+
+    def resolve_line_pricing(self, qty, rate, discount_text, discount_mode, tax_text):
+        qty = float(qty or 0.0)
+        rate = float(rate or 0.0)
+        subtotal = qty * rate
+
+        try:
+            entered_discount_value = float(discount_text or 0.0)
+        except ValueError:
+            entered_discount_value = 0.0
+
+        entered_discount_value = max(entered_discount_value, 0.0)
+        if discount_mode == "amount":
+            discount_amount = min(entered_discount_value, subtotal)
+            discount_percent = (discount_amount / subtotal * 100.0) if subtotal > 0 else 0.0
+        else:
+            discount_percent = entered_discount_value
+            discount_amount = subtotal * discount_percent / 100.0
+
+        taxable_amount = max(subtotal - discount_amount, 0.0)
+
+        try:
+            tax_percent = float(tax_text or 0.0)
+        except ValueError:
+            tax_percent = 0.0
+        tax_percent = max(tax_percent, 0.0)
+        tax_amount = taxable_amount * tax_percent / 100.0
+        line_total = taxable_amount + tax_amount
+
+        return {
+            "subtotal": subtotal,
+            "discount_percent": discount_percent,
+            "discount_amount": discount_amount,
+            "taxable_amount": taxable_amount,
+            "tax_percent": tax_percent,
+            "tax_amount": tax_amount,
+            "line_total": line_total,
+        }
+
+    def on_line_discount_edited(self):
+        self.line_discount_manual_override = True
+        self.update_line_pricing_hint()
+
+    def on_line_tax_edited(self):
+        self.line_tax_manual_override = True
+        self.update_line_pricing_hint()
+
+    def on_discount_mode_changed(self):
+        if self.current_line_product_defaults:
+            self.line_discount_manual_override = True
+        self.update_line_total()
+
+    def apply_current_line_product_defaults(self, product_data):
+        self.current_line_product_defaults = dict(product_data or {})
+        self.line_discount_manual_override = False
+        self.line_tax_manual_override = False
+
+        self.discount_mode_combo.blockSignals(True)
+        self.discount_mode_combo.setCurrentIndex(self.discount_mode_combo.findData("percent"))
+        self.discount_mode_combo.blockSignals(False)
+
+        self.discount.setText(f"{float(self.current_line_product_defaults.get('discount_percent', 0.0) or 0.0):.2f}")
+        self.tax.setText(f"{float(self.current_line_product_defaults.get('tax_percent', 0.0) or 0.0):.2f}")
+        self.update_line_pricing_hint()
+        self.update_line_total()
+
+    def reset_current_line_defaults(self):
+        if not self.current_line_product_defaults:
+            self.discount_mode_combo.blockSignals(True)
+            self.discount_mode_combo.setCurrentIndex(self.discount_mode_combo.findData("percent"))
+            self.discount_mode_combo.blockSignals(False)
+            self.discount.setText("0.00")
+            self.tax.setText("0.00")
+            self.line_discount_manual_override = False
+            self.line_tax_manual_override = False
+            self.update_line_pricing_hint()
+            self.update_line_total()
+            return
+
+        self.apply_current_line_product_defaults(self.current_line_product_defaults)
     
     
     
@@ -1341,13 +1225,13 @@ class CreateSalesWidget(QWidget):
         
         if product_name == '':
             print("Please Select a product first")
-            QMessageBox.information(self, 'Error', "Please Select a product first")
+            AppMessageBox.information(self, 'Error', "Please Select a product first")
             QTimer.singleShot(0, lambda: self.item.lineEdit().setFocus())
             return
         
         elif product_id is None:
             print("Entered product is not available... Please Add this product first")
-            QMessageBox.information(self, 'Error', "Entered product is not available... Please Add this product first")
+            AppMessageBox.information(self, 'Error', "Entered product is not available... Please Add this product first")
             QTimer.singleShot(0, lambda: self.item.lineEdit().setFocus())
             return
 
@@ -1378,6 +1262,10 @@ class CreateSalesWidget(QWidget):
         discount_data = self.discount.text()
         tax_data = self.tax.text()
         total_data = self.amount_edit.text()
+        discount_mode = self.discount_mode_combo.currentData() if hasattr(self, "discount_mode_combo") else "percent"
+        resolved = self.resolve_line_pricing(qty_data or 0, rate_data or 0, discount_data or 0, discount_mode, tax_data or 0)
+        discount_source = "manual_override" if self.line_discount_manual_override else "product_default"
+        tax_source = "manual_override" if self.line_tax_manual_override else "product_default"
         
         if discount_data == '':
             discount_data = '0'
@@ -1405,10 +1293,33 @@ class CreateSalesWidget(QWidget):
         discount = QLineEdit()
         discount.setReadOnly(True)
         discount.setText(discount_data)
+        discount.setProperty("discount_input_mode", discount_mode)
+        discount.setProperty("discount_percent_applied", resolved["discount_percent"])
+        discount.setProperty("discount_amount_applied", resolved["discount_amount"])
+        discount.setProperty(
+            "default_discount_group_id",
+            self.current_line_product_defaults.get("discount_group_id")
+        )
+        discount.setProperty(
+            "discount_group_id",
+            self.current_line_product_defaults.get("discount_group_id") if not self.line_discount_manual_override else None
+        )
+        discount.setProperty("discount_source", discount_source)
         
         tax = QLineEdit()
         tax.setReadOnly(True)
         tax.setText(tax_data)
+        tax.setProperty("tax_percent_applied", resolved["tax_percent"])
+        tax.setProperty("tax_amount_applied", resolved["tax_amount"])
+        tax.setProperty(
+            "default_tax_group_id",
+            self.current_line_product_defaults.get("tax_group_id")
+        )
+        tax.setProperty(
+            "tax_group_id",
+            self.current_line_product_defaults.get("tax_group_id") if not self.line_tax_manual_override else None
+        )
+        tax.setProperty("tax_source", tax_source)
         
         amount_edit = QLineEdit()
         amount_edit.setReadOnly(True)
@@ -1431,10 +1342,18 @@ class CreateSalesWidget(QWidget):
         self.discount.clear()
         self.tax.clear()
         self.amount_edit.setText("0.00")
+        self.discount_mode_combo.blockSignals(True)
+        self.discount_mode_combo.setCurrentIndex(self.discount_mode_combo.findData("percent"))
+        self.discount_mode_combo.blockSignals(False)
+        self.current_line_product_defaults = {}
+        self.line_discount_manual_override = False
+        self.line_tax_manual_override = False
+        self.update_line_pricing_hint()
         
         
         
-        self.item.setFocus()
+        self.item.lineEdit().setFocus()
+        self.item.lineEdit().selectAll()
         self.update_total_amount()
         
        
@@ -1560,7 +1479,9 @@ class CreateSalesWidget(QWidget):
                 name = str(query.value(1)).strip()
                 self.customer.addItem(name, customer_id)
         else:
-            QMessageBox.information(self, "Error", query.lastError().text())
+            AppMessageBox.information(self, "Error", query.lastError().text())
+
+        self.update_customer_credit_summary()
     
     
     
@@ -1603,6 +1524,144 @@ class CreateSalesWidget(QWidget):
         
         customer = self.customer.currentData()
         return customer
+
+    def on_discount_entry_edited(self):
+        self.discount_group_manual_override = True
+        self.refresh_customer_pricing_summary()
+
+    def on_tax_entry_edited(self):
+        self.tax_group_manual_override = True
+        self.refresh_customer_pricing_summary()
+
+    def update_customer_credit_summary(self):
+        if not hasattr(self, "customer_credit_summary"):
+            return
+
+        customer_id = self.get_customer_id()
+        if customer_id is None:
+            self.customer_credit_summary.setText(
+                "Credit Summary: Walk-in customer | Credit limit not applied"
+            )
+            return
+
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT
+                COALESCE(name, 'Walk-in Customer'),
+                COALESCE(receiveable, 0),
+                COALESCE(credit_limit, 0)
+            FROM customer
+            WHERE id = ?
+        """)
+        query.addBindValue(customer_id)
+
+        if not query.exec() or not query.next():
+            self.customer_credit_summary.setText("Credit Summary: Unable to load customer credit position")
+            return
+
+        customer_name = str(query.value(0) or "")
+        receivable = float(query.value(1) or 0.0)
+        credit_limit = float(query.value(2) or 0.0)
+
+        if credit_limit <= 0:
+            self.customer_credit_summary.setText(
+                f"Credit Summary: {customer_name} | Receivable {receivable:,.2f} | No credit limit"
+            )
+            return
+
+        available_credit = credit_limit - receivable
+        utilization_pct = (receivable / credit_limit * 100.0) if credit_limit > 0 else 0.0
+        self.customer_credit_summary.setText(
+            f"Credit Summary: {customer_name} | Limit {credit_limit:,.2f} | "
+            f"Receivable {receivable:,.2f} | Available {available_credit:,.2f} | "
+            f"Utilization {utilization_pct:,.1f}%"
+        )
+
+    def apply_customer_pricing_groups(self):
+        customer_id = self.get_customer_id()
+        has_pricing_fields = hasattr(self, "discount_entry") and hasattr(self, "tax_entry")
+
+        self.discount_group_manual_override = False
+        self.tax_group_manual_override = False
+        self.active_discount_group_id = None
+        self.active_discount_group_name = ""
+        self.active_discount_percent = 0.0
+        self.active_tax_group_id = None
+        self.active_tax_group_name = ""
+        self.active_tax_percent = 0.0
+
+        if customer_id is None:
+            if has_pricing_fields:
+                self.discount_entry.blockSignals(True)
+                self.tax_entry.blockSignals(True)
+                self.discount_entry.setText("0.00")
+                self.tax_entry.setText("0.00")
+                self.discount_entry.blockSignals(False)
+                self.tax_entry.blockSignals(False)
+            self.refresh_customer_pricing_summary()
+            if has_pricing_fields:
+                self.update_total_amount()
+            return
+
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT
+                dg.id,
+                COALESCE(dg.name, ''),
+                COALESCE(dg.discount_percent, 0),
+                tg.id,
+                COALESCE(tg.name, ''),
+                COALESCE(tg.tax_percent, 0)
+            FROM customer c
+            LEFT JOIN discount_group dg ON dg.id = c.discount_group_id
+            LEFT JOIN tax_group tg ON tg.id = c.tax_group_id
+            WHERE c.id = ?
+        """)
+        query.addBindValue(customer_id)
+
+        if query.exec() and query.next():
+            self.active_discount_group_id = query.value(0)
+            self.active_discount_group_name = str(query.value(1) or "")
+            self.active_discount_percent = float(query.value(2) or 0.0)
+            self.active_tax_group_id = query.value(3)
+            self.active_tax_group_name = str(query.value(4) or "")
+            self.active_tax_percent = float(query.value(5) or 0.0)
+
+        if has_pricing_fields and self.active_discount_group_id is None:
+            self.discount_entry.blockSignals(True)
+            self.discount_entry.setText("0.00")
+            self.discount_entry.blockSignals(False)
+
+        if has_pricing_fields and self.active_tax_group_id is None:
+            self.tax_entry.blockSignals(True)
+            self.tax_entry.setText("0.00")
+            self.tax_entry.blockSignals(False)
+
+        self.refresh_customer_pricing_summary()
+        if has_pricing_fields:
+            self.update_total_amount()
+
+    def refresh_customer_pricing_summary(self):
+        if not hasattr(self, "customer_pricing_summary"):
+            return
+
+        discount_label = (
+            f"{self.active_discount_group_name} ({self.active_discount_percent:.2f}%)"
+            if self.active_discount_group_id is not None and self.active_discount_group_name
+            else "None"
+        )
+        tax_label = (
+            f"{self.active_tax_group_name} ({self.active_tax_percent:.2f}%)"
+            if self.active_tax_group_id is not None and self.active_tax_group_name
+            else "None"
+        )
+
+        discount_mode = "Manual Override" if self.discount_group_manual_override else "Auto"
+        tax_mode = "Manual Override" if self.tax_group_manual_override else "Auto"
+
+        self.customer_pricing_summary.setText(
+            f"Pricing Defaults: Discount {discount_label} [{discount_mode}] | Tax {tax_label} [{tax_mode}]"
+        )
         
         
         
@@ -1617,7 +1676,7 @@ class CreateSalesWidget(QWidget):
         if query.exec() and query.next():
             return query.value(0)
         else:
-            QMessageBox.information(None, 'Error', query.lastError().text() )
+            AppMessageBox.information(None, 'Error', query.lastError().text() )
             self.close()                # Close main window
             QApplication.quit()
             return None    
@@ -1645,23 +1704,25 @@ class CreateSalesWidget(QWidget):
             tax = to_float(self.tax_entry.text())
             net_amount = to_float(self.net_amount_entry.text())
             additional_charges = to_float(self.additional_entry.text())
-            total = to_float(self.net_amount_entry.text())
+            total = to_float(self.final_amount_entry.text())
             received = to_float(self.received_entry.text())
             remaining = to_float(self.remainingdata.text())
+            
+            due_date = None  # Will be set if receiveable amount exists
 
             # --- Basic Validation ---
             if total < 0:
-                QMessageBox.warning(self, "Validation Error", "Total cannot be negative.")
+                AppMessageBox.warning(self, "Validation Error", "Total cannot be negative.")
                 return None
 
             if received < 0:
-                QMessageBox.warning(self, "Validation Error", "Received amount cannot be negative.")
+                AppMessageBox.warning(self, "Validation Error", "Received amount cannot be negative.")
                 return None
 
-            session_id = get_current_session(self)
+            session_id = get_active_session_id(strict=True)
             
             if session_id is None:
-                QMessageBox.warning(self, "Validation Error", "No active session found.")
+                AppMessageBox.warning(self, "Validation Error", "No active session found.")
                 return None
 
             writeoff = payable = receiveable = 0.0
@@ -1669,21 +1730,27 @@ class CreateSalesWidget(QWidget):
             if remaining > 0:
                 if self.writeoff_check.isChecked():
                     writeoff = remaining
+                    due_date = None
                 else:
                     if customer_id is None:
-                        QMessageBox.information(
+                        AppMessageBox.warning(
                             self,
                             "Error",
                             "Walk-In Customer Can't Have Remaining Amount\nReceive Full amount or Write off"
                         )
                         return None
                     receiveable = remaining
+                    due_date = self.compute_due_date()
 
             elif remaining < 0:
                 payable = abs(remaining)
 
             if customer_id is None:
                 payable = receiveable = 0.0
+                due_date = None
+
+            if not self.confirm_customer_credit_limit(customer_id, receiveable):
+                return None
 
             print("Writeoff:", writeoff)
             print("Payable:", payable)
@@ -1694,8 +1761,8 @@ class CreateSalesWidget(QWidget):
                 INSERT INTO sales
                 (customer, salesman, subtotal, discount, taxable, tax,
                 net_amount, additional_charges, total, received,
-                remaining, writeoff, payable, receiveable, session_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                remaining, writeoff, payable, receiveable, session_id, due_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
 
     
@@ -1715,9 +1782,10 @@ class CreateSalesWidget(QWidget):
             query.addBindValue(payable)
             query.addBindValue(receiveable)
             query.addBindValue(session_id)
+            query.addBindValue(due_date)
 
             if not query.exec():
-                QMessageBox.critical(self, "Database Error", query.lastError().text())
+                AppMessageBox.error(self, "Database Error", query.lastError().text())
                 return None
 
             sales_id = query.lastInsertId()
@@ -1733,8 +1801,61 @@ class CreateSalesWidget(QWidget):
             return sales_id
 
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            AppMessageBox.error(self, "Error", str(e))
             return None
+
+    def confirm_customer_credit_limit(self, customer_id, additional_receivable):
+        if customer_id is None:
+            return True
+
+        additional_receivable = float(additional_receivable or 0.0)
+        if additional_receivable <= 0:
+            return True
+
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT
+                COALESCE(name, 'Walk-in Customer'),
+                COALESCE(receiveable, 0),
+                COALESCE(credit_limit, 0)
+            FROM customer
+            WHERE id = ?
+        """)
+        query.addBindValue(customer_id)
+
+        if not query.exec() or not query.next():
+            AppMessageBox.warning(self, "Credit Limit", "Could not load customer credit information.")
+            return False
+
+        customer_name = str(query.value(0) or "")
+        current_receivable = float(query.value(1) or 0.0)
+        credit_limit = float(query.value(2) or 0.0)
+
+        if credit_limit <= 0:
+            return True
+
+        projected_receivable = current_receivable + additional_receivable
+        if projected_receivable <= credit_limit:
+            return True
+
+        available_credit = credit_limit - current_receivable
+        _, accepted = AppMessageBox.confirm(
+            self,
+            "Credit Limit Warning",
+            (
+                f"{customer_name} will exceed the configured credit limit.\n\n"
+                f"Credit Limit: {credit_limit:,.2f}\n"
+                f"Current Receivable: {current_receivable:,.2f}\n"
+                f"Available Credit: {available_credit:,.2f}\n"
+                f"New Credit Exposure: {additional_receivable:,.2f}\n"
+                f"Projected Receivable: {projected_receivable:,.2f}\n\n"
+                "Do you want to continue with this sale?"
+            ),
+            confirm_label="Save Anyway",
+            cancel_label="Cancel",
+            kind="warning",
+        )
+        return accepted
         
     
     
@@ -1781,9 +1902,9 @@ class CreateSalesWidget(QWidget):
             payable_after = payable_before + payable_now
             receiveable_after = receiveable_before + receiveable_now
 
-        session_id = get_current_session(self)
+        session_id = get_active_session_id(strict=True)
         if session_id is None:
-            QMessageBox.warning(self, "Validation Error", "No active session found.")
+            AppMessageBox.warning(self, "Validation Error", "No active session found.")
             return None
 
         payment = self.payment_handler.payment_data.copy()
@@ -1865,32 +1986,198 @@ class CreateSalesWidget(QWidget):
         
         
     def thermal_receipt_printer(self, sales_id):
+        filename = "salesinvoice_thermal.pdf"
+        return self.export_thermal_pdf(filename=filename, sales_id=sales_id)
+    
+    
+    def export_thermal_pdf(self, filename=None, sales_id=None, paper_width_mm=80.0):
         
-        # get business
+        print("Exporting thermal PDF")
+        print("Sales id is:", sales_id)
+
+        if sales_id is None:
+            print("Cannot export thermal PDF without sales_id.")
+            return None
+
+        if filename is None:
+            filename = "salesinvoice_thermal.pdf"
+
+        if os.path.exists(filename):
+            try:
+                os.remove(filename)
+            except Exception as e:
+                print("Could not remove old thermal pdf:", e)
+
+        # ---------------------------
+        # Fetch business information
+        # ---------------------------
+        business_name = "Business"
+        address = "-"
+        contact = "-"
+
         business_query = QSqlQuery()
         business_query.prepare("""
-                                SELECT businessname, address, contact from business where id = ? ;
-                               """)
-        business_query.addBindValue(1)
-        
-        
+            SELECT businessname, address, contact
+            FROM business
+            WHERE id = 1
+            LIMIT 1
+        """)
         if business_query.exec() and business_query.next():
+            business_name = str(business_query.value(0) or business_name)
+            address = str(business_query.value(1) or address)
+            contact = str(business_query.value(2) or contact)
 
-            businessname = business_query.value(0)
-            address = business_query.value(1)
-            contact = business_query.value(2)
-            
-            business = {
-                "name": businessname,
-                "address": address,
-                "contact": contact
-            }
-            
-            
-        
-        else:
-            
-            print("Error Fetching Business ", business_query.lastError().text())
+        # ---------------------------
+        # Fetch sales header details
+        # ---------------------------
+        header_query = QSqlQuery()
+        header_query.prepare("""
+            SELECT
+                s.id,
+                s.creation_date,
+                s.subtotal,
+                s.discount,
+                s.tax,
+                s.total,
+                COALESCE(c.name, 'Walk-In Customer')
+            FROM sales s
+            LEFT JOIN customer c ON c.id = s.customer
+            WHERE s.id = ?
+            LIMIT 1
+        """)
+        header_query.addBindValue(sales_id)
+        if not header_query.exec() or not header_query.next():
+            print("Failed to fetch sales header:", header_query.lastError().text())
+            return None
+
+        invoice_no = str(header_query.value(0) or sales_id)
+        invoice_date = str(header_query.value(1) or "")
+        sales_subtotal = float(header_query.value(2) or 0.0)
+        sales_discount = float(header_query.value(3) or 0.0)
+        sales_tax = float(header_query.value(4) or 0.0)
+        sales_total = float(header_query.value(5) or 0.0)
+        customer_name = str(header_query.value(6) or "Walk-In Customer")
+
+        # ---------------------------
+        # Fetch sale items
+        # ---------------------------
+        items = []
+        item_query = QSqlQuery()
+        item_query.prepare("""
+            SELECT
+                p.display_name,
+                si.qty_sold,
+                si.unit_price,
+                si.discount,
+                si.line_total
+            FROM salesitem si
+            JOIN product p ON p.id = si.product_id
+            WHERE si.sales_id = ?
+            ORDER BY si.id
+        """)
+        item_query.addBindValue(sales_id)
+
+        if not item_query.exec():
+            print("Failed to fetch sale items:", item_query.lastError().text())
+            return None
+
+        while item_query.next():
+            items.append({
+                "name": str(item_query.value(0) or ""),
+                "qty": int(item_query.value(1) or 0),
+                "unit_price": float(item_query.value(2) or 0.0),
+                "discount": float(item_query.value(3) or 0.0),
+                "line_total": float(item_query.value(4) or 0.0),
+            })
+
+        # ---------------------------
+        # Build thermal-size PDF
+        # ---------------------------
+        base_height_mm = 95.0
+        per_item_height_mm = 8.0
+        page_height_mm = max(120.0, base_height_mm + len(items) * per_item_height_mm)
+
+        pdf = QPdfWriter(filename)
+        pdf.setResolution(203)
+        pdf.setPageSize(QPageSize(QSizeF(float(paper_width_mm), page_height_mm), QPageSize.Millimeter))
+
+        painter = QPainter(pdf)
+        painter.setPen(Qt.black)
+
+        page_width = pdf.width()
+        margin = 24
+        right = page_width - margin
+        y = 34
+        line_h = 30
+
+        def center_text(text, font):
+            nonlocal y
+            painter.setFont(font)
+            option = QTextOption()
+            option.setAlignment(Qt.AlignHCenter)
+            painter.drawText(QRectF(margin, y, page_width - (2 * margin), line_h), text, option)
+            y += line_h
+
+        center_text(business_name, QFont("Courier New", 10, QFont.Bold))
+        center_text(address, QFont("Courier New", 8))
+        center_text(f"Phone: {contact}", QFont("Courier New", 8))
+        y += 4
+
+        painter.setFont(QFont("Courier New", 8))
+        painter.drawText(margin, y, f"Invoice: {invoice_no}")
+        y += line_h - 8
+        painter.drawText(margin, y, f"Date: {invoice_date}")
+        y += line_h - 8
+        painter.drawText(margin, y, f"Customer: {customer_name}")
+        y += line_h
+
+        painter.drawLine(margin, y, right, y)
+        y += line_h - 8
+        painter.drawText(margin, y, "Item")
+        painter.drawText(right - 120, y, "Qty")
+        painter.drawText(right - 30, y, "Total")
+        y += line_h - 8
+        painter.drawLine(margin, y, right, y)
+        y += line_h - 4
+
+        for row in items:
+            name = row["name"][:32]
+            qty = row["qty"]
+            total = row["line_total"]
+            unit_price = row["unit_price"]
+
+            painter.drawText(margin, y, name)
+            y += line_h - 10
+            painter.drawText(margin + 8, y, f"{qty} x {unit_price:.2f}")
+            painter.drawText(right - 120, y, str(qty))
+            painter.drawText(right - 55, y, f"{total:.2f}")
+            y += line_h - 2
+
+        painter.drawLine(margin, y, right, y)
+        y += line_h
+
+        painter.setFont(QFont("Courier New", 9))
+        painter.drawText(margin, y, "Sub Total")
+        painter.drawText(right - 95, y, f"{sales_subtotal:.2f}")
+        y += line_h - 6
+        painter.drawText(margin, y, "Discount")
+        painter.drawText(right - 95, y, f"{sales_discount:.2f}")
+        y += line_h - 6
+        painter.drawText(margin, y, "Sales Tax")
+        painter.drawText(right - 95, y, f"{sales_tax:.2f}")
+        y += line_h - 4
+        painter.drawLine(margin, y, right, y)
+        y += line_h
+
+        painter.setFont(QFont("Courier New", 10, QFont.Bold))
+        painter.drawText(margin, y, "Total")
+        painter.drawText(right - 95, y, f"{sales_total:.2f}")
+        y += line_h
+
+        center_text("Thank you for your purchase", QFont("Courier New", 8))
+
+        painter.end()
+        return filename
         
         
       
@@ -1927,6 +2214,18 @@ class CreateSalesWidget(QWidget):
                 SELECT COALESCE(SUM(quantity_remaining), 0)
                 FROM batch
                 WHERE product_id = ?
+                AND quantity_remaining > 0
+                AND (
+                    expiry_date IS NULL
+                    OR (
+                        CASE
+                            WHEN expiry_date LIKE '____-__-__' THEN date(expiry_date)
+                            WHEN expiry_date LIKE '__-__-____'
+                                THEN date(substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2))
+                            ELSE NULL
+                        END
+                    ) >= date('now', 'localtime')
+                )
             """)
             query.addBindValue(product_id)
 
@@ -1938,14 +2237,20 @@ class CreateSalesWidget(QWidget):
 
         def insert_sales_item_record(
             sales_id, product_id, qty, rate, discount, tax,
+            discount_amount, tax_amount, discount_input_mode,
+            default_discount_group_id, default_tax_group_id,
+            discount_group_id, tax_group_id, discount_source, tax_source,
             line_total, line_weight, effective_line_total
         ):
             query = QSqlQuery()
             query.prepare("""
                 INSERT INTO salesitem
                 (sales_id, product_id, qty_sold, unit_price,
-                discount, tax, line_total, line_weight, effective_line_total)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                discount, tax, discount_amount, tax_amount, discount_input_mode,
+                default_discount_group_id, default_tax_group_id,
+                discount_group_id, tax_group_id, discount_source, tax_source,
+                line_total, line_weight, effective_line_total)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
             query.addBindValue(sales_id)
             query.addBindValue(product_id)
@@ -1953,6 +2258,15 @@ class CreateSalesWidget(QWidget):
             query.addBindValue(rate)
             query.addBindValue(discount)
             query.addBindValue(tax)
+            query.addBindValue(discount_amount)
+            query.addBindValue(tax_amount)
+            query.addBindValue(discount_input_mode)
+            query.addBindValue(default_discount_group_id)
+            query.addBindValue(default_tax_group_id)
+            query.addBindValue(discount_group_id)
+            query.addBindValue(tax_group_id)
+            query.addBindValue(discount_source)
+            query.addBindValue(tax_source)
             query.addBindValue(line_total)
             query.addBindValue(line_weight)
             query.addBindValue(effective_line_total)
@@ -1971,6 +2285,17 @@ class CreateSalesWidget(QWidget):
                 FROM batch
                 WHERE product_id = ?
                 AND quantity_remaining > 0
+                AND (
+                    expiry_date IS NULL
+                    OR (
+                        CASE
+                            WHEN expiry_date LIKE '____-__-__' THEN date(expiry_date)
+                            WHEN expiry_date LIKE '__-__-____'
+                                THEN date(substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2))
+                            ELSE NULL
+                        END
+                    ) >= date('now', 'localtime')
+                )
                 ORDER BY received_at ASC, id ASC
             """)
             batch_query.addBindValue(product_id)
@@ -2079,9 +2404,20 @@ class CreateSalesWidget(QWidget):
 
             qty = to_int(text_from_widget(qty_widget, "quantity", row), "quantity", row)
             rate = to_float(text_from_widget(rate_widget, "rate", row), "rate", row)
-            discount = to_float(text_from_widget(discount_widget, "discount", row), "discount", row)
-            tax = to_float(text_from_widget(tax_widget, "tax", row), "tax", row)
+            discount_display = to_float(text_from_widget(discount_widget, "discount", row), "discount", row)
+            tax_display = to_float(text_from_widget(tax_widget, "tax", row), "tax", row)
             line_total = to_float(text_from_widget(total_widget, "line total", row), "line total", row)
+            discount_input_mode = str(discount_widget.property("discount_input_mode") or "percent")
+            discount_percent = float(discount_widget.property("discount_percent_applied") or discount_display or 0.0)
+            discount_amount = float(discount_widget.property("discount_amount_applied") or 0.0)
+            tax_percent = float(tax_widget.property("tax_percent_applied") or tax_display or 0.0)
+            tax_amount = float(tax_widget.property("tax_amount_applied") or 0.0)
+            default_discount_group_id = discount_widget.property("default_discount_group_id")
+            default_tax_group_id = tax_widget.property("default_tax_group_id")
+            discount_group_id = discount_widget.property("discount_group_id")
+            tax_group_id = tax_widget.property("tax_group_id")
+            discount_source = str(discount_widget.property("discount_source") or "manual_override")
+            tax_source = str(tax_widget.property("tax_source") or "manual_override")
 
             if qty <= 0:
                 raise Exception(f"Row {row + 1}: Quantity must be greater than zero.")
@@ -2089,10 +2425,10 @@ class CreateSalesWidget(QWidget):
             if rate < 0:
                 raise Exception(f"Row {row + 1}: Rate cannot be negative.")
 
-            if discount < 0:
+            if discount_percent < 0 or discount_amount < 0:
                 raise Exception(f"Row {row + 1}: Discount cannot be negative.")
 
-            if tax < 0:
+            if tax_percent < 0 or tax_amount < 0:
                 raise Exception(f"Row {row + 1}: Tax cannot be negative.")
 
             if line_total < 0:
@@ -2118,8 +2454,10 @@ class CreateSalesWidget(QWidget):
                 "Product ID:", product_id,
                 "Qty:", qty,
                 "Rate:", rate,
-                "Discount:", discount,
-                "Tax:", tax,
+                "Discount %:", discount_percent,
+                "Discount Amount:", discount_amount,
+                "Tax %:", tax_percent,
+                "Tax Amount:", tax_amount,
                 "Line Total:", line_total,
                 "Effective Line Total:", effective_line_total
             )
@@ -2135,8 +2473,17 @@ class CreateSalesWidget(QWidget):
                 product_id=product_id,
                 qty=qty,
                 rate=rate,
-                discount=discount,
-                tax=tax,
+                discount=discount_percent,
+                tax=tax_percent,
+                discount_amount=discount_amount,
+                tax_amount=tax_amount,
+                discount_input_mode=discount_input_mode,
+                default_discount_group_id=default_discount_group_id,
+                default_tax_group_id=default_tax_group_id,
+                discount_group_id=discount_group_id,
+                tax_group_id=tax_group_id,
+                discount_source=discount_source,
+                tax_source=tax_source,
                 line_total=line_total,
                 line_weight=line_weight,
                 effective_line_total=effective_line_total
@@ -2165,55 +2512,101 @@ class CreateSalesWidget(QWidget):
 
             # get salesorder data
             customer = self.customer.currentData()
+            salesman = self.get_salesman_id()
             status = 'On Hold'
+            subtotal = float(self.gross_entry.text() or 0.0)
+            discount_amount = float(self.discount_entry.text() or 0.0)
+            taxable_amount = float(self.taxable_entry.text() or 0.0)
+            tax_amount = float(self.tax_entry.text() or 0.0)
+            additional_charges = float(self.additional_entry.text() or 0.0)
+            final_amount = float(self.final_amount_entry.text() or 0.0)
+            received_amount = float(self.received_entry.text() or 0.0)
+            remaining_amount = float(self.remainingdata.text() or 0.0)
+            payment_method = self.payment_method.currentText() if hasattr(self, "payment_method") else "Cash"
+            due_date = self.compute_due_date()
             
             print("Customer is: ", customer)
             
             if customer == 0:
                 customer = None
 
-            # inserting sales into holdsales table
-            
+            # inserting or updating hold sale
+            hold_id = self.current_hold_sale_id
             hold_query = QSqlQuery()
-            hold_query.prepare("""
-                INSERT INTO holdsale (customer, salesman, status)
-                VALUES (?, ?, ?)
-            """)
+
+            if hold_id is not None:
+                hold_query.prepare("""
+                    UPDATE holdsale
+                    SET customer = ?, salesman = ?, status = ?,
+                        subtotal = ?, discount_amount = ?, taxable_amount = ?, tax_amount = ?,
+                        additional_charges = ?, final_amount = ?, received_amount = ?,
+                        remaining_amount = ?, payment_method = ?, due_date = ?
+                    WHERE id = ?
+                """)
+            else:
+                hold_query.prepare("""
+                    INSERT INTO holdsale (
+                        customer, salesman, status,
+                        subtotal, discount_amount, taxable_amount, tax_amount,
+                        additional_charges, final_amount, received_amount,
+                        remaining_amount, payment_method, due_date
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """)
 
             hold_query.addBindValue(customer)
             hold_query.addBindValue(salesman)
             hold_query.addBindValue(status)
+            hold_query.addBindValue(subtotal)
+            hold_query.addBindValue(discount_amount)
+            hold_query.addBindValue(taxable_amount)
+            hold_query.addBindValue(tax_amount)
+            hold_query.addBindValue(additional_charges)
+            hold_query.addBindValue(final_amount)
+            hold_query.addBindValue(received_amount)
+            hold_query.addBindValue(remaining_amount)
+            hold_query.addBindValue(payment_method)
+            hold_query.addBindValue(due_date)
+            if hold_id is not None:
+                hold_query.addBindValue(int(hold_id))
             
             if hold_query.exec():
 
                 print("Sales on Hold Running...")
-                hold_id = hold_query.lastInsertId()
+                if hold_id is None:
+                    hold_id = int(hold_query.lastInsertId())
+                else:
+                    clear_items_query = QSqlQuery()
+                    clear_items_query.prepare("DELETE FROM holditems WHERE holdsale = ?")
+                    clear_items_query.addBindValue(int(hold_id))
+                    if not clear_items_query.exec():
+                        raise Exception(clear_items_query.lastError().text())
+
+                self.current_hold_sale_id = int(hold_id)
                 print("Sales ID is: ", hold_id)
-                
-                
+
                 # save hold items
                 self.hold_sales_items(hold_id)
-                
-                
+
             else:
                 print("Error inserting sales on hold:", hold_query.lastError().text())
-                QMessageBox.critical(self, "Error", hold_query.lastError().text())
+                AppMessageBox.error(self, "Error", hold_query.lastError().text())
                 raise Exception
 
         
         
-        except Exception:
+        except Exception as exc:
             
             print("rolling back transactions")
             db.rollback()
-            QMessageBox.information(self, "Error", "Database error - rolling back Transactions")
+            AppMessageBox.error(self, "Error", f"Database error - rolling back transactions.\n\n{exc}")
             
         else:
             
             db.commit()
             print("Transaction committed successfully")
             self.clear_fields()
-            QMessageBox.information(None, "Success", "Sales Hold saved successfully")
+            AppMessageBox.success(self, "Success", "Sales Hold saved successfully")
         
         
         
@@ -2236,19 +2629,26 @@ class CreateSalesWidget(QWidget):
                 print("Row is empty ... ignoring it...")
                 continue
 
-            product_id = product_widget.currentData()
-            product_id = int(product_id)
+            product_id = self.extract_product_id(product_widget.currentData())
+            if product_id is None:
+                continue
             items_exits = True
             
             hold_id = int(hold_id)
             
             print("Current Data is: ", product_id)
             
-            qty = int(self.table.cellWidget(row, 3).text())
-            rate = float(self.table.cellWidget(row, 4).text())
-            discount = float(self.table.cellWidget(row, 5).text())
-            discountamount = float(self.table.cellWidget(row, 6).text())
-            total = float(self.table.cellWidget(row, 7).text())
+            qty = int(float(self.table.cellWidget(row, 2).text() or 0))
+            rate = float(self.table.cellWidget(row, 3).text() or 0.0)
+            discount_widget = self.table.cellWidget(row, 4)
+            tax_widget = self.table.cellWidget(row, 5)
+            total_widget = self.table.cellWidget(row, 6)
+            discount = float(discount_widget.property("discount_percent_applied") or discount_widget.text() or 0.0)
+            discountamount = float(discount_widget.property("discount_amount_applied") or 0.0)
+            tax = float(tax_widget.property("tax_percent_applied") or tax_widget.text() or 0.0)
+            taxamount = float(tax_widget.property("tax_amount_applied") or 0.0)
+            discount_input_mode = str(discount_widget.property("discount_input_mode") or "percent")
+            total = float(total_widget.text() or 0.0)
             
             
             print("we have reached here...")
@@ -2256,8 +2656,11 @@ class CreateSalesWidget(QWidget):
             # Insert sales item
             item_query = QSqlQuery()
             item_query.prepare("""
-                INSERT INTO holditems (holdsale, product, qty, unitrate, discount, discountamount, total)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO holditems (
+                    holdsale, product, qty, unitrate, discount,
+                    discountamount, tax, taxamount, discount_input_mode, total
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
 
             item_query.addBindValue(hold_id)
@@ -2266,6 +2669,9 @@ class CreateSalesWidget(QWidget):
             item_query.addBindValue(rate)
             item_query.addBindValue(discount)
             item_query.addBindValue(discountamount)
+            item_query.addBindValue(tax)
+            item_query.addBindValue(taxamount)
+            item_query.addBindValue(discount_input_mode)
             item_query.addBindValue(total)
             
             if not item_query.exec():
@@ -2288,8 +2694,7 @@ class CreateSalesWidget(QWidget):
     
     
     def load_hold_items(self):
-        
-        pass
+        self.load_hold_orders()
         
         
         
@@ -2298,10 +2703,15 @@ class CreateSalesWidget(QWidget):
         
     
     #  Saving Sales Receipt
+    @Permissions.require_permission('sales.create')
     def save_receipt(self):
-        
+        if not require_open_session(self):
+            return
+
         db = QSqlDatabase.database()
-        db.transaction()
+        if not db.transaction():
+            AppMessageBox.error(self, "Database Error", "Could not start sales transaction.")
+            return
         
         try: 
         
@@ -2309,112 +2719,332 @@ class CreateSalesWidget(QWidget):
             sales_id = self.insert_salesreceipt()
             
             if sales_id is None:
-                
-                raise Exception
+                raise Exception("Sales receipt header was not saved.")
             # Insert Sales Items
             self.insert_salesitems(sales_id)
             
         
-        except Exception:
+        except Exception as exc:
             
             print("rolling back transactions")
             db.rollback()
-            QMessageBox.information(self, "Error", "Database error - rolling back Transactions")
+            AppMessageBox.error(self, "Error", f"Database error - rolling back transactions.\n\n{exc}")
             
         else:
             
-            db.commit()
+            if not db.commit():
+                db.rollback()
+                AppMessageBox.error(self, "Error", "Failed to commit sales transaction.")
+                return
+
             print("Transaction committed successfully")
+
+            standard_pdf = self.export_pdf(
+                filename="salesinvoice.pdf",
+                sales_id=sales_id
+            )
+            thermal_pdf = self.export_thermal_pdf(
+                filename="salesinvoice_thermal.pdf",
+                sales_id=sales_id
+            )
+
+            if standard_pdf:
+                print("Standard invoice PDF generated:", standard_pdf)
+            if thermal_pdf:
+                print("Thermal invoice PDF generated:", thermal_pdf)
+
+            if not self.auto_print_check.isChecked():
+                print("Auto Print is OFF. PDFs generated without printing.")
+            else:
+                printer_info = self.get_printer_info()
+                if not printer_info.get("attached", False):
+                    print("No printer detected. PDFs generated but printing skipped.")
+                else:
+                    is_thermal = printer_info.get("is_thermal", False)
+                    printer_name = printer_info.get("name")
+
+                    if is_thermal and thermal_pdf:
+                        print("Thermal printer detected:", printer_name)
+                        self.print_pdf(thermal_pdf, printer_name=printer_name)
+                    elif standard_pdf:
+                        print("Standard printer detected:", printer_name)
+                        self.print_pdf(standard_pdf, printer_name=printer_name)
+                    elif thermal_pdf:
+                        # fallback in case standard failed but thermal succeeded
+                        self.print_pdf(thermal_pdf, printer_name=printer_name)
+
+            self.delete_current_hold_sale()
             self.clear_fields()
-            QMessageBox.information(None, "Success", "Sales Record saved successfully")
+            AppMessageBox.success(self, "Success", "Sales Record saved successfully")
         
         
         
         
     def get_product_via_code(self, code):
-        
-        # --- Step 1: Validate input ---
-        if not str(code).isdigit():
-            print("Invalid or empty code.")
+        code_text = str(code or "").strip()
+        if not code_text:
             return None
 
-        code = int(code)
-        print(f"Getting product via code: {code}")
-
-        # --- Step 2: Query product info ---
         query = QSqlQuery()
         query.prepare("""
-            SELECT id, name, form, strength 
-            FROM product 
-            WHERE code = ? 
+            SELECT
+                p.id,
+                p.display_name,
+                COALESCE(pp.unit_price, 0),
+                COALESCE(dg.id, 0),
+                COALESCE(dg.discount_percent, 0),
+                COALESCE(dg.name, ''),
+                COALESCE(tg.id, 0),
+                COALESCE(tg.tax_percent, 0),
+                COALESCE(tg.name, ''),
+                COALESCE((
+                    SELECT SUM(quantity_remaining)
+                    FROM batch
+                    WHERE product_id = p.id
+                      AND quantity_remaining > 0
+                      AND (
+                          expiry_date IS NULL
+                          OR (
+                              CASE
+                                  WHEN expiry_date LIKE '____-__-__' THEN date(expiry_date)
+                                  WHEN expiry_date LIKE '__-__-____'
+                                      THEN date(substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2))
+                                  ELSE NULL
+                              END
+                          ) >= date('now', 'localtime')
+                      )
+                ), 0) as available_stock
+            FROM product p
+            LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
+            LEFT JOIN tax_group tg ON tg.id = p.tax_group_id
+            LEFT JOIN price_pack pp ON pp.id = (
+                SELECT id
+                FROM price_pack
+                WHERE product_id = p.id
+                ORDER BY is_default DESC, id ASC
+                LIMIT 1
+            )
+            WHERE TRIM(CAST(p.code AS TEXT)) = ?
+              AND COALESCE(p.status, 'active') IN ('active', 'used')
             LIMIT 1
         """)
-        query.addBindValue(code)
+        query.addBindValue(code_text)
 
         if not query.exec():
-            print("Product query failed:", query.lastError().text())
+            print("Barcode product query failed:", query.lastError().text())
             return None
-
 
         if not query.next():
-            print("No product found with code:", code)
-            row = self.table.currentRow()
-            combo = self.table.cellWidget(row, 1)
-            print("Clearing the combo box...")
-            combo.clear()
-            
-            combo.lineEdit().setText('')
-            combo
             return None
 
-        # --- Step 3: Extract product details ---
         product_id = int(query.value(0))
-        name = query.value(1)
-        form = query.value(2) or ""
-        strength = query.value(3) or ""
-        label = f"{name} {strength} {form}".strip()
+        display_name = str(query.value(1) or "").strip()
+        unit_price = float(query.value(2) or 0.0)
+        discount_group_id = int(query.value(3) or 0) or None
+        discount_percent = float(query.value(4) or 0.0)
+        discount_group_name = str(query.value(5) or "").strip()
+        tax_group_id = int(query.value(6) or 0) or None
+        tax_percent = float(query.value(7) or 0.0)
+        tax_group_name = str(query.value(8) or "").strip()
+        available_stock = int(query.value(9) or 0)
 
-        print(f"Product found: {label} (ID: {product_id})")
+        return {
+            "product_id": product_id,
+            "display_name": display_name,
+            "unit_price": unit_price,
+            "discount_group_id": discount_group_id,
+            "discount_percent": discount_percent,
+            "discount_group_name": discount_group_name,
+            "tax_group_id": tax_group_id,
+            "tax_percent": tax_percent,
+            "tax_group_name": tax_group_name,
+            "available_stock": available_stock,
+            "code": code_text,
+        }
 
-        row = self.table.currentRow()
-        combo = self.table.cellWidget(row, 1)
-        if not combo:
-            print("Combo not found at row:", row)
+
+    def find_sale_row_by_product(self, product_id):
+        for row in range(self.table.rowCount()):
+            combo = self.table.cellWidget(row, 1)
+            if combo is None:
+                continue
+
+            data = combo.currentData()
+            row_product_id = self.extract_product_id(data)
+            if row_product_id is not None and int(row_product_id) == int(product_id):
+                return row
+
+        return -1
+
+
+    def extract_product_id(self, data):
+        if isinstance(data, dict):
+            product_id = data.get("product_id")
+            if product_id is None:
+                return None
+            return int(product_id)
+
+        try:
+            if data is None:
+                return None
+            return int(data)
+        except (TypeError, ValueError):
             return None
 
-        # --- Step 4: Query stock info ---
-        stock_query = QSqlQuery()
-        stock_query.prepare("""
-            SELECT packsize, units, saleprice 
-            FROM stock 
-            WHERE product = ? 
-            LIMIT 1
-        """)
-        stock_query.addBindValue(product_id)
 
-        if not stock_query.exec():
-            print("Stock query failed:", stock_query.lastError().text())
-            return None
+    def get_in_cart_qty_for_product(self, product_id):
+        total_qty = 0
 
-        if not stock_query.next():
-            print("Stock record missing for product:", product_id)
-            QMessageBox.warning(self, "Stock Error", f"No stock found for {label}")
-            return None
+        for row in range(self.table.rowCount()):
+            combo = self.table.cellWidget(row, 1)
+            qty_widget = self.table.cellWidget(row, 2)
+            if combo is None or qty_widget is None:
+                continue
 
-        # --- Step 5: Extract and fill stock data ---
-        packsize = int(stock_query.value(0))
-        units = int(stock_query.value(1))
-        saleprice = float(stock_query.value(2))
-        unit_sale_price = saleprice / packsize if packsize > 0 else 0.0
+            row_product_id = self.extract_product_id(combo.currentData())
+            if row_product_id is None or int(row_product_id) != int(product_id):
+                continue
 
-        print(f"Stock info: packsize={packsize}, units={units}, saleprice={saleprice}")
+            try:
+                total_qty += int(float(qty_widget.text() or 0))
+            except (TypeError, ValueError):
+                pass
 
-        self.table.cellWidget(row, 2).setText(str(units))
-        self.table.cellWidget(row, 4).setText(f"{unit_sale_price:.2f}")
-        
-        
+        return total_qty
 
-        return product_id, label
+
+    def apply_scan_to_existing_row(self, row, product):
+        qty_widget = self.table.cellWidget(row, 2)
+        rate_widget = self.table.cellWidget(row, 3)
+        discount_widget = self.table.cellWidget(row, 4)
+        tax_widget = self.table.cellWidget(row, 5)
+        total_widget = self.table.cellWidget(row, 6)
+
+        if not (qty_widget and rate_widget and discount_widget and tax_widget and total_widget):
+            return
+
+        available_stock = int(product.get("available_stock") or 0)
+        in_cart_qty = self.get_in_cart_qty_for_product(product["product_id"])
+        if in_cart_qty + 1 > available_stock:
+            AppMessageBox.information(
+                self,
+                "Stock Limit",
+                f"Cannot add more of {product['display_name']}. Available stock: {available_stock}."
+            )
+            return
+
+        current_qty = int(float(qty_widget.text() or 0))
+
+        qty = current_qty + 1
+        rate = float(rate_widget.text() or product.get("unit_price") or 0.0)
+        discount_value = discount_widget.text() or 0.0
+        discount_mode = str(discount_widget.property("discount_input_mode") or "percent")
+        tax_pct = float(tax_widget.property("tax_percent_applied") or tax_widget.text() or 0.0)
+        resolved = self.resolve_line_pricing(qty, rate, discount_value, discount_mode, tax_pct)
+
+        qty_widget.setText(str(qty))
+        total_widget.setText(f"{resolved['line_total']:.2f}")
+        discount_widget.setProperty("discount_percent_applied", resolved["discount_percent"])
+        discount_widget.setProperty("discount_amount_applied", resolved["discount_amount"])
+        tax_widget.setProperty("tax_percent_applied", resolved["tax_percent"])
+        tax_widget.setProperty("tax_amount_applied", resolved["tax_amount"])
+        self.update_total_amount()
+
+
+    def process_barcode_code(self, code_text):
+        code_text = (code_text or "").strip()
+        if not code_text:
+            return
+
+        product = self.get_product_via_code(code_text)
+        if not product:
+            AppMessageBox.information(self, "Not Found", f"No product found for barcode '{code_text}'.")
+            self.item.lineEdit().clear()
+            self.item.lineEdit().setFocus()
+            return
+
+        if int(product.get("available_stock") or 0) <= 0:
+            AppMessageBox.information(
+                self,
+                "Out of Stock",
+                f"{product['display_name']} is currently out of stock."
+            )
+            self.item.lineEdit().clear()
+            self.item.lineEdit().setFocus()
+            return
+
+        available_stock = int(product.get("available_stock") or 0)
+        in_cart_qty = self.get_in_cart_qty_for_product(product["product_id"])
+        if in_cart_qty + 1 > available_stock:
+            AppMessageBox.information(
+                self,
+                "Stock Limit",
+                f"Cannot add more of {product['display_name']}. Available stock: {available_stock}."
+            )
+            self.item.lineEdit().clear()
+            self.item.lineEdit().setFocus()
+            return
+
+        existing_row = self.find_sale_row_by_product(product["product_id"])
+        if existing_row >= 0:
+            self.apply_scan_to_existing_row(existing_row, product)
+            self.item.lineEdit().clear()
+            self.item.lineEdit().setFocus()
+            return
+
+        product_data = {
+            "product_id": product["product_id"],
+            "unit_price": product["unit_price"],
+            "discount_group_id": product.get("discount_group_id"),
+            "discount_percent": product.get("discount_percent", 0.0),
+            "discount_group_name": product.get("discount_group_name", ""),
+            "code": product["code"],
+            "tax_group_id": product.get("tax_group_id"),
+            "tax_percent": product.get("tax_percent", 0.0),
+            "tax_group_name": product.get("tax_group_name", ""),
+        }
+
+        self.item.blockSignals(True)
+        self.item.clear()
+        self.item.addItem(product["display_name"], product_data)
+        self.item.setCurrentIndex(0)
+        if self.item.isEditable():
+            self.item.lineEdit().setText(product["display_name"])
+        self.item.blockSignals(False)
+
+        self.qty_edit.setText("1")
+        self.rate_edit.setText(f"{float(product['unit_price']):.2f}")
+        self.apply_current_line_product_defaults(product_data)
+
+        self.add_row()
+
+        self.item.lineEdit().clear()
+        self.item.lineEdit().setFocus()
+
+
+    def handle_product_enter(self):
+        if self._suppress_enter_once:
+            self._suppress_enter_once = False
+            return
+
+        if self.item.popup_is_visible():
+            return
+
+        entered_text = (self.item.lineEdit().text() or "").strip()
+        if not entered_text:
+            return
+
+        looks_like_barcode = entered_text.isdigit() and len(entered_text) >= 1
+        if looks_like_barcode:
+            self.process_barcode_code(entered_text)
+            return
+
+        # For text entry, keep existing behavior intact and move focus to qty only
+        # if a valid product has already been selected from completer.
+        data = self.item.currentData()
+        if isinstance(data, dict) and data.get("product_id"):
+            self.qty_edit.setFocus()
+            self.qty_edit.selectAll()
 
     
     
@@ -2426,87 +3056,63 @@ class CreateSalesWidget(QWidget):
         
         code, combo = self._pending_scan
         self._pending_scan = None
-
-        # call your lookup (make sure it returns (product_id, label) on success)
-        res = self.get_product_via_code(code)
-        
-        if not res:
-            
-            return
-
-        product_id, label = res
-        
-        combo.blockSignals(True)
-        combo.clear()
-        combo.addItem(label, product_id)
-        combo.setCurrentIndex(0)
-        
-        if combo.isEditable():
-            combo.lineEdit().setText(label)
-            
-        combo.blockSignals(False)
+        self.process_barcode_code(str(code or ""))
 
 
     
         
     
-    def load_product_suggestions(self, item, completer):
-        
-        current_text = item.lineEdit().text().strip()
-        print("Current Text is:", current_text)
-
-        if not current_text:
-            item.blockSignals(True)
-            item.clear()
-            item.setCurrentIndex(-1)
-            item.blockSignals(False)
-            return
-
+    def _sales_product_query_fn(self, search_text):
         query = QSqlQuery()
         query.prepare("""
             SELECT p.id, p.display_name, pp.unit_price
+                 , COALESCE(dg.id, 0)
+                 , COALESCE(dg.discount_percent, 0)
+                 , COALESCE(dg.name, '')
+                 , COALESCE(tg.id, 0)
+                 , COALESCE(tg.tax_percent, 0)
+                 , COALESCE(tg.name, '')
             FROM product p
-            LEFT JOIN price_pack pp ON pp.product_id = p.id
+            LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
+            LEFT JOIN tax_group tg ON tg.id = p.tax_group_id
+            LEFT JOIN price_pack pp ON pp.id = (
+                SELECT id
+                FROM price_pack
+                WHERE product_id = p.id
+                ORDER BY is_default DESC, id DESC
+                LIMIT 1
+            )
             WHERE p.display_name LIKE ?
             LIMIT 10
         """)
-        query.addBindValue(f"%{current_text}%")
+        query.addBindValue(f"%{search_text}%")
 
-        products = []
-        product_data = []
-
+        results = []
         if not query.exec():
-            print("Something wrong happened...", query.lastError().text())
-            return
+            return results
 
         while query.next():
             product_id = query.value(0)
             name = str(query.value(1)).strip()
             unit_price = query.value(2) or 0.0
-
-            products.append(name)
-            product_data.append((name, {
+            discount_group_id = int(query.value(3) or 0) or None
+            discount_percent = query.value(4) or 0.0
+            discount_group_name = str(query.value(5) or "").strip()
+            tax_group_id = int(query.value(6) or 0) or None
+            tax_percent = query.value(7) or 0.0
+            tax_group_name = str(query.value(8) or "").strip()
+            results.append((name, {
                 "product_id": product_id,
-                "unit_price": unit_price
+                "unit_price": unit_price,
+                "discount_group_id": discount_group_id,
+                "discount_percent": discount_percent,
+                "discount_group_name": discount_group_name,
+                "tax_group_id": tax_group_id,
+                "tax_percent": tax_percent,
+                "tax_group_name": tax_group_name,
             }))
-
-        item.blockSignals(True)
-        item.clear()
-
-        for name, data in product_data:
-            item.addItem(name, data)
-
-        item.setCurrentIndex(-1)
-        item.lineEdit().setText(current_text)
-        item.blockSignals(False)
-
-        completer.setModel(QStringListModel(products))
-        completer.complete()
-     
-    
-    
-        
-    def on_completer_selected(self, text, combo):
+        return results
+    def on_completer_selected(self, text, combo, selected_data=None):
         
         index = combo.findText(text.strip(), Qt.MatchExactly)
 
@@ -2515,27 +3121,67 @@ class CreateSalesWidget(QWidget):
             return None
 
         combo.setCurrentIndex(index)
-        data = combo.currentData()
+        if combo.lineEdit() is not None:
+            combo.lineEdit().setText(text.strip())
+        data = selected_data if isinstance(selected_data, dict) else combo.currentData()
 
         if not isinstance(data, dict):
             return None
 
         product_id = data.get("product_id")
         unit_price = data.get("unit_price", 0)
+        discount_percent = data.get("discount_percent", 0)
+        tax_percent = data.get("tax_percent", 0)
 
         try:
             self.rate_edit.setText(f"{float(unit_price):.2f}")
         except (TypeError, ValueError):
             self.rate_edit.clear()
 
+        data["discount_percent"] = discount_percent
+        data["tax_percent"] = tax_percent
+        self.apply_current_line_product_defaults(data)
+
+        self._suppress_enter_once = True
         self.qty_edit.setFocus()
         self.qty_edit.selectAll()
-        
-        
-        # empty completer
-        combo.completer().setModel(QStringListModel([]))
+
+        combo.hidePopup()
 
         return product_id
+
+    def update_line_pricing_hint(self, product_data=None):
+        if not hasattr(self, "line_pricing_hint"):
+            return
+
+        product_data = product_data or self.current_line_product_defaults or {}
+        discount_name = str(product_data.get("discount_group_name") or "").strip()
+        tax_name = str(product_data.get("tax_group_name") or "").strip()
+        discount_percent = float(product_data.get("discount_percent") or 0.0)
+        tax_percent = float(product_data.get("tax_percent") or 0.0)
+        discount_mode = self.discount_mode_combo.currentData() if hasattr(self, "discount_mode_combo") else "percent"
+        discount_source = "Manual Override" if self.line_discount_manual_override else "Product Default"
+        tax_source = "Manual Override" if self.line_tax_manual_override else "Product Default"
+        has_manual_override = self.line_discount_manual_override or self.line_tax_manual_override
+
+        discount_text = (
+            f"{discount_name} ({discount_percent:.2f}%)"
+            if discount_name else f"None ({discount_percent:.2f}%)"
+        )
+        tax_text = (
+            f"{tax_name} ({tax_percent:.2f}%)"
+            if tax_name else f"None ({tax_percent:.2f}%)"
+        )
+
+        badge = "Manual Override Active" if has_manual_override else "Defaults Active"
+        badge_color = "#B45309" if has_manual_override else "#2F5D7C"
+        self.line_pricing_hint.setStyleSheet(
+            f"color: {badge_color}; font-size: 11px; font-weight: 700; padding-left: 0;"
+        )
+        self.line_pricing_hint.setText(
+            f"Line Pricing [{badge}]: Discount {discount_text} [{discount_source}, Mode: {'Amt' if discount_mode == 'amount' else '%'}] | "
+            f"Tax {tax_text} [{tax_source}] | Product defaults drive the row, header defaults stay at invoice level"
+        )
             
             
 
@@ -2563,12 +3209,25 @@ class CreateSalesWidget(QWidget):
                 continue
                 
         self.gross_entry.setText(f"{subtotal:.2f}")
+
+        if self.active_discount_group_id is not None and not self.discount_group_manual_override:
+            discount_amount = subtotal * self.active_discount_percent / 100.0
+            self.discount_entry.blockSignals(True)
+            self.discount_entry.setText(f"{discount_amount:.2f}")
+            self.discount_entry.blockSignals(False)
+
         discount = self.discount_entry.text()
         discount = float(discount) if discount else 0.00
         
         taxable = subtotal - discount
         self.taxable_entry.setText(f"{taxable:.2f}")
-        
+
+        if self.active_tax_group_id is not None and not self.tax_group_manual_override:
+            tax_amount = taxable * self.active_tax_percent / 100.0
+            self.tax_entry.blockSignals(True)
+            self.tax_entry.setText(f"{tax_amount:.2f}")
+            self.tax_entry.blockSignals(False)
+
         tax = self.tax_entry.text()
         tax = float(tax) if tax else 0.00
         
@@ -2585,6 +3244,153 @@ class CreateSalesWidget(QWidget):
         self.final_amount_entry.setStyleSheet("font-weight: bold;")
         
         self.main_final_amount.setText(f"{final_amount:.2f}")
+        self.refresh_customer_pricing_summary()
+        
+    def build_hold_row_product_data(self, product_id):
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT
+                p.display_name,
+                COALESCE(pp.unit_price, 0),
+                COALESCE(dg.id, 0),
+                COALESCE(dg.discount_percent, 0),
+                COALESCE(dg.name, ''),
+                COALESCE(tg.id, 0),
+                COALESCE(tg.tax_percent, 0),
+                COALESCE(tg.name, '')
+            FROM product p
+            LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
+            LEFT JOIN tax_group tg ON tg.id = p.tax_group_id
+            LEFT JOIN price_pack pp ON pp.id = (
+                SELECT id
+                FROM price_pack
+                WHERE product_id = p.id
+                ORDER BY is_default DESC, id ASC
+                LIMIT 1
+            )
+            WHERE p.id = ?
+            LIMIT 1
+        """)
+        query.addBindValue(int(product_id))
+
+        if not query.exec() or not query.next():
+            return None
+
+        return {
+            "product_id": int(product_id),
+            "display_name": str(query.value(0) or "").strip(),
+            "unit_price": float(query.value(1) or 0.0),
+            "discount_group_id": int(query.value(2) or 0) or None,
+            "discount_percent": float(query.value(3) or 0.0),
+            "discount_group_name": str(query.value(4) or "").strip(),
+            "tax_group_id": int(query.value(5) or 0) or None,
+            "tax_percent": float(query.value(6) or 0.0),
+            "tax_group_name": str(query.value(7) or "").strip(),
+        }
+
+    def insert_sale_row_widget(
+        self,
+        product_name,
+        product_data,
+        qty_data,
+        rate_data,
+        discount_data,
+        tax_data,
+        total_data,
+        discount_mode="percent",
+        discount_manual_override=False,
+        tax_manual_override=False,
+    ):
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        self.table.setRowHeight(row, self.row_height)
+
+        counter = QLabel(str(row + 1))
+        counter.setStyleSheet("font-weight: 500;")
+
+        remove_btn = QPushButton("X")
+        remove_btn.setStyleSheet("color: #333; ")
+        remove_btn.clicked.connect(lambda _, r=row: self.remove_row(r))
+
+        product_combo = QComboBox()
+        product_combo.setEditable(True)
+        product_combo.lineEdit().setStyleSheet("font-weight: 700;")
+        product_combo.lineEdit().setReadOnly(True)
+        product_combo.setInsertPolicy(QComboBox.NoInsert)
+        product_combo.addItem(product_name, product_data)
+        product_combo.setCurrentIndex(0)
+        product_combo.setStyleSheet("""
+        QComboBox {font-weight: 600; padding: 0;}
+        QComboBox::drop-down {
+            border: 0px;
+        }
+        QComboBox::down-arrow {
+            image: none;
+        }
+        """)
+
+        resolved = self.resolve_line_pricing(
+            qty_data or 0,
+            rate_data or 0,
+            discount_data or 0,
+            discount_mode,
+            tax_data or 0,
+        )
+
+        qty_edit = QLineEdit()
+        qty_edit.setReadOnly(True)
+        qty_edit.setText(str(qty_data))
+        qty_edit.setStyleSheet("font-weight: 600;")
+
+        rate_edit = QLineEdit()
+        rate_edit.setReadOnly(True)
+        rate_edit.setText(str(rate_data))
+        rate_edit.setStyleSheet("font-weight: 600;")
+
+        discount = QLineEdit()
+        discount.setReadOnly(True)
+        discount.setText(str(discount_data))
+        discount.setProperty("discount_input_mode", discount_mode)
+        discount.setProperty("discount_percent_applied", resolved["discount_percent"])
+        discount.setProperty("discount_amount_applied", resolved["discount_amount"])
+        discount.setProperty("default_discount_group_id", product_data.get("discount_group_id"))
+        discount.setProperty(
+            "discount_group_id",
+            None if discount_manual_override else product_data.get("discount_group_id")
+        )
+        discount.setProperty(
+            "discount_source",
+            "manual_override" if discount_manual_override else "product_default"
+        )
+
+        tax = QLineEdit()
+        tax.setReadOnly(True)
+        tax.setText(str(tax_data))
+        tax.setProperty("tax_percent_applied", resolved["tax_percent"])
+        tax.setProperty("tax_amount_applied", resolved["tax_amount"])
+        tax.setProperty("default_tax_group_id", product_data.get("tax_group_id"))
+        tax.setProperty(
+            "tax_group_id",
+            None if tax_manual_override else product_data.get("tax_group_id")
+        )
+        tax.setProperty(
+            "tax_source",
+            "manual_override" if tax_manual_override else "product_default"
+        )
+
+        amount_edit = QLineEdit()
+        amount_edit.setReadOnly(True)
+        amount_edit.setText(str(total_data))
+        amount_edit.setStyleSheet("font-weight: 600;")
+
+        self.table.setCellWidget(row, 0, counter)
+        self.table.setCellWidget(row, 1, product_combo)
+        self.table.setCellWidget(row, 2, qty_edit)
+        self.table.setCellWidget(row, 3, rate_edit)
+        self.table.setCellWidget(row, 4, discount)
+        self.table.setCellWidget(row, 5, tax)
+        self.table.setCellWidget(row, 6, amount_edit)
+        self.table.setCellWidget(row, 7, remove_btn)
         
     
 
@@ -2593,248 +3399,243 @@ class CreateSalesWidget(QWidget):
     def reload_hold_order(self, id):
         
         print("Reloading Hold Data")
-        
-        self.reloading_sale = True
 
+        self.clear_fields(reset_hold_reference=False)
+        self.reloading_sale = True
         hold_id = int(id)
-        
-        self.customer.clear()
-        self.salesman.clear()
-        
-        # get customer and salesman from hold order
+        self.current_hold_sale_id = hold_id
+
         query = QSqlQuery()
         query.prepare("""
-            SELECT customer, salesman FROM holdsale WHERE id = ? """)
+            SELECT
+                customer, salesman, subtotal, discount_amount, taxable_amount,
+                tax_amount, additional_charges, final_amount, received_amount,
+                remaining_amount, payment_method, due_date
+            FROM holdsale
+            WHERE id = ?
+        """)
         query.addBindValue(hold_id)
-        
-        print("About to run query")
-        if query.exec() and query.next():
 
-            customer_id = query.value(0)
-            salesman_id = query.value(1)
+        if not (query.exec() and query.next()):
+            self.reloading_sale = False
+            AppMessageBox.error(self, "Error", "Unable to load held sale.")
+            return
 
-            print("Customer_id is:", customer_id, ' Salesman_id is: ', salesman_id)
+        customer_id = query.value(0)
+        salesman_id = query.value(1)
+        stored_discount = float(query.value(3) or 0.0)
+        stored_tax = float(query.value(5) or 0.0)
+        additional_charges = float(query.value(6) or 0.0)
+        received_amount = float(query.value(8) or 0.0)
+        payment_method = str(query.value(10) or "Cash").strip() or "Cash"
 
-            # get customer name 
-            if customer_id != 0:
-    
-                customer_id = int(customer_id)
-                # get the customer data
-                customer_query = QSqlQuery()
-                customer_query.prepare("""
-                    SELECT name FROM customer WHERE id = ? """)
-                
-                customer_query.addBindValue(customer_id)
-                
-                if customer_query.exec() and customer_query.next():
-
-                    customer = customer_query.value(0)
-                    self.customer.addItem(customer, customer_id)
-                    
-                    customer_query = QSqlQuery()
-                    customer_query.prepare(""" SELECT id, name FROM customer """)
-                    existing_id = customer_id
-                    if customer_query.exec():
-                        
-                        while customer_query.next():
-
-                            
-                            customer_id = customer_query.value(0)
-                            customer_name = customer_query.value(1)
-                            
-                            if customer_id == existing_id:
-                                continue
-                            
-                            self.customer.addItem(customer_name, customer_id)
-                
-                else:
-                    print("Error getting customer")
-                    print(customer_query.lastError().text())
-                
-            else:
-                
-                customer = 'Walk-In Customer'
-                customer_query = None
-                
-                self.customer.addItem(customer, customer_id)
-                
-                customer_query = QSqlQuery()
-                customer_query.prepare(""" SELECT id, name FROM customer """)
-                existing_id = customer_id
-                if customer_query.exec():
-                    
-                    while customer_query.next():
-
-                        
-                        customer_id = customer_query.value(0)
-                        customer_name = customer_query.value(1)
-                        
-                        self.customer.addItem(customer_name, customer_id)
-                
-                
-                else:
-                    print("Error getting customer")
-                    print(customer_query.lastError().text())
-                
-            
-            # get salesman name
-            if salesman_id is not None:
-
-                salesman_id = int(salesman_id)
-                # get the salesman data
-                salesman_query = QSqlQuery()
-                salesman_query.prepare("""
-                    SELECT name FROM employee WHERE id = ? """)
-
-                salesman_query.addBindValue(salesman_id)
-
-                if salesman_query.exec() and salesman_query.next():
-
-                    salesman = salesman_query.value(0)
-                    self.salesman.addItem(salesman, salesman_id)
-                    
-                    salesman_query = QSqlQuery()
-                    salesman_query.prepare(""" SELECT id, name FROM employee """)
-                    
-                    existing_id = salesman_id
-                    
-                    if salesman_query.exec():
-
-                        while salesman_query.next():
-
-                            salesman_id = salesman_query.value(0)
-                            salesman_name = salesman_query.value(1)
-
-                            if salesman_id == existing_id:
-                                continue
-
-                            self.salesman.addItem(salesman_name, salesman_id)
-                    
-                    
-
-                else:
-                    print("Error getting salesman")
-                    print(salesman_query.lastError().text())
-
-
-
-            print("Customer is: ", customer, ' Salesman is: ', salesman)
-            
-            
+        customer_index = self.customer.findData(customer_id)
+        if customer_index >= 0:
+            self.customer.setCurrentIndex(customer_index)
         else:
-            print("Error getting customer and supplier")
-            print(query.lastError().text())
+            self.customer.setCurrentIndex(0)
 
+        self.additional_entry.setText(f"{additional_charges:.2f}")
+        self.received_entry.setText(f"{received_amount:.2f}")
 
-        
-        # insert holditems data
-        print("Inserting holditems data")
+        method_index = self.payment_method.findText(payment_method)
+        self.payment_method.setCurrentIndex(method_index if method_index >= 0 else 0)
+
+        current_discount = float(self.discount_entry.text() or 0.0)
+        current_tax = float(self.tax_entry.text() or 0.0)
+        if abs(current_discount - stored_discount) > 0.009:
+            self.discount_group_manual_override = True
+            self.discount_entry.blockSignals(True)
+            self.discount_entry.setText(f"{stored_discount:.2f}")
+            self.discount_entry.blockSignals(False)
+
+        if abs(current_tax - stored_tax) > 0.009:
+            self.tax_group_manual_override = True
+            self.tax_entry.blockSignals(True)
+            self.tax_entry.setText(f"{stored_tax:.2f}")
+            self.tax_entry.blockSignals(False)
+
+        print("Customer is:", customer_id, "Salesman is:", salesman_id)
+
         items_query = QSqlQuery()
-        items_query.prepare(""" SELECT product, qty, unitrate, discount, discountamount, total FROM holditems WHERE holdsale = ?""")
+        items_query.prepare("""
+            SELECT
+                product, qty, unitrate, discount, discountamount,
+                COALESCE(tax, 0), COALESCE(discount_input_mode, 'percent'), total
+            FROM holditems
+            WHERE holdsale = ?
+        """)
         items_query.addBindValue(hold_id)
-        
-        if items_query.exec():
-            
-            print("got the data now geting records to insert items")
-            self.table.setRowCount(0)
-           
-            while items_query.next():
-                
-                print("Adding new Row for record")
-                self.add_row()
-                new_row = self.table.rowCount() - 1
 
-                print("Getting Data after adding rows")
-                product = int(items_query.value(0))
-                quantity = str(items_query.value(1))
-                rate = str(items_query.value(2))
-                discount = str(items_query.value(3))
-                discountamount = str(items_query.value(4))
-                total = str(items_query.value(5))
-                
-                print("Got the data now getting MEDICINE INFO")
+        if not items_query.exec():
+            self.reloading_sale = False
+            AppMessageBox.error(self, "Error", items_query.lastError().text())
+            return
 
-                query2 = QSqlQuery()
-                query2.prepare("SELECT id, name, form, strength FROM product WHERE id = ?")
-                query2.addBindValue(product)
-                
-                if query2.exec() and query2.next():
-                    
-                    product_id = query2.value(0)
-                    name = query2.value(1)
-                    form = query2.value(2)
-                    strength = query2.value(3)
-                    
-                    label = f"{name} {strength} {form}".strip()
-                    print("insertint lable and id into combobox")
-                    
-                    combo = self.table.cellWidget(new_row, 1)
-                    combo.addItem(label, product_id)
-                    combo.setCurrentIndex(combo.findData(product_id))  # ✅ Select it!
+        self.table.setRowCount(0)
+
+        while items_query.next():
+            product_id = int(items_query.value(0))
+            quantity = int(items_query.value(1) or 0)
+            rate = float(items_query.value(2) or 0.0)
+            discount_percent = float(items_query.value(3) or 0.0)
+            discount_amount = float(items_query.value(4) or 0.0)
+            tax_percent = float(items_query.value(5) or 0.0)
+            discount_mode = str(items_query.value(6) or "percent")
+            total = float(items_query.value(7) or 0.0)
+
+            product_data = self.build_hold_row_product_data(product_id)
+            if not product_data:
+                continue
+
+            displayed_discount = discount_amount if discount_mode == "amount" else discount_percent
+            discount_manual_override = abs(discount_percent - float(product_data.get("discount_percent") or 0.0)) > 0.009
+            tax_manual_override = abs(tax_percent - float(product_data.get("tax_percent") or 0.0)) > 0.009
+
+            self.insert_sale_row_widget(
+                product_name=product_data["display_name"],
+                product_data=product_data,
+                qty_data=quantity,
+                rate_data=f"{rate:.2f}",
+                discount_data=f"{displayed_discount:.2f}",
+                tax_data=f"{tax_percent:.2f}",
+                total_data=f"{total:.2f}",
+                discount_mode=discount_mode,
+                discount_manual_override=discount_manual_override,
+                tax_manual_override=tax_manual_override,
+            )
+
+        self.update_total_amount()
+        self.calculate_payment()
+        self.refresh_customer_pricing_summary()
+
+        self.reloading_sale = False
 
 
+    def load_hold_orders(self):
+        query = QSqlQuery()
+        if not query.exec("""
+            SELECT
+                h.id,
+                COALESCE(c.name, 'Walk-in Customer') AS customer_name,
+                COALESCE(a.username, e.name, '-') AS user_name,
+                COALESCE(h.final_amount, 0),
+                COALESCE((SELECT COUNT(*) FROM holditems hi WHERE hi.holdsale = h.id), 0),
+                h.creation_date
+            FROM holdsale h
+            LEFT JOIN customer c ON c.id = h.customer
+            LEFT JOIN auth a ON a.id = h.salesman
+            LEFT JOIN employee e ON e.id = h.salesman
+            ORDER BY h.id DESC
+        """):
+            AppMessageBox.error(self, "Hold Sales", query.lastError().text())
+            return
 
+        rows = []
+        while query.next():
+            rows.append({
+                "id": int(query.value(0) or 0),
+                "customer": str(query.value(1) or "Walk-in Customer"),
+                "user": str(query.value(2) or "-"),
+                "final_amount": float(query.value(3) or 0.0),
+                "items": int(query.value(4) or 0),
+                "created_at": str(query.value(5) or "-"),
+            })
 
-                stock_query = QSqlQuery()
-                stock_query.prepare("SELECT packsize, units FROM stock WHERE product = ?")
-                stock_query.addBindValue(product_id)
-                    
-                if stock_query.exec() and stock_query.next():  
-                        
-                    packsize = stock_query.value(0)
-                    units = stock_query.value(1)
-                    
-                    rate = str(rate)
-                    
-                    self.table.cellWidget(new_row, 2).setText(str(units))
-                    self.table.cellWidget(new_row, 3).setText(str(quantity))
-                    self.table.cellWidget(new_row, 4).setText(rate)
-                    self.table.cellWidget(new_row, 5).setText(discount)
-                    self.table.cellWidget(new_row, 6).setText(discountamount)
-                    self.table.cellWidget(new_row, 7).setText(total)
+        if not rows:
+            AppMessageBox.information(self, "Hold Sales", "No held sales are currently available.")
+            return
 
-        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Held Sales")
+        dialog.setModal(True)
+        dialog.resize(860, 420)
 
-            # Deleting Hold Items after reloading
-            item_delete = QSqlQuery()
-            item_delete.prepare("DELETE FROM holditems WHERE holdsale = ?") 
-            item_delete.addBindValue(hold_id)
-            
-            
-            if item_delete.exec():
-                
-                print("Hold Items Deleted")
-                
-                # Deleting Hold Order Ref
-                query = QSqlQuery()
-                query.prepare("DELETE FROM holdsale WHERE id = ?")
-                query.addBindValue(hold_id)
-                
-                if query.exec():
-                    print("Hold Order Deleted")
-                    
-                    
-                else:
-                    print("Error deleting hold order")
-                    print(query.lastError().text())
-                
-                
-            else:
-                
-                print("Error deleting hold items")
-                print(item_delete.lastError().text())
-                
-                
-            
-        
-            
-        else:
-            print("Error getting hold items")
-            print(items_query.lastError().text())
-        
-        
-    
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
 
+        heading = QLabel("Held Sales", objectName="SectionTitle")
+        subtitle = QLabel("Open a parked sale and continue working on it.")
+        subtitle.setStyleSheet("color: #5E7383; font-size: 12px;")
+
+        table = QTableWidget()
+        table.setColumnCount(6)
+        table.setHorizontalHeaderLabels(["ID", "Customer", "User", "Items", "Amount", "Created"])
+        table.setRowCount(len(rows))
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.setSelectionMode(QTableWidget.SingleSelection)
+        table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setAlternatingRowColors(True)
+        table.setStyleSheet("QTableWidget::item { color: #333; }")
+
+        for row_index, row in enumerate(rows):
+            values = [
+                str(row["id"]),
+                row["customer"],
+                row["user"],
+                str(row["items"]),
+                f"{row['final_amount']:.2f}",
+                row["created_at"],
+            ]
+            for col_index, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if col_index in (0, 3, 4):
+                    item.setTextAlignment(Qt.AlignCenter)
+                if row["id"] == self.current_hold_sale_id:
+                    item.setBackground(QColor("#EAF3F9"))
+                table.setItem(row_index, col_index, item)
+
+        table.resizeColumnsToContents()
+        table.horizontalHeader().setStretchLastSection(True)
+
+        button_row = QHBoxLayout()
+        refresh_btn = QPushButton("Refresh", objectName="TopRightButton")
+        open_btn = QPushButton("Open Selected", objectName="TopRightButton")
+        close_btn = QPushButton("Close", objectName="TopRightButton")
+        refresh_btn.setCursor(Qt.PointingHandCursor)
+        open_btn.setCursor(Qt.PointingHandCursor)
+        close_btn.setCursor(Qt.PointingHandCursor)
+        button_row.addStretch()
+        button_row.addWidget(refresh_btn)
+        button_row.addWidget(open_btn)
+        button_row.addWidget(close_btn)
+
+        def open_selected_hold():
+            current_row = table.currentRow()
+            if current_row < 0:
+                AppMessageBox.information(dialog, "Hold Sales", "Please select a held sale first.")
+                return
+
+            selected_hold_id = int(table.item(current_row, 0).text())
+            has_current_buffer = self.table.rowCount() > 0
+            if has_current_buffer:
+                _, accepted = AppMessageBox.confirm(
+                    dialog,
+                    "Open Held Sale",
+                    "Opening a held sale will replace the current working sale on screen. Do you want to continue?",
+                    confirm_label="Open Hold",
+                    cancel_label="Cancel",
+                    kind="warning",
+                )
+                if not accepted:
+                    return
+
+            dialog.accept()
+            self.reload_hold_order(selected_hold_id)
+
+        refresh_btn.clicked.connect(lambda: (dialog.reject(), self.load_hold_orders()))
+        open_btn.clicked.connect(open_selected_hold)
+        close_btn.clicked.connect(dialog.reject)
+        table.itemDoubleClicked.connect(lambda *_: open_selected_hold())
+
+        layout.addWidget(heading)
+        layout.addWidget(subtitle)
+        layout.addWidget(table)
+        layout.addLayout(button_row)
+        dialog.exec()
 
 
     def force_uppercase(self, text):
@@ -2847,10 +3648,36 @@ class CreateSalesWidget(QWidget):
 
     
     
-    def clear_fields(self):
+    def delete_current_hold_sale(self):
+        hold_id = self.current_hold_sale_id
+        if hold_id is None:
+            return
+
+        item_delete = QSqlQuery()
+        item_delete.prepare("DELETE FROM holditems WHERE holdsale = ?")
+        item_delete.addBindValue(int(hold_id))
+        if not item_delete.exec():
+            print("Error deleting hold items")
+            print(item_delete.lastError().text())
+            return
+
+        hold_delete = QSqlQuery()
+        hold_delete.prepare("DELETE FROM holdsale WHERE id = ?")
+        hold_delete.addBindValue(int(hold_id))
+        if not hold_delete.exec():
+            print("Error deleting hold order")
+            print(hold_delete.lastError().text())
+            return
+
+        self.current_hold_sale_id = None
+
+
+    def clear_fields(self, reset_hold_reference=True):
         
         self.order_modified = False
         self.reloading_sale = False
+        if reset_hold_reference:
+            self.current_hold_sale_id = None
         
         self.gross_entry.clear()
         self.discount_entry.clear()
@@ -2863,17 +3690,27 @@ class CreateSalesWidget(QWidget):
         self.additional_entry.clear()
         self.final_amount_entry.clear()
         self.main_final_amount.clear()
+
+        self.discount_group_manual_override = False
+        self.tax_group_manual_override = False
+        self.active_discount_group_id = None
+        self.active_discount_group_name = ""
+        self.active_discount_percent = 0.0
+        self.active_tax_group_id = None
+        self.active_tax_group_name = ""
+        self.active_tax_percent = 0.0
         
         self.payment_method.blockSignals(True); 
         self.payment_method.setCurrentText("Cash"); 
         self.payment_method.blockSignals(False)
         
         
-        self.writeoff_check.setChecked(True)        
+        self.writeoff_check.setChecked(False)
         
         self.table.setRowCount(0)
         
         self.populate_customers()
+        self.refresh_customer_pricing_summary()
         
         # set focus back to combobox
         self.item.setCurrentIndex(-1)
@@ -2887,13 +3724,80 @@ class CreateSalesWidget(QWidget):
         print("Exporting PDF")
         
         print("Sales id is: ", sales_id)
+        if sales_id is None:
+            print("Cannot export PDF without sales_id.")
+            return None
+
+        if os.path.exists(filename):
+            try:
+                os.remove(filename)
+            except Exception as e:
+                print("Could not remove old invoice pdf:", e)
+
+        # ---------------------------
+        # Fetch business information
+        # ---------------------------
+        business_name = "Business"
+        address = "-"
+        contact = "-"
+
+        business_query = QSqlQuery()
+        business_query.prepare("""
+            SELECT businessname, address, contact
+            FROM business
+            WHERE id = 1
+            LIMIT 1
+        """)
+        if business_query.exec() and business_query.next():
+            business_name = str(business_query.value(0) or business_name)
+            address = str(business_query.value(1) or address)
+            contact = str(business_query.value(2) or contact)
+
+        # ---------------------------
+        # Fetch sales header details
+        # ---------------------------
+        header_query = QSqlQuery()
+        header_query.prepare("""
+            SELECT
+                s.id,
+                s.creation_date,
+                s.subtotal,
+                s.discount,
+                s.tax,
+                s.total,
+                COALESCE(c.name, 'Walk-In Customer')
+            FROM sales s
+            LEFT JOIN customer c ON c.id = s.customer
+            WHERE s.id = ?
+            LIMIT 1
+        """)
+        header_query.addBindValue(sales_id)
+
+        if not header_query.exec() or not header_query.next():
+            print("Failed to fetch sales header:", header_query.lastError().text())
+            return None
+
+        invoice_no = f"# {int(header_query.value(0))}"
+        invoice_date = str(header_query.value(1) or "")
+        sales_subtotal = float(header_query.value(2) or 0.0)
+        sales_discount = float(header_query.value(3) or 0.0)
+        sales_tax = float(header_query.value(4) or 0.0)
+        sales_total = float(header_query.value(5) or 0.0)
+        customer_name = str(header_query.value(6) or "Walk-In Customer")
         
         
         query = QSqlQuery()
         query.prepare("""
-            SELECT product, qty, unitrate, discount, discountamount, total
-            FROM salesitem 
-            WHERE sales = ?
+            SELECT
+                p.display_name,
+                si.qty_sold,
+                si.unit_price,
+                si.discount,
+                si.line_total
+            FROM salesitem si
+            JOIN product p ON p.id = si.product_id
+            WHERE si.sales_id = ?
+            ORDER BY si.id
         """)
         query.addBindValue(sales_id)
         
@@ -2905,23 +3809,15 @@ class CreateSalesWidget(QWidget):
             
             while query.next():
                 
-                product_id = int(query.value(0))
-                qty = str(query.value(1))
-                rate = str(query.value(2))
-                discount = str(query.value(3))
-                discount_amount = str(query.value(4))
-                price = float(rate) - float(discount_amount)
-                total = str(query.value(5))
+                product_name = str(query.value(0) or "")
+                qty = int(query.value(1) or 0)
+                rate = float(query.value(2) or 0.0)
+                discount = float(query.value(3) or 0.0)
+                total = float(query.value(4) or 0.0)
 
-                # Get product name
-                product_name = ""
-                query2 = QSqlQuery()
-                query2.prepare("SELECT name FROM product WHERE id = ?")
-                query2.addBindValue(product_id)
+                # discount is stored per line item; net price shown per unit.
+                price = rate - discount
 
-                if query2.exec() and query2.next():
-                    product_name = query2.value(0)
-                    
                 items.append((product_name, qty, rate, discount, price, total))
                 print(items)
 
@@ -2950,7 +3846,6 @@ class CreateSalesWidget(QWidget):
         business_font = QFont("Arial", 16, QFont.Bold)
         painter.setFont(business_font)
 
-        business_name = "Muzammil Medical & General Store"
         painter.drawText(x, y, business_name)
 
         y += 80
@@ -2958,12 +3853,10 @@ class CreateSalesWidget(QWidget):
         address_font = QFont("Arial", 12)
         painter.setFont(address_font)
         
-        address = "123 Health St, Wellness City"
         painter.drawText(x, y, address)
         
         y += 70
-        contact = "Phone: (123) 456-7890"
-        painter.drawText(x, y, contact)
+        painter.drawText(x, y, f"Phone: {contact}")
         
         
         invoice_font = QFont("Arial", 36, QFont.Bold)
@@ -2980,7 +3873,6 @@ class CreateSalesWidget(QWidget):
         option = QTextOption()
         option.setAlignment(Qt.AlignRight)
 
-        invoice_no = "# 12345"
         painter.drawText(rect, invoice_no, option)
         
         
@@ -2992,15 +3884,13 @@ class CreateSalesWidget(QWidget):
         option = QTextOption()
         option.setAlignment(Qt.AlignRight)
 
-        invoice_no = "21 October, 2025"
-        painter.drawText(rect, invoice_no, option)
+        painter.drawText(rect, invoice_date, option)
 
         y += 150
         
         customer_font = QFont("Arial", 12, QFont.Bold)
         painter.setFont(customer_font)
-        info = " Asad Clinic & Pharmacy"
-        customer = f"To : {info}"
+        customer = f"To : {customer_name}"
         painter.drawText(x, y, customer)
         
         y += 80
@@ -3053,7 +3943,7 @@ class CreateSalesWidget(QWidget):
         #         ("Clementrin Syrup 160ml", 3, 15.00, "10%", 13.50, 40.50),
         #         ("Tibe Cream 75gm", 4, 12.00, "5%", 11.40, 45.60)
         #     ]
-        total = 0
+        items_total = 0.0
         
         print("Drawing Items into Table")
         
@@ -3066,7 +3956,7 @@ class CreateSalesWidget(QWidget):
             painter.drawText(x + 1650, y, f"{net_price:.2f}")
             painter.drawText(x + 1900, y, f"{item_total:.2f}")
             
-            total += item_total
+            items_total += item_total
             y += 80
 
         y += 40
@@ -3092,18 +3982,18 @@ class CreateSalesWidget(QWidget):
         option = QTextOption()
         option.setAlignment(Qt.AlignRight)
 
-        painter.drawText(rect, f"{total}", option)
+        painter.drawText(rect, f"{sales_subtotal:.2f}", option)
         
         
         
         y += 100
         painter.drawText(x + 1600, y, f"Discount: ")
-        painter.drawText(x + 1900, y, f"0.00")
+        painter.drawText(x + 1900, y, f"{sales_discount:.2f}")
         
         y += 80
 
         painter.drawText(x + 1600, y, f"Sales Tax: ")
-        painter.drawText(x + 1900, y, f"0.00")
+        painter.drawText(x + 1900, y, f"{sales_tax:.2f}")
         
         y += 80
         pen = QPen(QColor("black"))
@@ -3115,18 +4005,124 @@ class CreateSalesWidget(QWidget):
         total_font = QFont("Arial", 14, QFont.Bold)
         painter.setFont(total_font)
         painter.drawText(x + 1500, y, f"Total Amount: ")
-        painter.drawText(x + 1950, y, f"{total:.2f}")
+        painter.drawText(x + 1950, y, f"{sales_total:.2f}")
 
         painter.end()
         return filename
     
 
 
-    def print_pdf(self, filename):
+    def get_printer_info(self):
+        
+        system = platform.system()
+        info = {
+            "attached": False,
+            "name": None,
+            "raw_info": "",
+            "is_thermal": False,
+        }
+
+        # ---------------------------
+        # Linux/macOS: use CUPS tools
+        # ---------------------------
+        if system in ("Linux", "Darwin"):
+            default_name = None
+            raw_parts = []
+
+            try:
+                out = subprocess.run(
+                    ["lpstat", "-d"],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                raw_parts.append((out.stdout or "") + (out.stderr or ""))
+
+                line = (out.stdout or "").strip()
+                if ":" in line:
+                    default_name = line.split(":", 1)[1].strip()
+            except Exception:
+                default_name = None
+
+            printers = []
+            try:
+                out = subprocess.run(
+                    ["lpstat", "-p"],
+                    capture_output=True,
+                    text=True,
+                    check=False
+                )
+                raw_parts.append((out.stdout or "") + (out.stderr or ""))
+                for ln in (out.stdout or "").splitlines():
+                    # expected: "printer <name> ..."
+                    parts = ln.strip().split()
+                    if len(parts) >= 2 and parts[0] == "printer":
+                        printers.append(parts[1])
+            except Exception:
+                printers = []
+
+            selected = default_name or (printers[0] if printers else None)
+            info["name"] = selected
+            info["attached"] = selected is not None
+
+            if selected:
+                # collect extra metadata for thermal detection
+                for cmd in (["lpstat", "-v", selected], ["lpoptions", "-p", selected]):
+                    try:
+                        out = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                        raw_parts.append((out.stdout or "") + (out.stderr or ""))
+                    except Exception:
+                        pass
+
+            raw_blob = "\n".join(part for part in raw_parts if part).lower()
+            info["raw_info"] = raw_blob
+            info["is_thermal"] = self._is_thermal_printer(
+                selected or "",
+                raw_blob
+            )
+            return info
+
+        # ---------------------------
+        # Windows fallback
+        # ---------------------------
+        if system == "Windows":
+            name = os.environ.get("PRINTER", "")
+            info["name"] = name or None
+            info["attached"] = True  # os.startfile print path handles actual availability
+            info["raw_info"] = (name or "").lower()
+            info["is_thermal"] = self._is_thermal_printer(name or "", info["raw_info"])
+            return info
+
+        return info
+
+
+    def _is_thermal_printer(self, printer_name, metadata=""):
+        haystack = f"{printer_name} {metadata}".lower()
+        thermal_keywords = [
+            "thermal",
+            "receipt",
+            "pos",
+            "xprinter",
+            "x-printer",
+            "epson tm",
+            "bixolon",
+            "star tsp",
+            "gp-",
+            "gprinter",
+            "zebra",
+        ]
+        return any(keyword in haystack for keyword in thermal_keywords)
+
+
+    def print_pdf(self, filename, printer_name=None):
         
         system = platform.system()
         if system in ("Linux", "Darwin"):
-            os.system(f"lp '{filename}'")
+            cmd = ["lp"]
+            if printer_name:
+                cmd.extend(["-d", printer_name])
+            cmd.append(filename)
+            subprocess.run(cmd, check=False)
         elif system == "Windows":
             os.startfile(filename, "print")
             
@@ -3138,12 +4134,63 @@ class CreateSalesWidget(QWidget):
 
         self.item.setCurrentIndex(-1)
         self.item.lineEdit().clear()
-
-        if self.item.completer():
-            self.item.completer().popup().hide()
-
+        self.item.hidePopup()
         self.item.blockSignals(False)
 
+    
+    
+    def update_due_date_availability(self):
+        """Enable due_date_combo only if there's a receiveable balance"""
+        try:
+            received = float(self.received_entry.text() or 0.0)
+        except (ValueError, AttributeError):
+            received = 0.0
+        
+        try:
+            total = float(self.net_amount_entry.text() or 0.0)
+        except (ValueError, AttributeError):
+            total = 0.0
+        
+        writeoff_checked = self.writeoff_check.isChecked()
+
+        is_payable = (received < total) and not writeoff_checked
+        self.due_date_combo.setEnabled(is_payable)
+        
+        if not is_payable:
+            self.due_date_combo.setCurrentText("None")
+
+    def compute_due_date(self):
+        """Compute due date based on selected days from combo box"""
+        from datetime import datetime, timedelta
+        
+        due_date_str = self.due_date_combo.currentText()
+        
+        # If "None" is selected or text doesn't start with "+", return None
+        if due_date_str == "None" or not due_date_str.startswith("+"):
+            return None
+
+        try:
+            # Extract number of days from text like "+30 days"
+            days = int(due_date_str.split()[0][1:])
+        except (ValueError, IndexError):
+            return None
+
+        today = datetime.now()
+        due = today + timedelta(days=days)
+        return due.strftime("%Y-%m-%d")
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     
     
     
@@ -3203,7 +4250,7 @@ class QtyValidationFilter(QObject):
         try:
             entered_qty = int(text)
         except ValueError:
-            QMessageBox.warning(
+            AppMessageBox.warning(
                 self.parent_page,
                 "Invalid Quantity",
                 "Quantity must be a whole number."
@@ -3222,7 +4269,7 @@ class QtyValidationFilter(QObject):
         print(f"Available Qty is: {available_qty}")
 
         if entered_qty > available_qty:
-            QMessageBox.warning(
+            AppMessageBox.warning(
                 self.parent_page,
                 "Insufficient Stock",
                 f"Entered quantity ( {entered_qty} ) is greater than available stock ( {available_qty} )."
@@ -3236,6 +4283,18 @@ class QtyValidationFilter(QObject):
             SELECT COALESCE(SUM(quantity_remaining), 0)
             FROM batch
             WHERE product_id = ?
+            AND quantity_remaining > 0
+            AND (
+                expiry_date IS NULL
+                OR (
+                    CASE
+                        WHEN expiry_date LIKE '____-__-__' THEN date(expiry_date)
+                        WHEN expiry_date LIKE '__-__-____'
+                            THEN date(substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2))
+                        ELSE NULL
+                    END
+                ) >= date('now', 'localtime')
+            )
         """)
         query.addBindValue(product_id)
 
@@ -3249,3 +4308,5 @@ class QtyValidationFilter(QObject):
     
    
    
+
+    

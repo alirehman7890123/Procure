@@ -12,17 +12,17 @@ class EmployeeDetailWidget(QWidget):
         super().__init__(parent)
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Employee Detail", objectName="SectionTitle")
         self.employeelist = QPushButton("Employees List", objectName="TopRightButton")
         self.employeelist.setCursor(Qt.PointingHandCursor)
-        self.employeelist.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.employeelist)
 
         self.layout.addLayout(header_layout)
@@ -94,19 +94,31 @@ class EmployeeDetailWidget(QWidget):
         
         print("Loading purchase ID:", id)
         query = QSqlQuery()
-        query.prepare("SELECT * FROM employee WHERE id = ?")
+        query.prepare("""
+            SELECT
+                name,
+                contact,
+                email,
+                address,
+                badge_no,
+                role,
+                status,
+                joining_date
+            FROM employee
+            WHERE id = ?
+        """)
         query.addBindValue(id)
         
         if query.exec() and query.next():
             
-            name = query.value(1)
-            contact = query.value(2)
-            email = query.value(3)
-            address = query.value(4)
-            badge = query.value(5)
-            role = query.value(6)
-            status = query.value(7)
-            joining_date = query.value(8)
+            name = query.value(0)
+            contact = query.value(1)
+            email = query.value(2)
+            address = query.value(3)
+            badge = query.value(4)
+            role = query.value(5)
+            status = query.value(6)
+            joining_date = query.value(7)
             
             if isinstance(joining_date, QDateTime):
                 joining_date = joining_date.date().toString("dd-MM-yyyy")
@@ -130,7 +142,6 @@ class EmployeeDetailWidget(QWidget):
             
             
             
-
 
 
 

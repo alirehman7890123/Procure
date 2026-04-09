@@ -1,14 +1,19 @@
 
-from PySide6.QtWidgets import QWidget, QCompleter, QHBoxLayout, QFrame , QVBoxLayout, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
-from PySide6.QtCore import QFile, Qt, QStringListModel, QTimer, Signal
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QFrame , QVBoxLayout, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
+from PySide6.QtCore import QFile, Qt, QTimer, Signal
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtGui import  QKeyEvent
+from utilities.product_search_widget import ProductSearchBox
 from functools import partial
 
 import math
 from utilities.stylus import load_stylesheets
-from utilities.get_session import get_current_session
+from utilities.activity_logger import log_activity
+from utilities.permissions import Permissions
+from utilities.session_gate import require_open_session
+from utilities.session_service import get_active_session_id
 from utilities.payment_handler import PaymentMethodHandler
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -33,17 +38,17 @@ class AddPurchaseReturnWidget(QWidget):
         super().__init__(parent)
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Purchase Return Invoice", objectName="SectionTitle")
         self.invoicelist = QPushButton("Purchase Returns List", objectName="TopRightButton")
         self.invoicelist.setCursor(Qt.PointingHandCursor)
-        self.invoicelist.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.invoicelist)
 
         self.layout.addLayout(header_layout)
@@ -243,13 +248,22 @@ class AddPurchaseReturnWidget(QWidget):
         self.layout.addLayout(temporary_row)
 
         
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(10)
+
         savereturn = QPushButton('Save Purchase Return', objectName='SaveButton')
         savereturn.setCursor(Qt.PointingHandCursor)
-        
         savereturn.clicked.connect(lambda: self.save_purchase_return())
+
+        clear_button = QPushButton("Clear Return", objectName="TopRightButton")
+        clear_button.setCursor(Qt.PointingHandCursor)
+        clear_button.clicked.connect(self.confirm_clear_return)
+
+        action_row.addWidget(savereturn, 1)
+        action_row.addWidget(clear_button)
         
-        
-        self.layout.addWidget(savereturn)
+        self.layout.addLayout(action_row)
         
         self.layout.addStretch()
         
@@ -336,40 +350,14 @@ class AddPurchaseReturnWidget(QWidget):
         dummy_item1.setFlags(Qt.NoItemFlags)
         self.table.setItem(row, 1, dummy_item1)
 
-        product = QComboBox()
-        product.setPlaceholderText("select product")
-        
-        
-        
-        product.setEditable(True)
+        product = ProductSearchBox(self, placeholder="select product", defer_numeric_to_enter=True)
         product.wheelEvent = lambda event: event.ignore()
-        
-        
-        
-        
-        
-        completer = QCompleter()
-        product.setCompleter(completer)
-        completer.setCompletionMode(QCompleter.PopupCompletion)
-        
-        product.lineEdit().completer().popup().setStyleSheet("""
-            QListView {
-                padding: 5px;
-                background-color: white;
-                border: 1px solid gray;
-                color: #333;
-            }
-            QListView::item {
-                padding: 6px 10px;
-            }
-            QListView::item:selected {
-                background-color: #5A9EC9;
-                color: white;
-            }
-        """)
-
-
-        product.lineEdit().textEdited.connect(lambda: self.load_product_suggestions(product, completer))
+        product.product_selected.connect(
+            lambda pid, name, p=product: self.on_completer_highlighted(name, p)
+        )
+        product.lineEdit().returnPressed.connect(
+            lambda p=product: self.handle_product_return_pressed(p)
+        )
 
         
         batch = QComboBox()
@@ -463,7 +451,7 @@ class AddPurchaseReturnWidget(QWidget):
             
 
         else:
-            QMessageBox.information(None, 'Error', query.lastError().text() )
+            AppMessageBox.information(None, 'Error', query.lastError().text() )
         
         self.supplier_edit.blockSignals(False)
         self.populate_reps()
@@ -492,17 +480,20 @@ class AddPurchaseReturnWidget(QWidget):
                 self.rep_edit.addItem(rep_name, rep_id)  # Text shown, ID stored as data
             
         else:
-            QMessageBox.information(None, 'Error', query.lastError().text())
+            AppMessageBox.information(None, 'Error', query.lastError().text())
         
     
      
         
+    @Permissions.require_permission('purchasereturn.create')
     def save_purchase_return(self):
+        if not require_open_session(self):
+            return
 
         db = QSqlDatabase.database()
 
         if not db.transaction():
-            QMessageBox.critical(None, "Database Error", "Could not start transaction.")
+            AppMessageBox.critical(None, "Database Error", "Could not start transaction.")
             return
 
         try:
@@ -523,6 +514,21 @@ class AddPurchaseReturnWidget(QWidget):
             total = round(safe_float(self.final_amountdata.text()), 2)
             received = round(safe_float(self.receive_edit.text()), 2)
             remaining = round(safe_float(self.remainingdata.text()), 2)
+            supplier_name = self.supplier_edit.currentText().strip()
+
+            return_item_count = 0
+            for row in range(self.table.rowCount()):
+                qty_widget = self.table.cellWidget(row, 4)
+                if qty_widget is None:
+                    continue
+                try:
+                    if int(qty_widget.text() or 0) > 0:
+                        return_item_count += 1
+                except ValueError:
+                    continue
+
+            if return_item_count <= 0:
+                raise ValueError("Enter at least one returned item before saving the purchase return.")
 
             payment = self.payment_handler.payment_data.copy()
 
@@ -541,7 +547,7 @@ class AddPurchaseReturnWidget(QWidget):
             else:  # remaining < 0
                 payable = abs(remaining)
 
-            session_id = get_current_session(self)
+            session_id = get_active_session_id(strict=True)
             if session_id is None:
                 raise ValueError("No active session found.")
 
@@ -593,7 +599,7 @@ class AddPurchaseReturnWidget(QWidget):
                 supplier_receiveable = float(supplier_query.value(1) or 0.0)
             else:
                 print("Error fetching supplier:", supplier_query.lastError().text())
-                QMessageBox.critical(self, "Error", "Supplier not found or database error.")
+                AppMessageBox.critical(self, "Error", "Supplier not found or database error.")
                 raise Exception("Supplier not found or database error.")
 
             transaction_type = "PURCHASE RETURN"
@@ -621,13 +627,19 @@ class AddPurchaseReturnWidget(QWidget):
             receivable_after = receivable_before + current_receivable
 
             # Transaction meta fields
-            due_amount = 0.0
             paid_now = 0.0
-            remaining_due = 0.0
-
-            receiveable_now = total
             received_now = received
-            remaining_now = remaining
+
+            if current_receivable > 0.0:
+                due_amount = 0.0
+                remaining_due = payable_before
+                receiveable_now = current_receivable
+                remaining_now = receivable_after
+            else:
+                due_amount = current_payable
+                remaining_due = payable_after
+                receiveable_now = 0.0
+                remaining_now = receivable_before
 
             note = (
                 "Purchase Return recorded with total amount " + str(total) +
@@ -685,7 +697,7 @@ class AddPurchaseReturnWidget(QWidget):
                 print("Supplier transaction saved with ID:", insert_id)
             else:
                 print("Error inserting supplier transaction:", query.lastError().text())
-                QMessageBox.critical(None, "Error", query.lastError().text())
+                AppMessageBox.critical(None, "Error", query.lastError().text())
                 raise Exception(query.lastError().text())
 
             # Update supplier balances
@@ -706,20 +718,32 @@ class AddPurchaseReturnWidget(QWidget):
                 print("Supplier balances updated successfully")
             else:
                 print("Error updating supplier balances:", update_supplier.lastError().text())
-                QMessageBox.critical(self, "Error", update_supplier.lastError().text())
+                AppMessageBox.critical(self, "Error", update_supplier.lastError().text())
                 raise Exception(update_supplier.lastError().text())
 
             self.return_items(return_id)
 
         except Exception as e:
             print("An error occurred:", str(e))
-            QMessageBox.critical(None, "Error", f"An error occurred while saving the purchase return: {str(e)}")
+            AppMessageBox.critical(None, "Error", f"An error occurred while saving the purchase return: {str(e)}")
             db.rollback()
 
         else:
             db.commit()
+            log_activity(
+                category="purchase",
+                action="purchase_return_created",
+                entity_type="purchase_return",
+                entity_id=int(return_id),
+                note=(
+                    f"Purchase return #{return_id} was recorded for supplier {supplier_name or supplier}. "
+                    f"It includes {return_item_count} item(s) with a total value of {total}."
+                ),
+                previous_value=None,
+                new_value=str(total)
+            )
             print("Transaction committed successfully")
-            QMessageBox.information(None, "Success", "Purchase return saved successfully")
+            AppMessageBox.information(None, "Success", "Purchase return saved successfully")
             self.clear_fields()
 
         finally:
@@ -750,6 +774,8 @@ class AddPurchaseReturnWidget(QWidget):
 
 
         print("About to save returned items...")
+
+        processed_rows = 0
 
         for row in range(row_count):
             
@@ -859,8 +885,15 @@ class AddPurchaseReturnWidget(QWidget):
                 print("some problem occurred...while updating batch qty")
                 print("Error:", update_query.lastError().text())
                 raise Exception(update_query.lastError().text())
+
+            if update_query.numRowsAffected() == 0:
+                raise Exception(f"Batch quantity update failed for row {row + 1}.")
             
             print("update query executed successfully for batch update")
+            processed_rows += 1
+
+        if processed_rows <= 0:
+            raise ValueError("No purchase return items were posted.")
 
         return True
 
@@ -871,61 +904,6 @@ class AddPurchaseReturnWidget(QWidget):
         
         
         
-    def load_product_suggestions(self, item, completer):
-        
-        print("Loading Medicine Suggestions")
-        item = item
-        completer = completer
-        current_text = item.currentText() 
-        print("Current Text is: ", current_text)
-        
-        if current_text == '':
-            return 
-        
-        query = QSqlQuery()
-        query.prepare("SELECT id, display_name FROM product WHERE display_name LIKE ? LIMIT 10")
-        
-        value = f"%{current_text}%"
-        query.addBindValue(value)
-        
-        products = []
-        
-        if not query.exec():
-            
-            print("Something wrong happened...")
-        
-        else:
-        
-            while query.next():
-                
-                product_id = int(query.value(0))
-                label = query.value(1)
-                
-                products.append(label)
-                item.addItem(label, product_id)
-                
-        print(products)
-
-        
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        
-        data = products
-        model = QStringListModel()
-        model.setStringList(data)
-        
-        
-        completer.setModel(model)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        item.setCompleter(completer)
-        
-        completer.highlighted[str].connect(partial(self.on_completer_highlighted, item=item))
-
-        print("Setting Current Text")
-        item.lineEdit().setText(current_text)        
-        
-        
-        
-
     def on_batch_highlighted(self, text, item):
         
 
@@ -933,13 +911,27 @@ class AddPurchaseReturnWidget(QWidget):
         batch = self.table.cellWidget(row, 2).currentText()
         
         self.table.cellWidget(row, 3).clear()
+        self.table.cellWidget(row, 5).setText("0.00")
+        self.table.cellWidget(row, 6).setText("0.00")
         
         batch = batch.strip()
         print("Batch is: ", batch)
 
+        if not batch:
+            self.table.cellWidget(row, 2).setFocus()
+            return
+
+        product_id = self.table.cellWidget(row, 1).currentData()
+
         batch_query = QSqlQuery()
-        batch_query.prepare("SELECT quantity_remaining, unit_cost FROM batch WHERE batch_no = ?")
+        batch_query.prepare("""
+            SELECT quantity_remaining, unit_cost
+            FROM batch
+            WHERE batch_no = ? AND product_id = ?
+            LIMIT 1
+        """)
         batch_query.addBindValue(batch)
+        batch_query.addBindValue(product_id)
         
 
         try:
@@ -960,7 +952,15 @@ class AddPurchaseReturnWidget(QWidget):
                 self.table.cellWidget(row, 5).setText(rate)
                     
             else:
-                QMessageBox.information(None, 'Error', batch_query.lastError().text())
+                self.table.cellWidget(row, 2).setCurrentIndex(-1)
+                if self.table.cellWidget(row, 2).isEditable():
+                    self.table.cellWidget(row, 2).lineEdit().clear()
+                AppMessageBox.information(
+                    self,
+                    "Not Found",
+                    f"Batch '{batch}' was not found for the selected product."
+                )
+                self.table.cellWidget(row, 2).setFocus()
 
         except Exception as e:
                 
@@ -983,6 +983,7 @@ class AddPurchaseReturnWidget(QWidget):
             
         row = self.table.indexAt(item.pos()).row()
         product_id = self.table.cellWidget(row, 1).currentData()
+        supplier_id = self.supplier_edit.currentData()
         
         self.table.cellWidget(row, 2).clear()
         
@@ -990,13 +991,26 @@ class AddPurchaseReturnWidget(QWidget):
         print("Product id is: ", product_id)
 
         stock_query = QSqlQuery()
-        stock_query.prepare("SELECT batch_no FROM batch WHERE product_id = ? and source = 'PURCHASE' ")
+        stock_query.prepare("""
+            SELECT DISTINCT b.batch_no
+            FROM batch b
+            JOIN purchaseitem pi ON pi.id = b.purchaseitem_id
+            JOIN purchase p ON p.id = pi.purchase
+            WHERE b.product_id = ?
+              AND p.supplier = ?
+              AND b.quantity_remaining > 0
+              AND COALESCE(b.source, '') = 'PURCHASE'
+              AND b.batch_no IS NOT NULL
+              AND TRIM(b.batch_no) <> ''
+        """)
         stock_query.addBindValue(product_id)
+        stock_query.addBindValue(supplier_id)
         
 
         try:
             
             if stock_query.exec():
+                found_batches = False
                 
                 while stock_query.next():  
                       
@@ -1005,22 +1019,62 @@ class AddPurchaseReturnWidget(QWidget):
                     print(f"Batch info is: {batch}")
                     
                     self.table.cellWidget(row, 2).addItem(batch)
+                    found_batches = True
                     
                 
-                widget = self.table.cellWidget(row, 2)
-                self.table.cellWidget(row, 2).setCurrentIndex(0)
-                self.table.cellWidget(row, 3).setText('')
-                
-                widget.activated.connect(partial(self.update_amount(widget)))
+                if found_batches:
+                    widget = self.table.cellWidget(row, 2)
+                    self.table.cellWidget(row, 2).setCurrentIndex(0)
+                    self.table.cellWidget(row, 3).setText('')
+                    self.on_batch_highlighted(widget.currentText(), widget)
+
+                    try:
+                        widget.activated.disconnect()
+                    except Exception:
+                        pass
+                    widget.activated.connect(lambda _=None, w=widget: self.update_amount(w))
+                else:
+                    self.table.cellWidget(row, 3).clear()
+                    self.table.cellWidget(row, 5).setText("0.00")
+                    self.table.cellWidget(row, 6).setText("0.00")
+                    AppMessageBox.information(
+                        self,
+                        "No Eligible Batch",
+                        "No remaining purchase batches for this product were found for the selected supplier."
+                    )
+                    item.clear_selection()
+                    item.setFocus()
                 
                 
             else:
             
-                QMessageBox.information(None, 'Error', stock_query.lastError().text())
+                AppMessageBox.information(None, 'Error', stock_query.lastError().text())
 
         except Exception as e:
                 
             print(str(e))
+
+    def handle_product_return_pressed(self, product_box):
+        text = product_box.currentText().strip()
+        if not text:
+            return
+
+        if text.isdigit():
+            match = product_box.lookup_product_by_code(text)
+            if match:
+                product_id, display_name = match
+                product_box.select_result(display_name, product_id)
+                self.on_completer_highlighted(display_name, product_box)
+            else:
+                AppMessageBox.information(self, "Not Found", f"No product found for code/barcode '{text}'.")
+                product_box.clear_selection()
+                product_box.setFocus()
+            return
+
+        index = product_box.findText(text, Qt.MatchFixedString)
+        if index >= 0:
+            product_box.setCurrentIndex(index)
+            self.on_completer_highlighted(text, product_box)
         
     
                 
@@ -1038,7 +1092,7 @@ class AddPurchaseReturnWidget(QWidget):
             
             if int(qty_text) > int(remaining):
                 
-                QMessageBox.information(None, "Error", "Quantity cannot be greater than purchased stock")
+                AppMessageBox.information(None, "Error", "Quantity cannot be greater than purchased stock")
                 self.table.cellWidget(row, 4).setText("0")
                 qty_text = 0
             
@@ -1107,6 +1161,18 @@ class AddPurchaseReturnWidget(QWidget):
         
             
         self.add_row()
+        self.supplier_edit.setFocus()
+
+    def confirm_clear_return(self):
+        _, accepted = AppMessageBox.confirm(
+            self,
+            "Clear Purchase Return",
+            "Clear the current purchase return and reset all fields?",
+            confirm_label="Clear Return",
+            cancel_label="Keep Editing",
+        )
+        if accepted:
+            self.clear_fields()
 
 
 
@@ -1139,6 +1205,3 @@ class MyTable(QTableWidget):
         
 
     
-
-
-

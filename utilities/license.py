@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton, QMessageBox, QMainWindow
 )
 from PySide6.QtCore import Qt, QTimer
+from utilities.app_messagebox import AppMessageBox
 
 LICENSE_FILE = os.path.expanduser("~/.myapp_license_key")  # simple local store
 
@@ -75,7 +76,7 @@ class LicenseDialog(QDialog):
     def _on_activate(self):
         key = self.key_input.text().strip()
         if not key:
-            QMessageBox.warning(self, "No key", "Please enter a key to continue.")
+            AppMessageBox.warning(self, "No key", "Please enter a key to continue.")
             return
 
         # disable UI while "verifying"

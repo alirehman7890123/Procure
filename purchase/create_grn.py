@@ -1,0 +1,1646 @@
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QTableWidget,
+    QTableWidgetItem, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit, QLineEdit, QMessageBox,
+    QHeaderView, QGridLayout, QCheckBox, QSizePolicy, QDialog
+)
+from PySide6.QtCore import Qt, Signal, QDate, QTimer
+from PySide6.QtSql import QSqlQuery, QSqlDatabase
+import re
+
+from utilities.activity_logger import log_activity
+from utilities.payment_handler import PaymentMethodHandler
+from utilities.permissions import Permissions
+from utilities.session_gate import require_open_session
+from utilities.session_service import get_active_session_id
+from utilities.stylus import load_stylesheets
+from utilities.app_messagebox import AppMessageBox
+
+
+class MyTable(QTableWidget):
+    """Responsive table with column ratio scaling on widget resize."""
+    def __init__(self, rows=0, cols=0, column_ratios=None, parent=None):
+        super().__init__(rows, cols, parent)
+        self.column_ratios = column_ratios or []
+        header = self.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setMinimumSectionSize(10)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self.column_ratios:
+            return
+        total = sum(self.column_ratios)
+        if total <= 0:
+            return
+        width = self.viewport().width()
+        for i, ratio in enumerate(self.column_ratios):
+            self.setColumnWidth(i, int(width * (ratio / total)))
+
+
+class SelectAllLineEdit(QLineEdit):
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        QTimer.singleShot(0, self.selectAll)
+
+
+class SelectAllSpinBox(QSpinBox):
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        editor = self.lineEdit()
+        if editor is not None:
+            QTimer.singleShot(0, editor.selectAll)
+
+
+class SelectAllDoubleSpinBox(QDoubleSpinBox):
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        editor = self.lineEdit()
+        if editor is not None:
+            QTimer.singleShot(0, editor.selectAll)
+
+
+class DiscountDisplayEdit(SelectAllLineEdit):
+    activate_requested = Signal()
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            self.activate_requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
+class DiscountEditDialog(QDialog):
+    def __init__(self, parent=None, mode="percent", value=0.0):
+        super().__init__(parent)
+        self.setWindowTitle("Line Discount")
+        self.setModal(True)
+        self.setFixedWidth(332)
+        self.setStyleSheet("""
+            QDialog {
+                background: #FFFFFF;
+            }
+            QLabel {
+                color: #23313F;
+            }
+            QComboBox QAbstractItemView {
+                background: #FFFFFF;
+                color: #111111;
+                selection-background-color: #DCEAF5;
+                selection-color: #111111;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+
+        title = QLabel("Line Discount")
+        title.setObjectName("SectionTitle")
+        title.setStyleSheet("font-size: 14px; font-weight: 600; padding-left: 0;")
+        layout.addWidget(title)
+        layout.addStretch()
+
+        form = QGridLayout()
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(10)
+
+        type_label = QLabel("Type")
+        type_label.setStyleSheet("font-weight: 600; color: #4A5563; padding-left: 0;")
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Percentage", "percent")
+        self.mode_combo.addItem("Amount", "amount")
+
+        value_label = QLabel("Value")
+        value_label.setStyleSheet("font-weight: 600; color: #4A5563; padding-left: 0;")
+        self.value_spin = SelectAllDoubleSpinBox()
+        self.value_spin.setMinimum(0)
+        self.value_spin.setMaximum(10**9)
+        self.value_spin.setDecimals(2)
+        self.value_spin.setValue(float(value or 0.0))
+        if self.value_spin.lineEdit() is not None:
+            self.value_spin.lineEdit().setStyleSheet("color: #111111;")
+
+        form.addWidget(type_label, 0, 0)
+        form.addWidget(self.mode_combo, 0, 1)
+        form.addWidget(value_label, 1, 0)
+        form.addWidget(self.value_spin, 1, 1)
+        layout.addLayout(form)
+
+        footer = QHBoxLayout()
+        footer.setSpacing(10)
+        footer.addStretch()
+        cancel_btn = QPushButton("Cancel", objectName="TopRightButton")
+        save_btn = QPushButton("Apply", objectName="SaveButton")
+        cancel_btn.clicked.connect(self.reject)
+        save_btn.clicked.connect(self.accept)
+        save_btn.setFixedWidth(108)
+        footer.addWidget(cancel_btn)
+        footer.addWidget(save_btn)
+        layout.addLayout(footer)
+
+        mode_index = self.mode_combo.findData(mode or "percent")
+        self.mode_combo.setCurrentIndex(mode_index if mode_index >= 0 else 0)
+
+        if self.mode_combo.lineEdit() is not None:
+            self.mode_combo.lineEdit().setReadOnly(True)
+
+        self.mode_combo.activated.connect(lambda *_: QTimer.singleShot(0, self.value_spin.setFocus))
+        editor = self.value_spin.lineEdit()
+        if editor is not None:
+            editor.returnPressed.connect(self.accept)
+
+        QTimer.singleShot(0, self.value_spin.setFocus)
+
+    def selected_discount(self):
+        return self.mode_combo.currentData(), float(self.value_spin.value())
+
+
+class CreateGRNWidget(QWidget):
+    grn_list_signal = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self._line_refs = []
+
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(10, 4, 10, 10)
+        self.layout.setSpacing(8)
+        self.layout.setAlignment(Qt.AlignTop)
+
+        header = QHBoxLayout()
+        heading = QLabel("Create Goods Receipt", objectName="SectionTitle")
+        back_btn = QPushButton("Back to List", objectName="TopRightButton")
+        back_btn.setCursor(Qt.PointingHandCursor)
+        back_btn.clicked.connect(self.grn_list_signal.emit)
+        header.addWidget(heading)
+        header.addStretch()
+        header.addWidget(back_btn)
+        self.layout.addLayout(header)
+
+        line = QFrame()
+        line.setObjectName("lineSeparator")
+        line.setFrameShape(QFrame.HLine)
+        line.setStyleSheet("QFrame#lineSeparator { border: none; border-top: 2px solid #333; }")
+        self.layout.addWidget(line)
+
+        header_card = QFrame()
+        header_card.setObjectName("sectionCard")
+        header_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        header_layout = QVBoxLayout(header_card)
+        header_layout.setSpacing(10)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(12)
+        notes_row = QHBoxLayout()
+        notes_row.setSpacing(12)
+
+        label_style = "font-weight: 600; color: #4A5563; padding-left: 0;"
+
+        self.po_combo = QComboBox()
+        self.po_combo.currentIndexChanged.connect(self.load_po_lines)
+        self.grn_number_edit = QLineEdit()
+        self.grn_number_edit.setPlaceholderText("Auto-generated (GRN-1001+) if empty")
+        self.grn_date_edit = QDateEdit()
+        self.grn_date_edit.setCalendarPopup(True)
+        self.grn_date_edit.setDate(QDate.currentDate())
+        self.supplier_value = QLineEdit()
+        self.supplier_value.setReadOnly(True)
+        self.supplier_value.setPlaceholderText("Supplier from selected PO")
+        self.rep_combo = QComboBox()
+        self.rep_combo.setPlaceholderText("Select rep")
+        self.notes_edit = QLineEdit()
+        self.notes_edit.setPlaceholderText("Receipt notes...")
+
+        po_label = QLabel("PO")
+        po_label.setStyleSheet(label_style)
+        po_label.setFixedWidth(72)
+        grn_number_label = QLabel("GRN Number")
+        grn_number_label.setStyleSheet(label_style)
+        grn_number_label.setFixedWidth(92)
+        grn_date_label = QLabel("GRN Date")
+        grn_date_label.setStyleSheet(label_style)
+        grn_date_label.setFixedWidth(72)
+        supplier_label = QLabel("Supplier")
+        supplier_label.setStyleSheet(label_style)
+        supplier_label.setFixedWidth(78)
+        rep_label = QLabel("Seller Rep")
+        rep_label.setStyleSheet(label_style)
+        rep_label.setFixedWidth(84)
+        notes_label = QLabel("Notes")
+        notes_label.setStyleSheet(label_style)
+        notes_label.setFixedWidth(72)
+
+        top_row.addWidget(po_label, 0)
+        top_row.addWidget(self.po_combo, 2)
+        top_row.addWidget(grn_number_label, 0)
+        top_row.addWidget(self.grn_number_edit, 2)
+        top_row.addWidget(grn_date_label, 0)
+        top_row.addWidget(self.grn_date_edit, 1)
+        top_row.addWidget(supplier_label, 0)
+        top_row.addWidget(self.supplier_value, 4)
+        top_row.addWidget(rep_label, 0)
+        top_row.addWidget(self.rep_combo, 2)
+
+        notes_row.addWidget(notes_label, 0)
+        notes_row.addWidget(self.notes_edit, 1)
+
+        header_layout.addLayout(top_row)
+        header_layout.addLayout(notes_row)
+        self.layout.addWidget(header_card)
+
+        # Product, batch, expiry, ordered, previous received, remaining,
+        # this GRN receipt qty, unit price, discount, tax, line total
+        self.items_table = MyTable(column_ratios=[0.18, 0.10, 0.10, 0.07, 0.07, 0.08, 0.08, 0.10, 0.07, 0.07, 0.08])
+        headers = [
+            "Product",
+            "Batch",
+            "Expiry (DD-MM-YYYY)",
+            "Qty Ord",
+            "Qty Prev",
+            "Qty Rem",
+            "Qty This GRN",
+            "Unit Price",
+            "Discount",
+            "Tax",
+            "Line Total",
+        ]
+        self.items_table.setColumnCount(len(headers))
+        self.items_table.setHorizontalHeaderLabels(headers)
+        self.items_table.verticalHeader().setVisible(False)
+        self.items_table.setAlternatingRowColors(True)
+        self.items_table.setMinimumWidth(900)
+        self.items_table.setFixedHeight(360)
+        self.items_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.items_table.setStyleSheet("""
+            QTableWidget::item { color: #333; border: none; }
+            QLineEdit { color: #333; background: #f9f9f9; border: 1px solid #ccc; border-radius: 3px; padding: 2px 4px; }
+            QSpinBox, QDoubleSpinBox { color: #333; background: #f9f9f9; border: 1px solid #ccc; border-radius: 3px; padding: 2px 4px; }
+            QComboBox { color: #333; background: #f9f9f9; border: 1px solid #ccc; border-radius: 3px; padding: 2px 4px; }
+            QDateEdit { color: #333; background: #f9f9f9; border: 1px solid #ccc; border-radius: 3px; padding: 2px 4px; }
+        """)
+        self.layout.addWidget(self.items_table)
+
+        # ===== ADD TOTALS/BILLING SECTION (matching purchase invoice) =====
+        totals_card = QFrame()
+        totals_card.setObjectName("sectionCard")
+        totals_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        totals_layout = QVBoxLayout(totals_card)
+        totals_layout.setContentsMargins(10, 10, 10, 10)
+        totals_layout.setSpacing(14)
+
+        totals_title = QLabel("Billing & Settlement")
+        totals_title.setStyleSheet("font-weight: 600; color: #2F5D7C; padding-left: 0;")
+        totals_layout.addWidget(totals_title)
+
+        totals_grid = QGridLayout()
+        totals_grid.setHorizontalSpacing(12)
+        totals_grid.setVerticalSpacing(10)
+
+        metric_label_style = "font-weight: 600; color: #4A5563; padding-left: 0;"
+        emphasis_style = "font-weight: 600; color: #2F5D7C;"
+
+        self.payment_handler = PaymentMethodHandler(self)
+
+        subtotal_title = QLabel("Subtotal")
+        subtotal_title.setStyleSheet(metric_label_style)
+        totals_grid.addWidget(subtotal_title, 0, 0)
+        self.subtotal_label = QLineEdit()
+        self.subtotal_label.setReadOnly(True)
+        self.subtotal_label.setText("0.00")
+        totals_grid.addWidget(self.subtotal_label, 0, 1)
+
+        discount_title = QLabel("Discount")
+        discount_title.setStyleSheet(metric_label_style)
+        totals_grid.addWidget(discount_title, 0, 2)
+        self.header_discount_edit = QLineEdit()
+        self.header_discount_edit.setText("0.00")
+        self.header_discount_edit.textChanged.connect(self.recalculate_landing_costs)
+        totals_grid.addWidget(self.header_discount_edit, 0, 3)
+
+        tax_236g_title = QLabel("Tax 236(G)")
+        tax_236g_title.setStyleSheet(metric_label_style)
+        totals_grid.addWidget(tax_236g_title, 0, 4)
+        self.tax_236g_edit = QLineEdit()
+        self.tax_236g_edit.setText("0.00")
+        self.tax_236g_edit.textChanged.connect(self.recalculate_landing_costs)
+        totals_grid.addWidget(self.tax_236g_edit, 0, 5)
+
+        tax_236h_title = QLabel("Tax 236(H)")
+        tax_236h_title.setStyleSheet(metric_label_style)
+        totals_grid.addWidget(tax_236h_title, 1, 0)
+        self.tax_236h_edit = QLineEdit()
+        self.tax_236h_edit.setText("0.00")
+        self.tax_236h_edit.textChanged.connect(self.recalculate_landing_costs)
+        totals_grid.addWidget(self.tax_236h_edit, 1, 1)
+
+        sales_tax_title = QLabel("Sales Tax")
+        sales_tax_title.setStyleSheet(metric_label_style)
+        totals_grid.addWidget(sales_tax_title, 1, 2)
+        self.sales_tax_edit = QLineEdit()
+        self.sales_tax_edit.setText("0.00")
+        self.sales_tax_edit.textChanged.connect(self.recalculate_landing_costs)
+        totals_grid.addWidget(self.sales_tax_edit, 1, 3)
+
+        cn_adjust_title = QLabel("CN Adjustment")
+        cn_adjust_title.setStyleSheet(metric_label_style)
+        totals_grid.addWidget(cn_adjust_title, 1, 4)
+        self.cn_adjustment_edit = QLineEdit()
+        self.cn_adjustment_edit.setText("0.00")
+        self.cn_adjustment_edit.textChanged.connect(self.recalculate_landing_costs)
+        totals_grid.addWidget(self.cn_adjustment_edit, 1, 5)
+
+        taxable_title = QLabel("Taxable")
+        taxable_title.setStyleSheet(metric_label_style)
+        totals_grid.addWidget(taxable_title, 2, 0)
+        self.taxable_label = QLineEdit()
+        self.taxable_label.setReadOnly(True)
+        self.taxable_label.setText("0.00")
+        totals_grid.addWidget(self.taxable_label, 2, 1)
+
+        net_amount_title = QLabel("Net Amount")
+        net_amount_title.setStyleSheet(metric_label_style)
+        totals_grid.addWidget(net_amount_title, 2, 2)
+        self.net_amount_label = QLineEdit()
+        self.net_amount_label.setReadOnly(True)
+        self.net_amount_label.setText("0.00")
+        self.net_amount_label.setStyleSheet(emphasis_style)
+        totals_grid.addWidget(self.net_amount_label, 2, 3)
+
+        payment_title = QLabel("Payment Method")
+        payment_title.setStyleSheet(metric_label_style)
+        totals_grid.addWidget(payment_title, 2, 4)
+        self.payment_method = QComboBox()
+        self.payment_method.addItems(["Cash", "Bank Transfer", "EasyPaisa", "JazzCash"])
+        self.payment_method.currentTextChanged.connect(self.on_payment_method_changed)
+        totals_grid.addWidget(self.payment_method, 2, 5)
+
+        due_date_title = QLabel("Due Date")
+        due_date_title.setStyleSheet(metric_label_style)
+        totals_grid.addWidget(due_date_title, 3, 0)
+        self.due_date_combo = QComboBox()
+        self.due_date_combo.addItems(["None", "+15 days", "+30 days", "+45 days", "+60 days", "+90 days"])
+        self.due_date_combo.setCurrentText("None")
+        self.due_date_combo.setEnabled(False)
+        totals_grid.addWidget(self.due_date_combo, 3, 1)
+
+        total_value_title = QLabel("Total Value")
+        total_value_title.setStyleSheet(metric_label_style)
+        totals_grid.addWidget(total_value_title, 3, 2)
+        self.total_with_fees_label = QLineEdit()
+        self.total_with_fees_label.setReadOnly(True)
+        self.total_with_fees_label.setText("0.00")
+        self.total_with_fees_label.setStyleSheet(emphasis_style)
+        totals_grid.addWidget(self.total_with_fees_label, 3, 3)
+
+        paid_amount_title = QLabel("Paid Amount")
+        paid_amount_title.setStyleSheet(metric_label_style)
+        totals_grid.addWidget(paid_amount_title, 3, 4)
+        self.paid_amount = QLineEdit()
+        self.paid_amount.setText("0.00")
+        totals_grid.addWidget(self.paid_amount, 3, 5)
+
+        remaining_title = QLabel("Remaining Amount")
+        remaining_title.setStyleSheet(metric_label_style)
+        totals_grid.addWidget(remaining_title, 4, 0)
+        self.remaining_amount = QLineEdit()
+        self.remaining_amount.setReadOnly(True)
+        self.remaining_amount.setText("0.00")
+        self.remaining_amount.setStyleSheet(emphasis_style)
+        totals_grid.addWidget(self.remaining_amount, 4, 1)
+
+        self.writeoff_check = QCheckBox("Write-off Remaining")
+        totals_grid.addWidget(self.writeoff_check, 4, 2, 1, 2)
+
+        for col in range(6):
+            if col % 2 == 0:
+                totals_grid.setColumnStretch(col, 0)
+            else:
+                totals_grid.setColumnStretch(col, 1)
+
+        totals_layout.addLayout(totals_grid)
+        self.layout.addWidget(totals_card)
+
+        footer = QHBoxLayout()
+        footer.addWidget(QLabel("Line Subtotal:"))
+        self.total_label = QLabel("0.00")
+        footer.addWidget(self.total_label)
+        footer.addStretch()
+
+        save_btn = QPushButton("Save GRN", objectName="TopRightButton")
+        save_btn.setCursor(Qt.PointingHandCursor)
+        save_btn.clicked.connect(self.save_grn)
+
+        footer.addSpacing(24)
+        footer.addWidget(save_btn)
+        self.layout.addLayout(footer)
+
+        self.paid_amount.textChanged.connect(self.calculate_payment)
+        self.paid_amount.textChanged.connect(self.update_due_date_availability)
+        self.writeoff_check.toggled.connect(self.update_due_date_availability)
+
+        self.setStyleSheet(load_stylesheets())
+
+    def _create_discount_editor(self, row):
+        editor = DiscountDisplayEdit()
+        editor.setReadOnly(True)
+        editor.setPlaceholderText("0.00")
+        editor.setProperty("discount_input_mode", "percent")
+        editor.setProperty("discount_input_value", 0.0)
+        editor.setProperty("discount_amount", 0.0)
+        editor.activate_requested.connect(lambda r=row: self.open_discount_dialog(r))
+        return editor
+
+    def _discount_widget(self, row):
+        return self.items_table.cellWidget(row, 8)
+
+    def _format_number(self, value):
+        text = f"{float(value):.2f}"
+        if "." in text:
+            text = text.rstrip("0").rstrip(".")
+        return text
+
+    def _line_discount_amount(self, row, qty, price):
+        discount_widget = self._discount_widget(row)
+        if discount_widget is None:
+            return 0.0
+
+        discount_value = float(discount_widget.property("discount_input_value") or 0.0)
+        mode = str(discount_widget.property("discount_input_mode") or "amount")
+        base_amount = max(qty * price, 0.0)
+
+        if mode == "percent":
+            return max(0.0, min(base_amount, (base_amount * discount_value) / 100.0))
+        return max(0.0, min(base_amount, discount_value))
+
+    def update_discount_display(self, row):
+        discount_widget = self._discount_widget(row)
+        qty_widget = self.items_table.cellWidget(row, 6)
+        price_widget = self.items_table.cellWidget(row, 7)
+        if discount_widget is None or qty_widget is None or price_widget is None:
+            return
+
+        qty = float(qty_widget.value())
+        price = float(price_widget.value())
+        base_amount = max(qty * price, 0.0)
+        discount_amount = self._line_discount_amount(row, qty, price)
+        input_value = float(discount_widget.property("discount_input_value") or 0.0)
+        mode = str(discount_widget.property("discount_input_mode") or "percent")
+        discount_widget.setProperty("discount_amount", discount_amount)
+
+        if discount_amount <= 0:
+            discount_widget.setText("0.00")
+            return
+
+        if mode == "percent":
+            summary = f"{discount_amount:.2f} ({self._format_number(input_value)}%)"
+        elif base_amount > 0:
+            implied_percent = (discount_amount / base_amount) * 100.0
+            summary = f"{discount_amount:.2f} ({self._format_number(implied_percent)}%)"
+        else:
+            summary = f"{discount_amount:.2f}"
+
+        discount_widget.setText(summary)
+
+    def focus_widget(self, widget):
+        if widget is None:
+            return
+        widget.setFocus()
+        if isinstance(widget, QLineEdit):
+            widget.selectAll()
+        elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+            editor = widget.lineEdit()
+            if editor is not None:
+                editor.selectAll()
+
+    def focus_table_cell_widget(self, row, column):
+        if row < 0 or row >= self.items_table.rowCount():
+            return
+        widget = self.items_table.cellWidget(row, column)
+        self.focus_widget(widget)
+
+    def advance_after_tax(self, row):
+        next_row = row + 1
+        if next_row < self.items_table.rowCount():
+            self.focus_table_cell_widget(next_row, 1)
+        else:
+            self.focus_widget(self.header_discount_edit)
+
+    def open_discount_dialog(self, row):
+        discount_widget = self._discount_widget(row)
+        qty_widget = self.items_table.cellWidget(row, 6)
+        price_widget = self.items_table.cellWidget(row, 7)
+        if discount_widget is None or qty_widget is None or price_widget is None:
+            return
+
+        dialog = DiscountEditDialog(
+            self,
+            mode=str(discount_widget.property("discount_input_mode") or "percent"),
+            value=float(discount_widget.property("discount_input_value") or 0.0),
+        )
+        if dialog.exec() == QDialog.Accepted:
+            mode, value = dialog.selected_discount()
+            discount_widget.setProperty("discount_input_mode", mode)
+            discount_widget.setProperty("discount_input_value", value)
+            self.update_discount_display(row)
+            self.recalculate_totals()
+            self.focus_table_cell_widget(row, 9)
+        else:
+            self.focus_widget(discount_widget)
+
+    def _read_money(self, edit: QLineEdit) -> float:
+        try:
+            return float((edit.text() or "").strip() or 0.0)
+        except (AttributeError, TypeError, ValueError):
+            return 0.0
+
+    def on_payment_method_changed(self, method):
+        success = self.payment_handler.handle_method_change(method)
+        if not success:
+            self.payment_method.blockSignals(True)
+            self.payment_method.setCurrentText("Cash")
+            self.payment_method.blockSignals(False)
+
+    def calculate_payment(self):
+        total_value = self._read_money(self.total_with_fees_label)
+        paid = self._read_money(self.paid_amount)
+        remaining = total_value - paid
+        self.remaining_amount.setText(f"{remaining:.2f}")
+
+    def update_due_date_availability(self):
+        remaining = self._read_money(self.remaining_amount)
+        should_enable = remaining > 0 and not self.writeoff_check.isChecked()
+        self.due_date_combo.setEnabled(should_enable)
+        if not should_enable:
+            self.due_date_combo.setCurrentText("None")
+
+    def compute_due_date(self):
+        selected = self.due_date_combo.currentText().strip()
+        if selected == "None":
+            return None
+
+        offset_map = {
+            "+15 days": 15,
+            "+30 days": 30,
+            "+45 days": 45,
+            "+60 days": 60,
+            "+90 days": 90,
+        }
+        days = offset_map.get(selected)
+        if days is None:
+            return None
+
+        return QDate.currentDate().addDays(days).toString("yyyy-MM-dd")
+
+    def prepare_new_grn(self):
+        self.notes_edit.clear()
+        self.grn_number_edit.clear()
+        self.grn_date_edit.setDate(QDate.currentDate())
+        self.supplier_value.clear()
+        self.rep_combo.clear()
+        self.header_discount_edit.setText("0.00")
+        self.tax_236g_edit.setText("0.00")
+        self.tax_236h_edit.setText("0.00")
+        self.sales_tax_edit.setText("0.00")
+        self.cn_adjustment_edit.setText("0.00")
+        self.subtotal_label.setText("0.00")
+        self.taxable_label.setText("0.00")
+        self.net_amount_label.setText("0.00")
+        self.total_with_fees_label.setText("0.00")
+        self.paid_amount.setText("0.00")
+        self.remaining_amount.setText("0.00")
+        self.writeoff_check.setChecked(False)
+        self.due_date_combo.setCurrentText("None")
+        self.due_date_combo.setEnabled(False)
+        self.payment_method.blockSignals(True)
+        self.payment_method.setCurrentText("Cash")
+        self.payment_method.blockSignals(False)
+        self.payment_handler.handle_method_change("Cash")
+        self.load_po_options()
+
+    def load_po_options(self):
+        self.po_combo.blockSignals(True)
+        self.po_combo.clear()
+
+        query = QSqlQuery()
+        if not query.exec("""
+            SELECT
+                po.id,
+                po.po_number
+            FROM purchase_order po
+            WHERE po.status IN ('draft', 'sent', 'partial_received')
+              AND COALESCE((SELECT SUM(qty_ordered) FROM purchase_order_line WHERE po_id = po.id), 0) >
+                  COALESCE((
+                      SELECT SUM(grl.qty_received)
+                      FROM goods_receipt_line grl
+                      JOIN purchase_order_line pol ON pol.id = grl.po_line_id
+                      WHERE pol.po_id = po.id
+                  ), 0)
+            ORDER BY po.id DESC
+        """):
+            self.po_combo.blockSignals(False)
+            print("PO options load failed:", query.lastError().text())
+            return
+
+        while query.next():
+            self.po_combo.addItem(str(query.value(1) or ""), int(query.value(0) or 0))
+
+        self.po_combo.blockSignals(False)
+        self.load_po_lines()
+
+    def populate_reps_for_po(self, po_id):
+        self.supplier_value.clear()
+        self.rep_combo.clear()
+
+        if not po_id:
+            return
+
+        supplier_query = QSqlQuery()
+        supplier_query.prepare("""
+            SELECT s.id, s.name
+            FROM purchase_order po
+            JOIN supplier s ON po.supplier = s.id
+            WHERE po.id = ?
+        """)
+        supplier_query.addBindValue(int(po_id))
+
+        if not supplier_query.exec() or not supplier_query.next():
+            return
+
+        supplier_id = int(supplier_query.value(0) or 0)
+        self.supplier_value.setText(str(supplier_query.value(1) or ""))
+
+        rep_query = QSqlQuery()
+        rep_query.prepare("""
+            SELECT id, name
+            FROM rep
+            WHERE supplier_id = ?
+            ORDER BY name
+        """)
+        rep_query.addBindValue(supplier_id)
+        if not rep_query.exec():
+            return
+
+        while rep_query.next():
+            self.rep_combo.addItem(str(rep_query.value(1) or ""), int(rep_query.value(0) or 0))
+
+        if self.rep_combo.count() > 0:
+            self.rep_combo.setCurrentIndex(0)
+
+    def load_po_lines(self):
+        self.items_table.setRowCount(0)
+        self._line_refs = []
+        self.total_label.setText("0.00")
+
+        po_id = self.po_combo.currentData()
+        self.populate_reps_for_po(po_id)
+        if not po_id:
+            return
+
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT
+                pol.id,
+                pol.product,
+                p.display_name,
+                pol.qty_ordered,
+                pol.unit_price,
+                COALESCE(SUM(grl.qty_received), 0) AS qty_prev_received
+            FROM purchase_order_line pol
+            JOIN product p ON pol.product = p.id
+            LEFT JOIN goods_receipt_line grl ON grl.po_line_id = pol.id
+            WHERE pol.po_id = ?
+            GROUP BY pol.id, pol.product, p.display_name, pol.qty_ordered, pol.unit_price
+            ORDER BY pol.id ASC
+        """)
+        query.addBindValue(int(po_id))
+
+        if not query.exec():
+            print("PO lines load failed:", query.lastError().text())
+            return
+
+        row = 0
+        while query.next():
+            po_line_id = int(query.value(0) or 0)
+            product_id = int(query.value(1) or 0)
+            product_name = str(query.value(2) or "")
+            qty_ordered = int(query.value(3) or 0)
+            unit_price = float(query.value(4) or 0)
+            qty_prev_received = int(query.value(5) or 0)
+            qty_remaining = max(qty_ordered - qty_prev_received, 0)
+
+            if qty_remaining <= 0:
+                continue
+
+            self.items_table.insertRow(row)
+            
+            # Column 0: Product name
+            self.items_table.setItem(row, 0, QTableWidgetItem(product_name))
+            
+            # Column 1: Batch Number (editable)
+            batch_edit = SelectAllLineEdit()
+            batch_edit.setPlaceholderText("Batch #")
+            batch_edit.textChanged.connect(self.recalculate_totals)
+            self.items_table.setCellWidget(row, 1, batch_edit)
+            
+            # Column 2: Expiry Date (editable with date mask)
+            expiry_edit = SelectAllLineEdit()
+            expiry_edit.setInputMask("00-00-0000")
+            expiry_edit.setPlaceholderText("DD-MM-YYYY")
+            expiry_edit.textChanged.connect(self.recalculate_totals)
+            self.items_table.setCellWidget(row, 2, expiry_edit)
+            
+            # Column 3: Qty Ordered (read-only)
+            qty_ordered_item = QTableWidgetItem(str(qty_ordered))
+            qty_ordered_item.setFlags(qty_ordered_item.flags() & ~Qt.ItemIsEditable)
+            self.items_table.setItem(row, 3, qty_ordered_item)
+
+            # Column 4: Previously Received (read-only)
+            qty_prev_item = QTableWidgetItem(str(qty_prev_received))
+            qty_prev_item.setFlags(qty_prev_item.flags() & ~Qt.ItemIsEditable)
+            self.items_table.setItem(row, 4, qty_prev_item)
+
+            # Column 5: Remaining (read-only)
+            qty_remaining_item = QTableWidgetItem(str(qty_remaining))
+            qty_remaining_item.setFlags(qty_remaining_item.flags() & ~Qt.ItemIsEditable)
+            self.items_table.setItem(row, 5, qty_remaining_item)
+
+            # Column 6: Qty Received on this GRN
+            qty_received = SelectAllSpinBox()
+            qty_received.setMinimum(0)
+            qty_received.setMaximum(qty_remaining)
+            qty_received.setValue(qty_remaining)
+            qty_received.valueChanged.connect(self.recalculate_totals)
+            self.items_table.setCellWidget(row, 6, qty_received)
+
+            # Column 7: Unit Price (editable spin box)
+            price_box = SelectAllDoubleSpinBox()
+            price_box.setMinimum(0)
+            price_box.setMaximum(10**9)
+            price_box.setDecimals(2)
+            price_box.setValue(unit_price)
+            price_box.valueChanged.connect(self.recalculate_totals)
+            self.items_table.setCellWidget(row, 7, price_box)
+            
+            # Column 8: Discount (amount or percent via popup editor)
+            discount_editor = self._create_discount_editor(row)
+            self.items_table.setCellWidget(row, 8, discount_editor)
+            
+            # Column 9: Tax (editable spin box)
+            tax_box = SelectAllDoubleSpinBox()
+            tax_box.setMinimum(0)
+            tax_box.setMaximum(10**9)
+            tax_box.setDecimals(2)
+            tax_box.setValue(0.0)
+            tax_box.setToolTip("Tax amount on this line")
+            tax_box.valueChanged.connect(self.recalculate_totals)
+            self.items_table.setCellWidget(row, 9, tax_box)
+
+            # Column 10: Line Total (read-only, calculated)
+            total_item = QTableWidgetItem(f"{qty_remaining * unit_price:.2f}")
+            total_item.setFlags(total_item.flags() & ~Qt.ItemIsEditable)
+            self.items_table.setItem(row, 10, total_item)
+
+            self._line_refs.append({
+                "po_line_id": po_line_id,
+                "product_id": product_id,  # Product ID is stored here for later use in stock batch creation
+                "qty_ordered": qty_ordered,
+                "qty_prev_received": qty_prev_received,
+                "qty_remaining": qty_remaining,
+            })
+
+            batch_edit.returnPressed.connect(lambda r=row: self.focus_table_cell_widget(r, 2))
+            expiry_edit.returnPressed.connect(lambda r=row: self.focus_table_cell_widget(r, 6))
+            qty_received.lineEdit().returnPressed.connect(lambda r=row: self.focus_table_cell_widget(r, 7))
+            price_box.lineEdit().returnPressed.connect(lambda r=row: self.focus_table_cell_widget(r, 8))
+            tax_box.lineEdit().returnPressed.connect(lambda r=row: self.advance_after_tax(r))
+
+            row += 1
+
+        self.recalculate_totals()
+
+    def recalculate_totals(self):
+        total = 0.0
+        for row in range(self.items_table.rowCount()):
+            qty_widget = self.items_table.cellWidget(row, 6)
+            price_widget = self.items_table.cellWidget(row, 7)
+            tax_widget = self.items_table.cellWidget(row, 9)
+            
+            if qty_widget is None or price_widget is None:
+                continue
+            
+            qty = float(qty_widget.value())
+            price = float(price_widget.value())
+            discount = self._line_discount_amount(row, qty, price)
+            tax = float(tax_widget.value()) if tax_widget else 0.0
+            
+            # Line total = (Qty * Price) - Discount + Tax
+            line_total = (qty * price) - discount + tax
+            total += line_total
+            
+            # Update column 10: Line Total
+            item = self.items_table.item(row, 10)
+            if item is not None:
+                item.setText(f"{line_total:.2f}")
+            self.update_discount_display(row)
+        
+        self.total_label.setText(f"{total:.2f}")
+        # Recalculate landing costs whenever totals change
+        self.recalculate_landing_costs()
+
+    def recalculate_landing_costs(self):
+        """
+        Calculate landing cost for each line item by distributing header-level fees.
+        Landing Cost = Line Total * (Total with Fees / Line Subtotal)
+        
+        This matches the sales effective_line_total pattern.
+        """
+        # Get header adjustments (amount fields, matching purchase invoice)
+        header_discount = self._read_money(self.header_discount_edit)
+        tax_236g = self._read_money(self.tax_236g_edit)
+        tax_236h = self._read_money(self.tax_236h_edit)
+        sales_tax = self._read_money(self.sales_tax_edit)
+        cn_adjustment = self._read_money(self.cn_adjustment_edit)
+        
+        # Calculate subtotal and total from all line items
+        line_subtotal = 0.0
+        for row in range(self.items_table.rowCount()):
+            item = self.items_table.item(row, 10)
+            if item:
+                try:
+                    line_subtotal += float(item.text() or 0)
+                except ValueError:
+                    pass
+        
+        taxable = line_subtotal - header_discount
+        net_amount = taxable + tax_236g + sales_tax - tax_236h
+        # Keep landing-cost distribution aligned with purchase invoice behavior.
+        total_with_fees = line_subtotal - header_discount + tax_236g - tax_236h + sales_tax - cn_adjustment
+        
+        # Update header displays
+        self.subtotal_label.setText(f"{line_subtotal:.2f}")
+        self.taxable_label.setText(f"{taxable:.2f}")
+        self.net_amount_label.setText(f"{net_amount:.2f}")
+        self.total_with_fees_label.setText(f"{total_with_fees:.2f}")
+        self.calculate_payment()
+        self.update_due_date_availability()
+        
+        # Calculate distribution factor
+        if line_subtotal > 0:
+            distribution_factor = total_with_fees / line_subtotal
+        else:
+            distribution_factor = 1.0
+        
+        # Store landing costs in _line_refs for later use
+        for row in range(len(self._line_refs)):
+            item = self.items_table.item(row, 10)
+            if item:
+                try:
+                    line_total = float(item.text() or 0)
+                    landing_cost = line_total * distribution_factor
+                    self._line_refs[row]["landing_cost"] = landing_cost
+                except ValueError:
+                    self._line_refs[row]["landing_cost"] = 0.0
+
+
+    def create_stock_batches_from_receipts(self, receipt_rows, grn_number):
+        posted_rows = 0
+
+        for row in receipt_rows:
+            product_id = int(row.get("product_id") or 0)
+            qty_received = int(row.get("qty_received") or 0)
+            unit_price = float(row.get("unit_price") or 0.0)
+            landing_cost = float(row.get("landing_cost") or unit_price)
+            purchaseitem_id = row.get("purchaseitem_id")
+            batch_no = row.get("batch_no") or None
+            expiry_date = row.get("expiry_date") or None
+
+            if product_id <= 0 or qty_received <= 0:
+                continue
+
+            size_query = QSqlQuery()
+            size_query.prepare("SELECT pack_size FROM price_pack WHERE product_id = ? AND is_default = 1 LIMIT 1")
+            size_query.addBindValue(product_id)
+
+            pack_size = 1
+            if size_query.exec() and size_query.next():
+                try:
+                    pack_size = int(size_query.value(0) or 1)
+                except (TypeError, ValueError):
+                    pack_size = 1
+
+            if pack_size <= 0:
+                pack_size = 1
+
+            total_received_units = int(qty_received * pack_size)
+            # landing_cost is the total allocated cost for the received line.
+            # Convert it to an actual per-unit cost for stock valuation / COGS.
+            landing_cost_per_unit = round(
+                landing_cost / (qty_received * pack_size), 6
+            ) if qty_received > 0 and pack_size > 0 else 0.0
+
+            batch_query = QSqlQuery()
+            batch_query.prepare("""
+                INSERT INTO batch (
+                    batch_no,
+                    expiry_date,
+                    product_id,
+                    purchaseitem_id,
+                    total_received,
+                    paid_qty,
+                    quantity_remaining,
+                    unit_cost,
+                    source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """)
+
+            # Use batch_no and expiry_date from GRN line items instead of NULL
+            batch_query.addBindValue(batch_no)
+            batch_query.addBindValue(expiry_date)
+            batch_query.addBindValue(product_id)
+            batch_query.addBindValue(purchaseitem_id if purchaseitem_id else None)
+            batch_query.addBindValue(total_received_units)
+            batch_query.addBindValue(total_received_units)
+            batch_query.addBindValue(total_received_units)
+            batch_query.addBindValue(landing_cost_per_unit)
+            batch_query.addBindValue("PURCHASE")
+
+            if not batch_query.exec():
+                raise Exception(f"Batch creation failed: {batch_query.lastError().text()}")
+
+            status_query = QSqlQuery()
+            status_query.prepare("UPDATE product SET status = 'used' WHERE id = ?")
+            status_query.addBindValue(product_id)
+            if not status_query.exec():
+                raise Exception(f"Product status update failed: {status_query.lastError().text()}")
+
+            posted_rows += 1
+
+        return posted_rows
+
+    def get_po_supplier(self, po_id):
+        query = QSqlQuery()
+        query.prepare("SELECT supplier FROM purchase_order WHERE id = ?")
+        query.addBindValue(int(po_id))
+        if not query.exec() or not query.next():
+            raise Exception("Could not resolve supplier for selected PO.")
+        return int(query.value(0) or 0)
+
+    def update_po_status_from_receipts(self, po_id):
+        status_query = QSqlQuery()
+        status_query.prepare("SELECT status, po_number FROM purchase_order WHERE id = ?")
+        status_query.addBindValue(int(po_id))
+        if not status_query.exec() or not status_query.next():
+            raise Exception("Could not read current PO status.")
+
+        current_status = str(status_query.value(0) or "")
+        po_number = str(status_query.value(1) or "")
+
+        if current_status == "closed":
+            return current_status
+
+        totals_query = QSqlQuery()
+        totals_query.prepare("""
+            SELECT
+                COALESCE((SELECT SUM(qty_ordered) FROM purchase_order_line WHERE po_id = ?), 0),
+                COALESCE((
+                    SELECT SUM(grl.qty_received)
+                    FROM goods_receipt_line grl
+                    JOIN goods_receipt gr ON gr.id = grl.grn_id
+                    JOIN purchase_order_line pol ON pol.id = grl.po_line_id
+                    WHERE gr.po_id = ?
+                ), 0)
+        """)
+        totals_query.addBindValue(int(po_id))
+        totals_query.addBindValue(int(po_id))
+
+        if not totals_query.exec() or not totals_query.next():
+            raise Exception("Could not compute PO receipt totals.")
+
+        ordered_total = float(totals_query.value(0) or 0)
+        received_total = float(totals_query.value(1) or 0)
+
+        new_status = current_status
+        if ordered_total > 0:
+            if received_total <= 0:
+                new_status = "sent"
+            elif received_total < ordered_total:
+                new_status = "partial_received"
+            else:
+                new_status = "received"
+
+        if new_status != current_status:
+            update_query = QSqlQuery()
+            update_query.prepare("UPDATE purchase_order SET status = ? WHERE id = ?")
+            update_query.addBindValue(new_status)
+            update_query.addBindValue(int(po_id))
+            if not update_query.exec():
+                raise Exception(f"PO status update failed: {update_query.lastError().text()}")
+
+            try:
+                log_activity(
+                    category="procurement",
+                    action="po_status_updated",
+                    entity_type="purchase_order",
+                    entity_id=int(po_id),
+                    note=f"PO {po_number} status changed from {current_status} to {new_status}."
+                )
+            except Exception as exc:
+                print("PO status activity log failed (non-blocking):", exc)
+
+        return new_status
+
+    def create_bill_from_grn(self, po_id, grn_number, receipt_rows, totals, billing_data, payment_data):
+        supplier_id = self.get_po_supplier(po_id)
+        if supplier_id <= 0:
+            raise Exception("Invalid supplier on selected PO.")
+
+        session_id = get_active_session_id(strict=True)
+        if session_id is None:
+            raise Exception("No active session found for billing.")
+
+        purchase_query = QSqlQuery()
+        purchase_query.prepare("""
+            INSERT INTO purchase (
+                supplier,
+                rep,
+                sellerinvoice,
+                subtotal,
+                discount,
+                tax_236g,
+                tax_236h,
+                salestax,
+                netamount,
+                cn_adjustment,
+                total,
+                paid,
+                remaining,
+                writeoff,
+                payable,
+                receivable,
+                due_date,
+                session_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """)
+
+        subtotal = float(totals.get("subtotal") or 0.0)
+        discount = float(totals.get("discount") or 0.0)
+        taxable = float(totals.get("taxable") or 0.0)
+        tax_236g = float(totals.get("tax_236g") or 0.0)
+        tax_236h = float(totals.get("tax_236h") or 0.0)
+        sales_tax = float(totals.get("sales_tax") or 0.0)
+        netamount = float(totals.get("netamount") or 0.0)
+        cn_adjustment = float(totals.get("cn_adjustment") or 0.0)
+        total_value = float(totals.get("total") or 0.0)
+        rep_id = billing_data.get("rep")
+        paid = float(billing_data.get("paid") or 0.0)
+        remaining = float(billing_data.get("remaining") or 0.0)
+        writeoff = float(billing_data.get("writeoff") or 0.0)
+        payable = float(billing_data.get("payable") or 0.0)
+        receivable = float(billing_data.get("receivable") or 0.0)
+        due_date = billing_data.get("due_date")
+
+        purchase_query.addBindValue(supplier_id)
+        purchase_query.addBindValue(rep_id)
+        purchase_query.addBindValue(grn_number)
+        purchase_query.addBindValue(subtotal)
+        purchase_query.addBindValue(discount)
+        purchase_query.addBindValue(tax_236g)
+        purchase_query.addBindValue(tax_236h)
+        purchase_query.addBindValue(sales_tax)
+        purchase_query.addBindValue(netamount)
+        purchase_query.addBindValue(cn_adjustment)
+        purchase_query.addBindValue(float(total_value))
+        purchase_query.addBindValue(paid)
+        purchase_query.addBindValue(remaining)
+        purchase_query.addBindValue(writeoff)
+        purchase_query.addBindValue(payable)
+        purchase_query.addBindValue(receivable)
+        purchase_query.addBindValue(due_date)
+        purchase_query.addBindValue(int(session_id))
+
+        if not purchase_query.exec():
+            raise Exception(f"Purchase bill creation failed: {purchase_query.lastError().text()}")
+
+        purchase_id = int(purchase_query.lastInsertId())
+
+        item_rows = 0
+        for row in receipt_rows:
+            product_id = int(row.get("product_id") or 0)
+            qty_received = float(row.get("qty_received") or 0.0)
+            unit_price = float(row.get("unit_price") or 0.0)
+            discount = float(row.get("discount") or 0.0)
+            tax = float(row.get("tax") or 0.0)
+            landing_cost = float(row.get("landing_cost") or unit_price)
+
+            if product_id <= 0 or qty_received <= 0:
+                continue
+
+            # Line total = (Qty * Price) - Discount + Tax
+            line_total = (qty_received * unit_price) - discount + tax
+            item_query = QSqlQuery()
+            item_query.prepare("""
+                INSERT INTO purchaseitem (
+                    purchase,
+                    product,
+                    qty,
+                    bonus,
+                    rate,
+                    discount,
+                    tax,
+                    total,
+                    landing_cost
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """)
+            item_query.addBindValue(purchase_id)
+            item_query.addBindValue(product_id)
+            item_query.addBindValue(qty_received)
+            item_query.addBindValue(0)
+            item_query.addBindValue(unit_price)
+            item_query.addBindValue(discount)
+            item_query.addBindValue(tax)
+            item_query.addBindValue(line_total)
+            item_query.addBindValue(landing_cost)  # Store landing_cost
+
+            if not item_query.exec():
+                raise Exception(f"Purchase bill item creation failed: {item_query.lastError().text()}")
+            purchaseitem_id = item_query.lastInsertId()
+            try:
+                purchaseitem_id = int(purchaseitem_id)
+            except (TypeError, ValueError):
+                purchaseitem_id = None
+            row["purchaseitem_id"] = purchaseitem_id
+            item_rows += 1
+
+        if item_rows == 0:
+            raise Exception("Purchase bill creation failed: no bill items were created.")
+
+        balance_query = QSqlQuery()
+        balance_query.prepare("SELECT payable, receiveable FROM supplier WHERE id = ?")
+        balance_query.addBindValue(supplier_id)
+        if not balance_query.exec() or not balance_query.next():
+            raise Exception("Could not fetch supplier balances for transaction posting.")
+
+        payable_before = float(balance_query.value(0) or 0.0)
+        receiveable_before = float(balance_query.value(1) or 0.0)
+        payable_after = payable_before + payable
+        receiveable_after = receiveable_before + receivable
+
+        transaction_query = QSqlQuery()
+        transaction_query.prepare("""
+            INSERT INTO supplier_transaction
+            (
+                supplier, transaction_type, ref, return_ref,
+                payable_before, due_amount, paid, remaining_due, payable_after,
+                receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
+                rep, session_id,
+                payment_method, bank_name, account_no, transaction_mode,
+                wallet_provider, wallet_no, payment_reference
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """)
+
+        transaction_query.addBindValue(supplier_id)
+        transaction_query.addBindValue("PURCHASE")
+        transaction_query.addBindValue(purchase_id)
+        transaction_query.addBindValue(None)
+
+        transaction_query.addBindValue(payable_before)
+        transaction_query.addBindValue(float(total_value))
+        transaction_query.addBindValue(paid)
+        transaction_query.addBindValue(payable)
+        transaction_query.addBindValue(payable_after)
+
+        transaction_query.addBindValue(receiveable_before)
+        transaction_query.addBindValue(receivable)
+        transaction_query.addBindValue(paid)
+        transaction_query.addBindValue(receivable)
+        transaction_query.addBindValue(receiveable_after)
+
+        transaction_query.addBindValue(rep_id)
+        transaction_query.addBindValue(int(session_id))
+
+        transaction_query.addBindValue(payment_data.get("payment_method"))
+        transaction_query.addBindValue(payment_data.get("bank_name"))
+        transaction_query.addBindValue(payment_data.get("account_no"))
+        transaction_query.addBindValue(payment_data.get("transaction_mode"))
+        transaction_query.addBindValue(payment_data.get("wallet_provider"))
+        transaction_query.addBindValue(payment_data.get("wallet_no"))
+        transaction_query.addBindValue(payment_data.get("payment_reference"))
+
+        if not transaction_query.exec():
+            raise Exception(f"Supplier transaction posting failed: {transaction_query.lastError().text()}")
+
+        supplier_update = QSqlQuery()
+        supplier_update.prepare("UPDATE supplier SET payable = ?, receiveable = ? WHERE id = ?")
+        supplier_update.addBindValue(payable_after)
+        supplier_update.addBindValue(receiveable_after)
+        supplier_update.addBindValue(supplier_id)
+        if not supplier_update.exec():
+            raise Exception(f"Supplier balance update failed: {supplier_update.lastError().text()}")
+
+        grn_update = QSqlQuery()
+        grn_update.prepare("UPDATE goods_receipt SET status = ? WHERE grn_number = ?")
+        grn_update.addBindValue("billed")
+        grn_update.addBindValue(grn_number)
+        if not grn_update.exec():
+            raise Exception(f"GRN status update failed: {grn_update.lastError().text()}")
+
+        return purchase_id
+
+    def validate_receipt_quantities(self):
+        under_received_lines = []
+        over_received_lines = []
+        positive_received_lines = 0
+
+        for row in range(self.items_table.rowCount()):
+            product_item = self.items_table.item(row, 0)
+            ordered_item = self.items_table.item(row, 3)
+            remaining_item = self.items_table.item(row, 5)
+            qty_widget = self.items_table.cellWidget(row, 6)
+
+            if qty_widget is None:
+                continue
+
+            product_name = str(product_item.text() if product_item else "")
+            qty_ordered = int(ordered_item.text() if ordered_item and ordered_item.text() else 0)
+            qty_remaining = int(remaining_item.text() if remaining_item and remaining_item.text() else 0)
+            qty_received = int(qty_widget.value())
+
+            if qty_received > 0:
+                positive_received_lines += 1
+
+            if 0 < qty_received < qty_remaining:
+                under_received_lines.append((product_name, qty_remaining, qty_received))
+            elif qty_received > qty_remaining:
+                over_received_lines.append((product_name, qty_remaining, qty_received))
+
+        if positive_received_lines == 0:
+            AppMessageBox.warning(self, "No Receipt", "At least one line must have received quantity greater than zero.")
+            return False
+
+        if under_received_lines:
+            preview = "\n".join(
+                f"- {name}: remaining {remaining}, this GRN {received}"
+                for name, remaining, received in under_received_lines[:8]
+            )
+            if len(under_received_lines) > 8:
+                preview += f"\n... and {len(under_received_lines) - 8} more line(s)."
+
+            _, accepted = AppMessageBox.confirm(
+                self,
+                "Under Receipt Detected",
+                "Some lines are received less than the remaining PO quantity.\n"
+                "Payment will be based only on received quantities.\n\n"
+                f"{preview}\n\n"
+                "Do you want to continue?",
+                confirm_label="Continue",
+                cancel_label="Cancel",
+                kind="warning",
+            )
+            if not accepted:
+                return False
+
+        if over_received_lines:
+            preview = "\n".join(
+                f"- {name}: remaining {remaining}, this GRN {received}"
+                for name, remaining, received in over_received_lines[:8]
+            )
+            if len(over_received_lines) > 8:
+                preview += f"\n... and {len(over_received_lines) - 8} more line(s)."
+
+            AppMessageBox.warning(
+                self,
+                "Over Receipt Detected",
+                "Some lines exceed the remaining quantity on the PO.\n"
+                "A GRN cannot receive more than the remaining open quantity.\n\n"
+                f"{preview}\n\n"
+                "Please reduce the received quantity and try again.",
+            )
+            return False
+
+        return True
+
+    def collect_billing_data(self, supplier_id, grn_number):
+        if supplier_id <= 0:
+            raise Exception("Could not resolve supplier for selected PO.")
+
+        rep = self.rep_combo.currentData()
+
+        subtotal = self._read_money(self.subtotal_label)
+        discount = self._read_money(self.header_discount_edit)
+        taxable = self._read_money(self.taxable_label)
+        tax_236g = self._read_money(self.tax_236g_edit)
+        tax_236h = self._read_money(self.tax_236h_edit)
+        sales_tax = self._read_money(self.sales_tax_edit)
+        netamount = self._read_money(self.net_amount_label)
+        cn_adjustment = self._read_money(self.cn_adjustment_edit)
+        total = self._read_money(self.total_with_fees_label)
+        paid = self._read_money(self.paid_amount)
+        remaining = self._read_money(self.remaining_amount)
+
+        if not grn_number:
+            raise Exception("GRN number is required.")
+        if total < 0:
+            raise Exception("Final amount cannot be negative.")
+        if paid < 0:
+            raise Exception("Paid amount cannot be negative.")
+
+        expected_remaining = round(total - paid, 2)
+        if abs(expected_remaining - remaining) > 0.01:
+            raise Exception("Remaining amount does not match total - paid.")
+
+        writeoff = 0.0
+        payable = 0.0
+        receivable = 0.0
+        if remaining > 0.0:
+            if self.writeoff_check.isChecked():
+                writeoff = remaining
+            else:
+                payable = remaining
+        elif remaining < 0.0:
+            receivable = abs(remaining)
+
+        due_date = self.compute_due_date() if payable > 0 else None
+
+        session_id = get_active_session_id(strict=True)
+        if session_id is None:
+            raise Exception("No active session found for billing.")
+
+        return {
+            "supplier": supplier_id,
+            "rep": rep,
+            "sellerinvoice": grn_number,
+            "subtotal": subtotal,
+            "discount": discount,
+            "taxable": taxable,
+            "tax_236g": tax_236g,
+            "tax_236h": tax_236h,
+            "sales_tax": sales_tax,
+            "netamount": netamount,
+            "cn_adjustment": cn_adjustment,
+            "total": total,
+            "paid": paid,
+            "remaining": remaining,
+            "writeoff": writeoff,
+            "payable": payable,
+            "receivable": receivable,
+            "due_date": due_date,
+            "session_id": session_id,
+        }
+
+    def get_next_grn_number(self):
+        query = QSqlQuery()
+        if not query.exec(
+            """
+            SELECT MAX(CAST(SUBSTR(grn_number, 5) AS INTEGER))
+            FROM goods_receipt
+            WHERE grn_number LIKE 'GRN-%'
+            """
+        ):
+            return "GRN-1001"
+
+        next_no = 1001
+        if query.next() and query.value(0) is not None:
+            try:
+                next_no = max(int(query.value(0)) + 1, 1001)
+            except (TypeError, ValueError):
+                next_no = 1001
+
+        return f"GRN-{next_no}"
+
+    @Permissions.require_permission('grn.create')
+    def save_grn(self):
+        if not require_open_session(self):
+            return
+
+        po_id = self.po_combo.currentData()
+        if not po_id:
+            AppMessageBox.warning(self, "Missing PO", "Select a purchase order first.")
+            return
+
+        if self.items_table.rowCount() == 0:
+            AppMessageBox.warning(self, "No Lines", "Selected PO has no items.")
+            return
+
+        if not self.validate_receipt_quantities():
+            return
+
+        grn_number = (self.grn_number_edit.text() or "").strip()
+        if not grn_number:
+            grn_number = self.get_next_grn_number()
+        else:
+            grn_number = grn_number.upper()
+            if not re.fullmatch(r"GRN-\d+", grn_number):
+                AppMessageBox.warning(
+                    self,
+                    "Invalid GRN Number",
+                    "GRN number must follow format GRN-<digits>, e.g. GRN-1001.",
+                )
+                return
+
+        _, accepted = AppMessageBox.confirm(
+            self,
+            "Confirm Save",
+            "Would you like to save the GRN and generate its purchase invoice?",
+            confirm_label="Save GRN",
+            cancel_label="Cancel",
+            kind="question",
+        )
+        if not accepted:
+            return
+
+        db = QSqlDatabase.database()
+        if not db.transaction():
+            AppMessageBox.error(self, "Error", "Could not start transaction.")
+            return
+
+        try:
+            session_id = get_active_session_id(strict=True)
+            supplier_id = self.get_po_supplier(int(po_id))
+            billing_data = self.collect_billing_data(supplier_id, grn_number)
+            payment_data = self.payment_handler.payment_data.copy()
+
+            grn_query = QSqlQuery()
+            grn_query.prepare("""
+                INSERT INTO goods_receipt (
+                    grn_number,
+                    po_id,
+                    grn_date,
+                    status,
+                    total_value,
+                    header_discount,
+                    header_tax,
+                    discount,
+                    tax_236g,
+                    tax_236h,
+                    salestax,
+                    cn_adjustment,
+                    taxable,
+                    netamount,
+                    session_id,
+                    notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """)
+
+            # Get header amounts (same shape as purchase invoice)
+            header_discount = self._read_money(self.header_discount_edit)
+            tax_236g = self._read_money(self.tax_236g_edit)
+            tax_236h = self._read_money(self.tax_236h_edit)
+            sales_tax = self._read_money(self.sales_tax_edit)
+            cn_adjustment = self._read_money(self.cn_adjustment_edit)
+            subtotal = self._read_money(self.subtotal_label)
+            taxable = self._read_money(self.taxable_label)
+            netamount = self._read_money(self.net_amount_label)
+            total_value = self._read_money(self.total_with_fees_label)
+            # Backward-compatible aggregate columns
+            header_tax = (tax_236g - tax_236h + sales_tax)
+            
+            grn_query.addBindValue(grn_number)
+            grn_query.addBindValue(int(po_id))
+            grn_query.addBindValue(self.grn_date_edit.date().toString("yyyy-MM-dd"))
+            grn_query.addBindValue("received")
+            grn_query.addBindValue(total_value)
+            grn_query.addBindValue(header_discount)
+            grn_query.addBindValue(header_tax)
+            grn_query.addBindValue(0.0)
+            grn_query.addBindValue(tax_236g)
+            grn_query.addBindValue(tax_236h)
+            grn_query.addBindValue(sales_tax)
+            grn_query.addBindValue(cn_adjustment)
+            grn_query.addBindValue(taxable)
+            grn_query.addBindValue(netamount)
+            grn_query.addBindValue(session_id)
+            grn_query.addBindValue((self.notes_edit.text() or "").strip())
+
+            if not grn_query.exec():
+                raise Exception(grn_query.lastError().text())
+
+            grn_id = int(grn_query.lastInsertId())
+
+            line_count = 0
+            receipt_rows = []
+            for row, line_ref in enumerate(self._line_refs):
+                # Column 1: Batch Number
+                batch_widget = self.items_table.cellWidget(row, 1)
+                # Column 2: Expiry Date
+                expiry_widget = self.items_table.cellWidget(row, 2)
+                qty_widget = self.items_table.cellWidget(row, 6)
+                price_widget = self.items_table.cellWidget(row, 7)
+                tax_widget = self.items_table.cellWidget(row, 9)
+                
+                if qty_widget is None or price_widget is None:
+                    continue
+
+                qty_received = int(qty_widget.value())
+                unit_price = float(price_widget.value())
+                batch_no = batch_widget.text().strip() if batch_widget else ""
+                expiry_date = expiry_widget.text().strip() if expiry_widget else ""
+                discount = self._line_discount_amount(row, qty_received, unit_price)
+                tax = float(tax_widget.value()) if tax_widget else 0.0
+                landing_cost = line_ref.get("landing_cost") or unit_price  # Fallback to unit_price if not calculated
+                
+                if qty_received <= 0:
+                    continue
+
+                po_line_id = int(line_ref.get("po_line_id") or 0)
+                # Retrieve product_id from stored reference - NOT saved directly in goods_receipt_line
+                # but retrieved via po_line_id -> purchase_order_line.product relationship
+                product_id = int(line_ref.get("product_id") or 0)
+
+                line_query = QSqlQuery()
+                # Note: goods_receipt_line now stores: batch_no, expiry_date, discount, tax, landing_cost
+                # Product ID can be derived via: goods_receipt_line.po_line_id -> purchase_order_line.product
+                line_query.prepare("""
+                    INSERT INTO goods_receipt_line (
+                        grn_id, po_line_id, qty_received, unit_price_received, total_received,
+                        batch_no, expiry_date, discount, tax, landing_cost
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """)
+                line_query.addBindValue(grn_id)
+                line_query.addBindValue(int(po_line_id))
+                line_query.addBindValue(qty_received)
+                line_query.addBindValue(unit_price)
+                line_query.addBindValue(qty_received * unit_price)
+                line_query.addBindValue(batch_no if batch_no else None)
+                line_query.addBindValue(expiry_date if expiry_date else None)
+                line_query.addBindValue(discount)
+                line_query.addBindValue(tax)
+                line_query.addBindValue(landing_cost)
+
+                if not line_query.exec():
+                    raise Exception(line_query.lastError().text())
+                line_count += 1
+                receipt_rows.append({
+                    "product_id": product_id,
+                    "qty_received": qty_received,
+                    "unit_price": unit_price,
+                    "batch_no": batch_no,
+                    "expiry_date": expiry_date,
+                    "discount": discount,
+                    "tax": tax,
+                    "landing_cost": landing_cost,  # Add landing_cost to receipt_rows
+                })
+
+            if line_count == 0:
+                raise Exception("At least one line must have received quantity > 0.")
+
+            totals_payload = {
+                "subtotal": subtotal,
+                "discount": header_discount,
+                "taxable": taxable,
+                "tax_236g": tax_236g,
+                "tax_236h": tax_236h,
+                "sales_tax": sales_tax,
+                "netamount": netamount,
+                "cn_adjustment": cn_adjustment,
+                "total": total_value,
+            }
+            purchase_bill_id = self.create_bill_from_grn(
+                po_id=int(po_id),
+                grn_number=grn_number,
+                receipt_rows=receipt_rows,
+                totals=totals_payload,
+                billing_data=billing_data,
+                payment_data=payment_data,
+            )
+
+            stock_batch_count = self.create_stock_batches_from_receipts(receipt_rows, grn_number)
+            if stock_batch_count <= 0:
+                raise Exception("Stock posting failed: no batch rows were created.")
+
+            po_status = self.update_po_status_from_receipts(int(po_id))
+
+            if not db.commit():
+                raise Exception("Could not commit GRN transaction.")
+
+            try:
+                log_activity(
+                    category="procurement",
+                    action="grn_created",
+                    entity_type="goods_receipt",
+                    entity_id=grn_id,
+                    note=f"Created GRN {grn_number} against PO ID {int(po_id)} with {line_count} lines, bill #{purchase_bill_id}, {stock_batch_count} stock batch postings, PO status {po_status}."
+                )
+            except Exception as exc:
+                print("Activity log failed (non-blocking):", exc)
+
+            try:
+                log_activity(
+                    category="procurement",
+                    action="grn_billed",
+                    entity_type="purchase",
+                    entity_id=purchase_bill_id,
+                    note=f"Generated purchase bill #{purchase_bill_id} from GRN {grn_number}."
+                )
+            except Exception as exc:
+                print("GRN billing activity log failed (non-blocking):", exc)
+
+            AppMessageBox.success(self, "Saved", f"GRN {grn_number} created successfully.")
+            self.grn_list_signal.emit()
+
+        except Exception as exc:
+            db.rollback()
+            AppMessageBox.error(self, "Save Failed", str(exc))

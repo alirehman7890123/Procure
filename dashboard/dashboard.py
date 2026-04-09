@@ -1,15 +1,23 @@
-from PySide6.QtWidgets import QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QDateEdit, QPushButton, QLabel, QFrame, QComboBox, QSpacerItem
-from PySide6.QtCore import Qt, QFile, QDate, Signal, QTimer
+from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QHeaderView,QDialog, QLineEdit,QSpacerItem, QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QFileDialog, QInputDialog, QApplication, QGridLayout
+from PySide6.QtCore import Qt, QFile, QDate, QDateTime, Signal, QTimer
+from PySide6.QtGui import QColor
 import sys, os
 from PySide6.QtSql import QSqlQuery, QSqlDatabase
 from PySide6.QtCore import QDate
 from functools import partial
 from utilities import mylogin
+from utilities.database import SQLiteConnectionManager
+from utilities.activity_logger import log_activity
+from utilities.permissions import Permissions
+from utilities.session_service import SessionErrorCode, check_active_session
 import pyqtgraph as pg
+import bcrypt
+from dashboard.daily_session import DailySession
 
 
 import os
 import sys
+from utilities.app_messagebox import AppMessageBox
 
 
 def resource_path(relative_path):
@@ -48,25 +56,22 @@ class DashboardWidget(QWidget):
 
         # main vertical layout
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
+        self.layout.setAlignment(Qt.AlignTop)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Business Dashboard", objectName="SectionTitle")
-        # self.supplierlist = QPushButton("Date / Time", objectName="TopRightButton")
-        # self.supplierlist.setCursor(Qt.PointingHandCursor)
-        # self.supplierlist.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
-        # header_layout.addWidget(self.supplierlist)
-        
-        
-        self.session_btn = QPushButton("Daily Sessions", objectName="TopRightButton")
-        self.session_btn.setCursor(Qt.PointingHandCursor)
-        self.session_btn.setFixedWidth(150)
 
-        header_layout.addWidget(self.session_btn, 0, Qt.AlignRight)
+        header_layout.addStretch()
+
+        self.dashboard_datetime = QLabel("")
+        self.dashboard_datetime.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.dashboard_datetime.setStyleSheet("color: #2F5D7C; font-weight: 600;")
+        header_layout.addWidget(self.dashboard_datetime, 0, Qt.AlignRight)
 
         self.layout.addLayout(header_layout)
         
@@ -88,133 +93,1725 @@ class DashboardWidget(QWidget):
 
         
 
-        today_sale_label = QLabel("Today's Sale - By Hour")
-        self.layout.addWidget(today_sale_label)
+        # today_sale_label = QLabel("Today's Sale - By Hour")
+        # self.layout.addWidget(today_sale_label)
         
-        # Plot widget
-        plot_widget = pg.PlotWidget()
-        self.layout.setContentsMargins(30, 30, 30, 30)  # left, top, right, bottom margins around all widgets in the layout
-        self.layout.setSpacing(20)  # space between widgets
+        # # Plot widget
+        # plot_widget = pg.PlotWidget()
+        # self.layout.setContentsMargins(10, 10, 10, 10)  # left, top, right, bottom margins around all widgets in the layout
+        # self.layout.setSpacing(10)  # space between widgets
 
-        plot_widget.setStyleSheet("""
-            background-color: #f0f0f0;      /* light gray background */
-            border: 2px solid #3498db;     /* blue border */
-        """)
+        # plot_widget.setStyleSheet("""
+        #     background-color: #f0f0f0;      /* light gray background */
+        #     border: 2px solid #3498db;     /* blue border */
+        # """)
 
 
-        self.layout.addWidget(plot_widget)
+        # # self.layout.addWidget(plot_widget)
 
-        # Get sales data and plot
-        hourly_sales = self.get_hourly_sales_data()
-        hours = list(range(24))
-        hour_sales = [hourly_sales.get(h, 0) for h in hours]
+        # # Get sales data and plot
+        # hourly_sales = self.get_hourly_sales_data()
+        # hours = list(range(24))
+        # hour_sales = [hourly_sales.get(h, 0) for h in hours]
         
 
-        # bg = pg.BarGraphItem(x=hours, height=sales, width=0.6, brush='skyblue')
-        from datetime import datetime
-        # Create a PlotDataItem (line plot) with markers
-        plot_widget.plot(hours, hour_sales,  pen=pg.mkPen('#e74c3c', width=2), symbol='o', symbolSize=8, symbolBrush='b')
-        hour_labels = []
-        for i in range(24):
-            if i == 0:
-                label = "12am"
-            elif i == 12:
-                label = "12pm"
-            else:
-                label = str(i % 12)
-            hour_labels.append((i, label))
+        # # bg = pg.BarGraphItem(x=hours, height=sales, width=0.6, brush='skyblue')
+        # from datetime import datetime
+        # # Create a PlotDataItem (line plot) with markers
+        # plot_widget.plot(hours, hour_sales,  pen=pg.mkPen('#e74c3c', width=2), symbol='o', symbolSize=8, symbolBrush='b')
+        # hour_labels = []
+        # for i in range(24):
+        #     if i == 0:
+        #         label = "12am"
+        #     elif i == 12:
+        #         label = "12pm"
+        #     else:
+        #         label = str(i % 12)
+        #     hour_labels.append((i, label))
 
-        plot_widget.getAxis('bottom').setTicks([hour_labels])
-        plot_widget.setXRange(0, 23)
+        # plot_widget.getAxis('bottom').setTicks([hour_labels])
+        # plot_widget.setXRange(0, 23)
         
-        # plot_widget.addItem(bg)
+        # # plot_widget.addItem(bg)
 
-        plot_widget.setLabel('left', 'Total Sales')
-        plot_widget.setLabel('bottom', 'Hour of Day')
-        plot_widget.setTitle("Hourly Sales Today")
-        plot_widget.setBackground("w")
-        plot_widget.showGrid(x=True, y=True)
+        # plot_widget.setLabel('left', 'Total Sales')
+        # plot_widget.setLabel('bottom', 'Hour of Day')
+        # plot_widget.setTitle("Hourly Sales Today")
+        # plot_widget.setBackground("w")
+        # plot_widget.showGrid(x=True, y=True)
         
         
-        #################################################
-        ####            Monthly Sales         ###########
+        # #################################################
+        # ####            Monthly Sales         ###########
         
-        monthly_sale_label = QLabel("Monthly Sale - By Day")
-        self.layout.addWidget(monthly_sale_label)
-
-        
-        days = list(range(1, 32))  # Days 1 to 31
-        monthly_sales = self.get_monthly_sales_data()
-        month_sales = [monthly_sales[day - 1] for day in range(1, 32)]
-        
-        print("Days:", len(days))
-        print("Sales:", len(month_sales))
+        # monthly_sale_label = QLabel("Monthly Sale - By Day")
+        # # self.layout.addWidget(monthly_sale_label)
 
         
-        # Plot widget
-        monthly_plot = pg.PlotWidget()
-        monthly_plot.setStyleSheet("""
-            background-color: #f0f0f0;      /* light gray background */
-            border: 2px solid #3498db;     /* blue border */
-        """)
+        # days = list(range(1, 32))  # Days 1 to 31
+        # monthly_sales = self.get_monthly_sales_data()
+        # month_sales = [monthly_sales[day - 1] for day in range(1, 32)]
+        
+        # print("Days:", len(days))
+        # print("Sales:", len(month_sales))
+
+        
+        # # Plot widget
+        # monthly_plot = pg.PlotWidget()
+        # monthly_plot.setStyleSheet("""
+        #     background-color: #f0f0f0;      /* light gray background */
+        #     border: 2px solid #3498db;     /* blue border */
+        # """)
         
         
-        # Create a PlotDataItem (line plot) with markers
-        monthly_plot.plot(days, month_sales,  pen=pg.mkPen("#000000", width=2), symbol='o', symbolSize=8, symbolBrush='b')
-        monthly_plot.getAxis('bottom').setTicks([[(i, str(i)) for i in range(1, 32)]])
-        monthly_plot.setXRange(0, 31)
+        # # Create a PlotDataItem (line plot) with markers
+        # monthly_plot.plot(days, month_sales,  pen=pg.mkPen("#000000", width=2), symbol='o', symbolSize=8, symbolBrush='b')
+        # monthly_plot.getAxis('bottom').setTicks([[(i, str(i)) for i in range(1, 32)]])
+        # monthly_plot.setXRange(0, 31)
 
     
-        # monthly_plot.addItem(bg)
+        # # monthly_plot.addItem(bg)
 
-        monthly_plot.setLabel('left', 'Daily Sales')
-        monthly_plot.setLabel('bottom', 'Day')
-        monthly_plot.setTitle("Monthly Sales")
-        monthly_plot.setBackground("w")
-        monthly_plot.showGrid(x=True, y=True)
+        # monthly_plot.setLabel('left', 'Daily Sales')
+        # monthly_plot.setLabel('bottom', 'Day')
+        # monthly_plot.setTitle("Monthly Sales")
+        # monthly_plot.setBackground("w")
+        # monthly_plot.showGrid(x=True, y=True)
         
-        self.layout.addWidget(monthly_plot)
+        # # self.layout.addWidget(monthly_plot)
         
 
-        # Spacer and CSS
-        spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
-        self.layout.addItem(spacer)
+        # # Spacer and CSS
+        # spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        # self.layout.addItem(spacer)
 
 
         # QTimer.singleShot(0, self.check_session)
         
         # dialog = DailySessionDialog(mode="open", parent=self)
         # dialog.exec()
+
+        self.backup_manager = SQLiteConnectionManager("ProcureApp")
+        self.backup_check_timer = QTimer(self)
+        self.backup_check_timer.setInterval(15 * 60 * 1000)
+        self.backup_check_timer.timeout.connect(self.run_scheduled_backup_cycle)
+        self.backup_check_timer.start()
+
+        self.header_clock_timer = QTimer(self)
+        self.header_clock_timer.setInterval(1000)
+        self.header_clock_timer.timeout.connect(self.update_dashboard_datetime)
+        self.header_clock_timer.start()
+        self.update_dashboard_datetime()
         
         
-       
-        
+        self.add_dashboard_alerts()
+
+        QTimer.singleShot(0, self.run_scheduled_backup_cycle)
+
         # set stylesheets
         self.setStyleSheet(load_stylesheets())
         
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    def add_dashboard_alerts(self):
+        self.alerts_container = QWidget()
+        self.alerts_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+
+        alerts_layout = QVBoxLayout(self.alerts_container)
+        alerts_layout.setSpacing(12)
+        alerts_layout.setContentsMargins(0, 0, 0, 0)
+        alerts_layout.setAlignment(Qt.AlignTop)
+
+        self.session_card = self.build_session_card()
+        self.low_stock_card = self.build_low_stock_card()
+        self.expiry_card = self.build_expiry_card()
+        self.reminders_card = self.build_reminders_card()
+        self.backup_card = self.build_backup_health_card()
+
+        self._apply_dashboard_card_style(self.session_card)
+        self._apply_dashboard_card_style(self.low_stock_card)
+        self._apply_dashboard_card_style(self.expiry_card)
+        self._apply_dashboard_card_style(self.reminders_card)
+        self._apply_dashboard_card_style(self.backup_card)
+
+        alerts_layout.addWidget(self.session_card)
+
+        operational_row = QHBoxLayout()
+        operational_row.setSpacing(12)
+        operational_row.addWidget(self.low_stock_card, 1)
+        operational_row.addWidget(self.expiry_card, 1)
+        operational_row.addWidget(self.reminders_card, 1)
+        alerts_layout.addLayout(operational_row)
+
+        alerts_layout.addSpacing(10)
+        alerts_layout.addWidget(self.backup_card)
+
+        self.layout.addWidget(self.alerts_container, 0, Qt.AlignTop)
+
+        self.load_inventory_alerts()
+
+    def _apply_dashboard_card_style(self, card, min_height=0):
+        if min_height > 0:
+            card.setMinimumHeight(min_height)
+        else:
+            card.setMinimumHeight(0)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        card.setStyleSheet(
+            """
+            QFrame#sectionCard {
+                background: #E8EEF3;
+                border: 1px solid #D6E0E8;
+                border-top: 2px solid #3E6B89;
+                border-radius: 8px;
+            }
+            QLabel {
+                color: #314757;
+            }
+            QLabel#SectionTitle {
+                color: #223746;
+            }
+            """
+        )
+
+    def update_dashboard_datetime(self):
+        now = QDateTime.currentDateTime()
+        self.dashboard_datetime.setText(now.toString("ddd, dd MMM yyyy | hh:mm:ss AP"))
+
+    def build_session_card(self):
+        card = QFrame()
+        card.setObjectName("sectionCard")
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        title = QLabel("Daily Session")
+        title.setObjectName("SectionTitle")
+
+        self.session_status_badge = QLabel("UNKNOWN")
+        self.session_status_badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.session_status_badge.setStyleSheet("font-weight:bold; color:#ef6c00;")
+
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(self.session_status_badge)
+        layout.addLayout(header)
+
+        meta_row = QHBoxLayout()
+        self.session_meta = QLabel("Session status not loaded yet")
+        self.session_meta.setStyleSheet("color:#777; padding-left: 0;")
+        meta_row.addWidget(self.session_meta)
+        meta_row.addStretch()
+
+        self.open_day_btn = QPushButton("Open Day")
+        self.open_day_btn.setCursor(Qt.PointingHandCursor)
+        self.open_day_btn.setObjectName("TopRightButton")
+        self.open_day_btn.clicked.connect(self.handle_open_session)
+        meta_row.addWidget(self.open_day_btn)
+
+        self.close_day_btn = QPushButton("Close Day")
+        self.close_day_btn.setCursor(Qt.PointingHandCursor)
+        self.close_day_btn.setObjectName("TopRightButton")
+        self.close_day_btn.clicked.connect(self.handle_close_session)
+        meta_row.addWidget(self.close_day_btn)
+
+        self.session_history_btn = QPushButton("History")
+        self.session_history_btn.setCursor(Qt.PointingHandCursor)
+        self.session_history_btn.setObjectName("TopRightButton")
+        meta_row.addWidget(self.session_history_btn)
+
+        layout.addLayout(meta_row)
+        return card
+
+
+    def build_backup_health_card(self):
+
+        card = QFrame()
+        card.setObjectName("sectionCard")
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        title = QLabel("Backup Health")
+        title.setObjectName("SectionTitle")
+
+        self.backup_status_badge = QLabel("UNKNOWN")
+        self.backup_status_badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.backup_status_badge.setStyleSheet("font-weight:bold; color:#ef6c00;")
+
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(self.backup_status_badge)
+        layout.addLayout(header)
+
+        info_row = QHBoxLayout()
+        self.backup_meta = QLabel("Backup status not loaded yet")
+        self.backup_meta.setStyleSheet("color:#777; padding-left: 0;")
+        info_row.addWidget(self.backup_meta)
+        info_row.addStretch()
+
+        self.backup_now_btn = QPushButton("Backup Now")
+        self.backup_now_btn.setCursor(Qt.PointingHandCursor)
+        self.backup_now_btn.setObjectName("SaveButton")
+        self.backup_now_btn.clicked.connect(self.run_manual_backup)
+        info_row.addWidget(self.backup_now_btn)
+
+        self.backup_view_btn = QPushButton("View Status")
+        self.backup_view_btn.setCursor(Qt.PointingHandCursor)
+        self.backup_view_btn.setObjectName("SaveButton")
+        self.backup_view_btn.clicked.connect(self.show_backup_status_dialog)
+        info_row.addWidget(self.backup_view_btn)
+
+        layout.addLayout(info_row)
+        return card
+
+
+    def build_reminders_card(self):
+
+        card = QFrame()
+        card.setObjectName("sectionCard")
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+
+        title = QLabel("Reminder Queue")
+        title.setObjectName("SectionTitle")
+
+        self.reminder_count = QLabel("0")
+        self.reminder_count.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(self.reminder_count)
+
+        layout.addLayout(header)
+
+        info_row = QHBoxLayout()
+        self.reminder_meta = QLabel("Payments + stock reminders")
+        self.reminder_meta.setStyleSheet("color:#777; padding-left: 0;")
+        info_row.addWidget(self.reminder_meta)
+        info_row.addStretch()
+
+        self.reminder_open_btn = QPushButton("Open Queue")
+        self.reminder_open_btn.setCursor(Qt.PointingHandCursor)
+        self.reminder_open_btn.setObjectName("SaveButton")
+        self.reminder_open_btn.clicked.connect(self.show_reminder_queue_dialog)
+        info_row.addWidget(self.reminder_open_btn)
+
+        layout.addLayout(info_row)
+
+        return card
 
         
+    def build_low_stock_card(self):
+    
+        card = QFrame()
+        card.setObjectName("sectionCard")
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        # header
+        header = QHBoxLayout()
+
+        title = QLabel("Low Stock")
+        title.setObjectName("SectionTitle")
+
+        self.low_stock_count = QLabel("0")
+        self.low_stock_count.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(self.low_stock_count)
+
+        layout.addLayout(header)
+
+        info_row = QHBoxLayout()
+        self.low_stock_meta = QLabel("No low-stock alerts")
+        self.low_stock_meta.setStyleSheet("color:#777; padding-left: 0;")
+        info_row.addWidget(self.low_stock_meta)
+        info_row.addStretch()
+
+        self.low_stock_open_btn = QPushButton("Open Queue")
+        self.low_stock_open_btn.setCursor(Qt.PointingHandCursor)
+        self.low_stock_open_btn.setObjectName("SaveButton")
+        self.low_stock_open_btn.clicked.connect(self.show_low_stock_queue_dialog)
+        info_row.addWidget(self.low_stock_open_btn)
+
+        layout.addLayout(info_row)
+
+        return card
+
+    
+    
+    def build_expiry_card(self):
+    
+        card = QFrame()
+        card.setObjectName("sectionCard")
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        # header
+        header = QHBoxLayout()
+
+        title = QLabel("Expiry Alerts")
+        title.setObjectName("SectionTitle")
+
+        self.expiry_count = QLabel("0")
+        self.expiry_count.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(self.expiry_count)
+
+        layout.addLayout(header)
+
+        info_row = QHBoxLayout()
+        self.expiry_meta = QLabel("No expiry alerts")
+        self.expiry_meta.setStyleSheet("color:#777; padding-left: 0;")
+        info_row.addWidget(self.expiry_meta)
+        info_row.addStretch()
+
+        self.expiry_open_btn = QPushButton("Open Queue")
+        self.expiry_open_btn.setCursor(Qt.PointingHandCursor)
+        self.expiry_open_btn.setObjectName("SaveButton")
+        self.expiry_open_btn.clicked.connect(self.show_expiry_queue_dialog)
+        info_row.addWidget(self.expiry_open_btn)
+
+        layout.addLayout(info_row)
+
+        return card
+        
+        
+    def load_inventory_alerts(self):
+        self.update_session_status_card()
+        self.load_backup_health_summary()
+        self.load_reminder_summary()
+        self.load_low_stock_data()
+        self.load_expiry_data()        
+
+    def refresh_dashboard_alerts(self):
+        db = QSqlDatabase.database()
+        if not db.isValid() or not db.isOpen():
+            return
+        self.load_inventory_alerts()
+
+    def _show_session_state_error(self, result, action_label="continue"):
+        return DailySession._show_session_state_error(self, result, action_label)
+
+    def _get_strict_active_session_id(self, action_label="continue"):
+        return DailySession._get_strict_active_session_id(self, action_label)
+
+    def get_open_session(self):
+        return DailySession.get_open_session(self)
+
+    def open_session_dialog(self):
+        return DailySession.open_session_dialog(self)
+
+    def get_previous_balance(self):
+        return DailySession.get_previous_balance(self)
+
+    def get_cash_expenses(self):
+        return DailySession.get_cash_expenses(self)
+
+    def get_session_payment_method_summary(self, methods=None):
+        return DailySession.get_session_payment_method_summary(self, methods)
+
+    def close_session_dialog(self, session_data):
+        return DailySession.close_session_dialog(self, session_data)
+
+    def get_opening_cash(self):
+        return DailySession.get_opening_cash(self)
+
+    def get_current_session_cash_flows(self):
+        return DailySession.get_current_session_cash_flows(self)
+
+    def update_session_status_card(self):
+        result = check_active_session(strict=True)
+
+        self.open_day_btn.show()
+        self.close_day_btn.hide()
+
+        if result.ok:
+            session = self.get_open_session()
+            self.session_status_badge.setText("OPEN")
+            self.session_status_badge.setStyleSheet("font-weight:bold; color:#2e7d32;")
+            if session:
+                self.session_meta.setText(
+                    f"Opened {session.get('session_date', '')} | Opening cash: {float(session.get('opening_cash') or 0):.2f}"
+                )
+            else:
+                self.session_meta.setText("An active session is open.")
+            self.open_day_btn.hide()
+            self.close_day_btn.show()
+            return
+
+        if result.code == SessionErrorCode.NO_OPEN_SESSION:
+            self.session_status_badge.setText("CLOSED")
+            self.session_status_badge.setStyleSheet("font-weight:bold; color:#ef6c00;")
+            self.session_meta.setText("No active session. Open the day before creating transactions.")
+            return
+
+        if result.code == SessionErrorCode.MULTIPLE_OPEN_SESSIONS:
+            self.session_status_badge.setText("ERROR")
+            self.session_status_badge.setStyleSheet("font-weight:bold; color:#b71c1c;")
+            self.session_meta.setText("Multiple open sessions detected. Fix session data before continuing.")
+            self.open_day_btn.hide()
+            self.close_day_btn.hide()
+            return
+
+        self.session_status_badge.setText("WARN")
+        self.session_status_badge.setStyleSheet("font-weight:bold; color:#ef6c00;")
+        self.session_meta.setText("Session status unavailable.")
+        self.open_day_btn.hide()
+        self.close_day_btn.hide()
+
+    @Permissions.require_permission('dashboard')
+    def handle_open_session(self):
+        active_session = check_active_session(strict=True)
+        if active_session.ok:
+            AppMessageBox.information(self, "Session Already Open", "A daily session is already open.")
+            self.update_session_status_card()
+            return
+
+        if active_session.code not in {SessionErrorCode.NO_OPEN_SESSION}:
+            self._show_session_state_error(active_session, action_label="open a new session")
+            self.update_session_status_card()
+            return
+
+        session_data = self.open_session_dialog()
+        if not session_data:
+            return
+
+        query = QSqlQuery()
+        query.prepare(
+            """
+            INSERT INTO daily_session (session_date, opening_cash, status)
+            VALUES (?, ?, 'open')
+            """
+        )
+        query.addBindValue(session_data["session_date"])
+        query.addBindValue(session_data["opening_cash"])
+
+        if not query.exec():
+            AppMessageBox.critical(self, "Database Error", f"Could not open daily session.\n\n{query.lastError().text()}")
+            return
+
+        self.refresh_dashboard_alerts()
+
+    @Permissions.require_permission('dashboard')
+    def handle_close_session(self):
+        session = self.get_open_session()
+        if not session:
+            AppMessageBox.warning(self, "No Active Session", "There is no active daily session to close.")
+            self.update_session_status_card()
+            return
+
+        result = self.close_session_dialog(session)
+        if not result:
+            return
+
+        query = QSqlQuery()
+        query.prepare(
+            """
+            UPDATE daily_session
+            SET
+                system_cash = ?,
+                actual_cash = ?,
+                withdrawal = ?,
+                cash_difference = ?,
+                closed_at = CURRENT_TIMESTAMP,
+                status = 'closed'
+            WHERE id = ?
+            """
+        )
+        query.addBindValue(result["system_cash"])
+        query.addBindValue(result["actual_cash"])
+        query.addBindValue(result["withdraw_amount"])
+        query.addBindValue(result["cash_difference"])
+        query.addBindValue(session["id"])
+
+        if not query.exec():
+            AppMessageBox.critical(self, "Database Error", f"Could not close daily session.\n\n{query.lastError().text()}")
+            return
+
+        self.refresh_dashboard_alerts()
+
+
+    def run_scheduled_backup_cycle(self):
+        db = QSqlDatabase.database()
+        if not db.isValid() or not db.isOpen():
+            return
+
+        try:
+            self.backup_manager.run_scheduled_backup(interval_hours=24, keep_last=14)
+        except Exception as exc:
+            print("Scheduled backup failed:", str(exc))
+
+        self.load_backup_health_summary()
+
+
+    def run_manual_backup(self):
+        db = QSqlDatabase.database()
+        if not db.isValid() or not db.isOpen():
+            return
+
+        try:
+            backup_file = self.backup_manager.backup(trigger_source="manual")
+            self.backup_manager.prune_backup_files(keep_last=14)
+            log_activity(
+                category="system",
+                action="backup_created",
+                entity_type="backup",
+                entity_id=None,
+                note=f"Manual backup created at {backup_file}",
+            )
+        except Exception as exc:
+            print("Manual backup failed:", str(exc))
+            log_activity(
+                category="system",
+                action="backup_failed",
+                entity_type="backup",
+                entity_id=None,
+                note=f"Manual backup failed: {str(exc)}",
+            )
+
+        self.load_backup_health_summary()
+
+
+    def verify_admin_password(self):
+        user_id = QApplication.instance().property("user_id")
+
+        if not Permissions.has_permission("system.backup.external") or user_id is None:
+            AppMessageBox.warning(self, "Admin Required", "Only admin can run Backup To external location.")
+            return False
+
+        password, ok = QInputDialog.getText(
+            self,
+            "Admin Confirmation",
+            "Enter admin password to continue:",
+            QLineEdit.Password,
+        )
+        if not ok:
+            return False
+
+        query = QSqlQuery()
+        query.prepare("SELECT password_hash FROM auth WHERE id = ? AND role = 'admin' AND status = 'active' LIMIT 1")
+        query.addBindValue(int(user_id))
+
+        if not query.exec() or not query.next():
+            AppMessageBox.warning(self, "Verification Failed", "Could not verify admin account.")
+            return False
+
+        stored_hash = str(query.value(0) or "")
+        if not stored_hash:
+            AppMessageBox.warning(self, "Verification Failed", "Stored admin password is missing.")
+            return False
+
+        try:
+            valid = bcrypt.checkpw(str(password).encode(), stored_hash.encode())
+        except Exception:
+            valid = False
+
+        if not valid:
+            AppMessageBox.warning(self, "Verification Failed", "Invalid admin password.")
+            return False
+
+        return True
+
+
+    def run_manual_backup_to_location(self):
+        db = QSqlDatabase.database()
+        if not db.isValid() or not db.isOpen():
+            return
+
+        if not self.verify_admin_password():
+            return
+
+        target_dir = QFileDialog.getExistingDirectory(self, "Select Backup Folder")
+        if not target_dir:
+            return
+
+        try:
+            backup_file = self.backup_manager.backup(backup_dir=target_dir, trigger_source="manual-custom")
+            log_activity(
+                category="system",
+                action="backup_created_external",
+                entity_type="backup",
+                entity_id=None,
+                note=f"Manual backup created to custom location: {backup_file}",
+            )
+            AppMessageBox.information(self, "Backup Completed", f"Backup saved to:\n{backup_file}")
+        except Exception as exc:
+            log_activity(
+                category="system",
+                action="backup_failed_external",
+                entity_type="backup",
+                entity_id=None,
+                note=f"External backup failed: {str(exc)}",
+            )
+            AppMessageBox.critical(self, "Backup Failed", str(exc))
+
+        self.load_backup_health_summary()
+
+
+    def load_backup_health_summary(self):
+        health = self.backup_manager.get_backup_health(stale_after_hours=30)
+        level = str(health.get("status_level", "warning"))
+        text = str(health.get("status_text", ""))
+        last_run = str(health.get("last_run_status", "unknown")).upper()
+
+        if level == "ok":
+            self.backup_status_badge.setText("OK")
+            self.backup_status_badge.setStyleSheet("font-weight:bold; color:#2e7d32;")
+        elif level == "critical":
+            self.backup_status_badge.setText("ALERT")
+            self.backup_status_badge.setStyleSheet("font-weight:bold; color:#b71c1c;")
+        else:
+            self.backup_status_badge.setText("WARN")
+            self.backup_status_badge.setStyleSheet("font-weight:bold; color:#ef6c00;")
+
+        self.backup_meta.setText(f"{text} | Last run: {last_run}")
+
+
+    def show_backup_status_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Backup Status")
+        dialog.resize(1080, 640)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(8)
+
+        top_row = QHBoxLayout()
+        health = self.backup_manager.get_backup_health(stale_after_hours=30)
+        top_row.addWidget(QLabel(str(health.get("status_text", ""))))
+        top_row.addStretch()
+        backup_now_btn = QPushButton("Backup Now")
+        backup_to_btn = QPushButton("Backup To...")
+        validate_btn = QPushButton("Validate Selected")
+        restore_btn = QPushButton("Restore Selected")
+        reload_btn = QPushButton("Reload", objectName="TopRightButton")
+        top_row.addWidget(backup_now_btn)
+        top_row.addWidget(backup_to_btn)
+        top_row.addWidget(validate_btn)
+        top_row.addWidget(restore_btn)
+        top_row.addWidget(reload_btn)
+        layout.addLayout(top_row)
+
+        status_note = QLabel("Select a backup row, validate it, then restore if needed. Restore creates a safety pre-restore backup automatically.")
+        status_note.setStyleSheet("color:#666;")
+        layout.addWidget(status_note)
+
+        table = QTableWidget()
+        table.setColumnCount(6)
+        table.setHorizontalHeaderLabels(["Run At", "Status", "Trigger", "File", "Size (KB)", "Message"])
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.setAlternatingRowColors(True)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
+        layout.addWidget(table)
+
+        restore_log_title = QLabel("Restore History")
+        restore_log_title.setStyleSheet("font-weight:bold;")
+        layout.addWidget(restore_log_title)
+
+        restore_table = QTableWidget()
+        restore_table.setColumnCount(4)
+        restore_table.setHorizontalHeaderLabels(["Run At", "Status", "Backup File", "Message"])
+        restore_table.verticalHeader().setVisible(False)
+        restore_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        restore_table.setSelectionBehavior(QTableWidget.SelectRows)
+        restore_table.setAlternatingRowColors(True)
+        restore_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        restore_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        restore_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        restore_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        restore_table.setMaximumHeight(180)
+        layout.addWidget(restore_table)
+
+        footer_label = QLabel("")
+        footer_label.setStyleSheet("font-weight:bold;")
+        layout.addWidget(footer_label)
+
+        def selected_backup_file():
+            row = table.currentRow()
+            if row < 0:
+                return ""
+            file_item = table.item(row, 3)
+            if not file_item:
+                return ""
+            return str(file_item.text() or "").strip()
+
+        def load_log_rows():
+            rows = []
+            for row in self.backup_manager.get_backup_run_logs(limit=100):
+                rows.append([
+                    str(row.get("run_at", "")),
+                    str(row.get("status", "")),
+                    str(row.get("trigger_source", "")),
+                    str(row.get("backup_file", "")),
+                    str(round((float(row.get("backup_size", 0) or 0) / 1024.0), 1)),
+                    str(row.get("message", "")),
+                ])
+
+            table.setRowCount(len(rows))
+            for r, values in enumerate(rows):
+                for c, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    item.setFlags(item.flags() ^ Qt.ItemIsEditable)
+                    if c == 1:
+                        status = value.lower()
+                        if status == "success":
+                            item.setForeground(QColor("#2e7d32"))
+                        elif status == "failed":
+                            item.setForeground(QColor("#b71c1c"))
+                        else:
+                            item.setForeground(QColor("#ef6c00"))
+                    table.setItem(r, c, item)
+
+            restore_rows = []
+            for row in self.backup_manager.get_restore_run_logs(limit=50):
+                restore_rows.append([
+                    str(row.get("run_at", "")),
+                    str(row.get("status", "")),
+                    str(row.get("backup_file", "")),
+                    str(row.get("message", "")),
+                ])
+
+            restore_table.setRowCount(len(restore_rows))
+            for r, values in enumerate(restore_rows):
+                for c, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    item.setFlags(item.flags() ^ Qt.ItemIsEditable)
+                    if c == 1:
+                        s = value.lower()
+                        if s == "success":
+                            item.setForeground(QColor("#2e7d32"))
+                        elif s == "failed":
+                            item.setForeground(QColor("#b71c1c"))
+                    restore_table.setItem(r, c, item)
+
+            footer_label.setText(f"Backups shown: {len(rows)} | Restore runs shown: {len(restore_rows)}")
+
+        def validate_selected_backup():
+            backup_file = selected_backup_file()
+            if not backup_file:
+                AppMessageBox.information(dialog, "Select Backup", "Please select a backup row first.")
+                return
+
+            result = self.backup_manager.validate_backup_file(backup_file)
+            if result.get("ok"):
+                AppMessageBox.information(
+                    dialog,
+                    "Validation Passed",
+                    f"Backup is valid.\n\nTables: {result.get('table_count', 0)}\n"
+                    f"Core tables found: {result.get('required_tables_found', 0)}/{result.get('required_tables_total', 3)}",
+                )
+            else:
+                AppMessageBox.warning(dialog, "Validation Failed", str(result.get("message") or "Validation failed."))
+
+        def restore_selected_backup():
+            backup_file = selected_backup_file()
+            if not backup_file:
+                AppMessageBox.information(dialog, "Select Backup", "Please select a backup row first.")
+                return
+
+            _, accepted = AppMessageBox.confirm(
+                dialog,
+                "Confirm Restore",
+                "Restore will replace current database data with selected backup.\n"
+                "A pre-restore safety backup will be created automatically.\n\n"
+                "Do you want to continue?",
+                confirm_label="Restore",
+                cancel_label="Cancel",
+                kind="warning",
+            )
+            if not accepted:
+                return
+
+            try:
+                self.backup_manager.restore_from_backup(backup_file, create_pre_restore_backup=True)
+            except Exception as exc:
+                log_activity(
+                    category="system",
+                    action="restore_failed",
+                    entity_type="backup",
+                    entity_id=None,
+                    note=f"Restore failed from {backup_file}: {str(exc)}",
+                )
+                AppMessageBox.critical(dialog, "Restore Failed", str(exc))
+                load_log_rows()
+                self.load_backup_health_summary()
+                return
+
+            log_activity(
+                category="system",
+                action="restore_completed",
+                entity_type="backup",
+                entity_id=None,
+                note=f"Database restored from {backup_file}",
+            )
+
+            AppMessageBox.information(
+                dialog,
+                "Restore Completed",
+                "Database restore completed successfully.\n"
+                "Please close and reopen the app to ensure all screens are refreshed with restored data.",
+            )
+            load_log_rows()
+            self.load_backup_health_summary()
+
+        def manual_backup_and_reload():
+            self.run_manual_backup()
+            load_log_rows()
+
+        backup_now_btn.clicked.connect(manual_backup_and_reload)
+        backup_to_btn.clicked.connect(lambda: (self.run_manual_backup_to_location(), load_log_rows()))
+        validate_btn.clicked.connect(validate_selected_backup)
+        restore_btn.clicked.connect(restore_selected_backup)
+        reload_btn.clicked.connect(load_log_rows)
+
+        load_log_rows()
+        dialog.exec()
+
+
+    def get_reminder_queue_rows(self, include_hidden_states=False):
+        self.ensure_reminder_state_table()
+        rows = []
+
+        # Payment follow-up reminders (overdue + due soon)
+        payment_query = QSqlQuery()
+        payment_query.prepare("""
+            SELECT
+                s.id,
+                COALESCE(c.name, 'Walk-in Customer') AS customer_name,
+                COALESCE(s.receiveable, 0) AS outstanding,
+                DATE(s.due_date) AS due_date,
+                CAST(julianday('now', 'localtime') - julianday(s.due_date) AS INTEGER) AS due_delta_days
+            FROM sales s
+            LEFT JOIN customer c ON c.id = s.customer
+            WHERE COALESCE(s.receiveable, 0) > 0
+              AND COALESCE(s.writeoff, 0) = 0
+              AND s.due_date IS NOT NULL
+        """)
+
+        if payment_query.exec():
+            while payment_query.next():
+                invoice_id = int(payment_query.value(0) or 0)
+                customer_name = str(payment_query.value(1) or "")
+                outstanding = float(payment_query.value(2) or 0.0)
+                due_date = str(payment_query.value(3) or "")
+                due_delta = int(payment_query.value(4) or 0)
+
+                if due_delta > 30:
+                    priority = "High"
+                elif due_delta > 0:
+                    priority = "Medium"
+                elif due_delta >= -3:
+                    priority = "Low"
+                else:
+                    continue
+
+                if due_delta > 0:
+                    message = f"Invoice #{invoice_id} for {customer_name} is overdue by {due_delta} day(s)."
+                else:
+                    message = f"Invoice #{invoice_id} for {customer_name} is due in {abs(due_delta)} day(s)."
+
+                rows.append({
+                    "reminder_key": f"PAYMENT:SALE#{invoice_id}",
+                    "type": "Payment",
+                    "priority": priority,
+                    "entity": customer_name,
+                    "reference": f"SALE#{invoice_id}",
+                    "due_date": due_date,
+                    "message": message,
+                    "amount": outstanding,
+                })
+        else:
+            print("Payment reminder query failed:", payment_query.lastError().text())
+
+        # Low stock reminders
+        low_stock_query = QSqlQuery()
+        low_stock_query.prepare("""
+            SELECT
+                p.id,
+                p.display_name,
+                COALESCE(SUM(b.quantity_remaining), 0) AS available_qty,
+                MAX(COALESCE(pp.reorder_level, 0)) AS reorder_level
+            FROM product p
+            LEFT JOIN price_pack pp ON pp.product_id = p.id
+            LEFT JOIN batch b ON b.product_id = p.id
+            WHERE p.status = 'used'
+            GROUP BY p.id, p.display_name
+            HAVING COALESCE(SUM(b.quantity_remaining), 0) <= MAX(COALESCE(pp.reorder_level, 0))
+            ORDER BY available_qty ASC
+            LIMIT 25
+        """)
+
+        if low_stock_query.exec():
+            while low_stock_query.next():
+                product_id = int(low_stock_query.value(0) or 0)
+                product_name = str(low_stock_query.value(1) or "")
+                available_qty = float(low_stock_query.value(2) or 0.0)
+                reorder_level = float(low_stock_query.value(3) or 0.0)
+                priority = "High" if available_qty <= 0 else "Medium"
+                rows.append({
+                    "reminder_key": f"LOW_STOCK:PROD#{product_id}",
+                    "type": "Low Stock",
+                    "priority": priority,
+                    "entity": product_name,
+                    "reference": "",
+                    "due_date": "",
+                    "message": f"Available {available_qty:.0f} vs reorder {reorder_level:.0f}.",
+                    "amount": 0.0,
+                })
+        else:
+            print("Low stock reminder query failed:", low_stock_query.lastError().text())
+
+        # Expiry reminders
+        expiry_query = QSqlQuery()
+        expiry_query.prepare("""
+            WITH parsed AS (
+                SELECT
+                    b.id AS batch_id,
+                    p.display_name,
+                    COALESCE(b.batch_no, '-') AS batch_no,
+                    b.expiry_date,
+                    CASE
+                        WHEN b.expiry_date LIKE '____-__-__' THEN date(b.expiry_date)
+                        WHEN b.expiry_date LIKE '__-__-____'
+                            THEN date(substr(b.expiry_date, 7, 4) || '-' || substr(b.expiry_date, 4, 2) || '-' || substr(b.expiry_date, 1, 2))
+                        ELSE NULL
+                    END AS expiry_norm
+                FROM batch b
+                JOIN product p ON p.id = b.product_id
+                WHERE p.status = 'used'
+                  AND b.quantity_remaining > 0
+                  AND b.expiry_date IS NOT NULL
+            )
+            SELECT
+                batch_id,
+                display_name,
+                batch_no,
+                expiry_date,
+                CAST(julianday(expiry_norm) - julianday(date('now', 'localtime')) AS INTEGER) AS remaining_days
+            FROM parsed
+            WHERE expiry_norm IS NOT NULL
+              AND expiry_norm <= date('now', 'localtime', '+45 days')
+            ORDER BY expiry_norm ASC
+            LIMIT 25
+        """)
+
+        if expiry_query.exec():
+            while expiry_query.next():
+                batch_id = int(expiry_query.value(0) or 0)
+                product_name = str(expiry_query.value(1) or "")
+                batch_no = str(expiry_query.value(2) or "")
+                expiry_date = str(expiry_query.value(3) or "")
+                remaining_days = int(expiry_query.value(4) or 0)
+
+                if remaining_days < 0:
+                    priority = "High"
+                elif remaining_days <= 15:
+                    priority = "Medium"
+                else:
+                    priority = "Low"
+
+                rows.append({
+                    "reminder_key": f"EXPIRY:BATCH#{batch_id}",
+                    "type": "Expiry",
+                    "priority": priority,
+                    "entity": product_name,
+                    "reference": f"Batch {batch_no}",
+                    "due_date": expiry_date,
+                    "message": f"Batch {batch_no} expires in {remaining_days} day(s).",
+                    "amount": 0.0,
+                })
+        else:
+            print("Expiry reminder query failed:", expiry_query.lastError().text())
+
+        active_keys = [str(r.get("reminder_key", "")) for r in rows if str(r.get("reminder_key", ""))]
+        state_map = self.get_reminder_state_map(active_keys)
+
+        visible_rows = []
+        for row in rows:
+            key = str(row.get("reminder_key", ""))
+            state = state_map.get(key, {})
+            status = str(state.get("state", "open") or "open").lower()
+            snooze_until = str(state.get("snooze_until", "") or "")
+
+            row["state"] = status
+            row["snooze_until"] = snooze_until
+
+            is_snoozed = False
+            if snooze_until:
+                now_check = QSqlQuery()
+                now_check.prepare("SELECT CASE WHEN datetime('now','localtime') <= datetime(?) THEN 1 ELSE 0 END")
+                now_check.addBindValue(snooze_until)
+                if now_check.exec() and now_check.next():
+                    is_snoozed = int(now_check.value(0) or 0) == 1
+
+            if status == "acknowledged":
+                row["visibility_state"] = "acknowledged"
+            elif is_snoozed:
+                row["visibility_state"] = "snoozed"
+            else:
+                row["visibility_state"] = "open"
+
+            if include_hidden_states:
+                visible_rows.append(row)
+                continue
+
+            if status == "acknowledged":
+                continue
+
+            if is_snoozed:
+                continue
+
+            visible_rows.append(row)
+
+        self.cleanup_stale_reminder_state(active_keys)
+
+        priority_order = {"High": 0, "Medium": 1, "Low": 2}
+        visible_rows.sort(key=lambda r: (priority_order.get(str(r.get("priority")), 9), str(r.get("type", "")), str(r.get("entity", ""))))
+        return visible_rows
+
+
+    def ensure_reminder_state_table(self):
+        query = QSqlQuery()
+        if not query.exec("""
+            CREATE TABLE IF NOT EXISTS reminder_state (
+                reminder_key TEXT PRIMARY KEY,
+                state TEXT NOT NULL DEFAULT 'open',
+                snooze_until TEXT,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+            )
+        """):
+            print("reminder_state table create failed:", query.lastError().text())
+
+
+    def get_reminder_state_map(self, reminder_keys):
+        state_map = {}
+        keys = [k for k in reminder_keys if k]
+        if not keys:
+            return state_map
+
+        placeholders = ",".join(["?"] * len(keys))
+        query = QSqlQuery()
+        query.prepare(f"""
+            SELECT reminder_key, state, COALESCE(snooze_until, '')
+            FROM reminder_state
+            WHERE reminder_key IN ({placeholders})
+        """)
+        for key in keys:
+            query.addBindValue(key)
+
+        if not query.exec():
+            print("reminder_state read failed:", query.lastError().text())
+            return state_map
+
+        while query.next():
+            r_key = str(query.value(0) or "")
+            state_map[r_key] = {
+                "state": str(query.value(1) or "open"),
+                "snooze_until": str(query.value(2) or ""),
+            }
+
+        return state_map
+
+
+    def set_reminder_state(self, reminder_key, state="open", snooze_days=None, clear_snooze=False):
+        if not reminder_key:
+            return
+
+        query = QSqlQuery()
+        if clear_snooze:
+            query.prepare("""
+                INSERT INTO reminder_state (reminder_key, state, snooze_until, updated_at)
+                VALUES (?, ?, NULL, datetime('now','localtime'))
+                ON CONFLICT(reminder_key) DO UPDATE SET
+                    state = excluded.state,
+                    snooze_until = NULL,
+                    updated_at = datetime('now','localtime')
+            """)
+            query.addBindValue(reminder_key)
+            query.addBindValue(state)
+        elif snooze_days is not None:
+            try:
+                snooze_days = int(snooze_days)
+            except Exception:
+                snooze_days = 1
+            if snooze_days < 1:
+                snooze_days = 1
+            query.prepare("""
+                INSERT INTO reminder_state (reminder_key, state, snooze_until, updated_at)
+                VALUES (?, 'open', datetime('now','localtime', ?), datetime('now','localtime'))
+                ON CONFLICT(reminder_key) DO UPDATE SET
+                    state = 'open',
+                    snooze_until = datetime('now','localtime', ?),
+                    updated_at = datetime('now','localtime')
+            """)
+            modifier = f"+{snooze_days} days"
+            query.addBindValue(reminder_key)
+            query.addBindValue(modifier)
+            query.addBindValue(modifier)
+        else:
+            query.prepare("""
+                INSERT INTO reminder_state (reminder_key, state, snooze_until, updated_at)
+                VALUES (?, ?, NULL, datetime('now','localtime'))
+                ON CONFLICT(reminder_key) DO UPDATE SET
+                    state = excluded.state,
+                    snooze_until = NULL,
+                    updated_at = datetime('now','localtime')
+            """)
+            query.addBindValue(reminder_key)
+            query.addBindValue(state)
+
+        if not query.exec():
+            print("reminder_state update failed:", query.lastError().text())
+
+
+    def cleanup_stale_reminder_state(self, active_keys):
+        keys = [k for k in active_keys if k]
+        query = QSqlQuery()
+        if not keys:
+            query.exec("DELETE FROM reminder_state")
+            return
+
+        placeholders = ",".join(["?"] * len(keys))
+        sql = f"DELETE FROM reminder_state WHERE reminder_key NOT IN ({placeholders})"
+        query.prepare(sql)
+        for key in keys:
+            query.addBindValue(key)
+        if not query.exec():
+            print("reminder_state cleanup failed:", query.lastError().text())
+
+
+    def load_reminder_summary(self):
+        rows = self.get_reminder_queue_rows()
+        high_count = sum(1 for r in rows if r.get("priority") == "High")
+        medium_count = sum(1 for r in rows if r.get("priority") == "Medium")
+        low_count = sum(1 for r in rows if r.get("priority") == "Low")
+
+        self.reminder_count.setText(str(len(rows)))
+        self.reminder_meta.setText(f"High {high_count} | Medium {medium_count} | Low {low_count}")
+
+
+    def show_reminder_queue_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Reminder Queue")
+        dialog.resize(1180, 640)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(8)
+
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("Type"))
+        type_combo = QComboBox()
+        type_combo.addItems(["All", "Payment", "Low Stock", "Expiry"])
+        type_combo.setFixedWidth(160)
+        filter_row.addWidget(type_combo)
+
+        filter_row.addWidget(QLabel("Priority"))
+        priority_combo = QComboBox()
+        priority_combo.addItems(["All", "High", "Medium", "Low"])
+        priority_combo.setFixedWidth(140)
+        filter_row.addWidget(priority_combo)
+
+        filter_row.addWidget(QLabel("Status"))
+        status_combo = QComboBox()
+        status_combo.addItems(["Open Only", "Asleep Only", "Done Only", "All"])
+        status_combo.setFixedWidth(170)
+        filter_row.addWidget(status_combo)
+
+        filter_row.addStretch()
+        reload_btn = QPushButton("Reload", objectName="TopRightButton")
+        filter_row.addWidget(reload_btn)
+        layout.addLayout(filter_row)
+
+        hint = QLabel("Auto reminders include payments due/overdue, low stock, and near-expiry batches.")
+        hint.setStyleSheet("color:#666;")
+        layout.addWidget(hint)
+
+        table = QTableWidget()
+        table.setColumnCount(8)
+        table.setHorizontalHeaderLabels(["Status", "Type", "Priority", "Entity", "Reference", "Due Date", "Amount", "Message"])
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.setAlternatingRowColors(True)
+        table.setWordWrap(False)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(7, QHeaderView.Stretch)
+        layout.addWidget(table)
+
+        summary_label = QLabel("Rows: 0")
+        summary_label.setStyleSheet("font-weight:bold;")
+        layout.addWidget(summary_label)
+
+        action_row = QHBoxLayout()
+        acknowledge_btn = QPushButton("Mark Done")
+        sleep_3_btn = QPushButton("Put to Sleep (3 Days)")
+        sleep_7_btn = QPushButton("Put to Sleep (7 Days)")
+        wake_btn = QPushButton("Wake Up Selected")
+        action_row.addWidget(acknowledge_btn)
+        action_row.addWidget(sleep_3_btn)
+        action_row.addWidget(sleep_7_btn)
+        action_row.addWidget(wake_btn)
+        action_row.addStretch()
+        layout.addLayout(action_row)
+
+        all_rows = []
+        visible_rows = []
+
+        def render_rows(rows):
+            nonlocal visible_rows
+            visible_rows = rows
+            table.setRowCount(len(rows))
+            total_payment = 0.0
+
+            for r, row_data in enumerate(rows):
+                amount = float(row_data.get("amount", 0.0) or 0.0)
+                total_payment += amount if str(row_data.get("type", "")) == "Payment" else 0.0
+
+                visibility_state = str(row_data.get("visibility_state", "open") or "open")
+                snooze_until = str(row_data.get("snooze_until", "") or "")
+                if visibility_state == "acknowledged":
+                    status_text = "Done"
+                elif visibility_state == "snoozed":
+                    status_text = f"Asleep until {snooze_until}" if snooze_until else "Asleep"
+                else:
+                    status_text = "Open"
+
+                values = [
+                    status_text,
+                    str(row_data.get("type", "")),
+                    str(row_data.get("priority", "")),
+                    str(row_data.get("entity", "")),
+                    str(row_data.get("reference", "")),
+                    str(row_data.get("due_date", "")),
+                    f"{amount:.2f}" if amount > 0 else "",
+                    str(row_data.get("message", "")),
+                ]
+
+                for c, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    item.setFlags(item.flags() ^ Qt.ItemIsEditable)
+
+                    if c == 2:
+                        p = str(row_data.get("priority", ""))
+                        if p == "High":
+                            item.setForeground(QColor("#b71c1c"))
+                        elif p == "Medium":
+                            item.setForeground(QColor("#ef6c00"))
+                        elif p == "Low":
+                            item.setForeground(QColor("#2e7d32"))
+
+                    if c == 6 and amount > 0:
+                        item.setForeground(QColor("#b71c1c"))
+
+                    if c == 0:
+                        item.setData(Qt.UserRole, str(row_data.get("reminder_key", "")))
+
+                    if c == 0:
+                        if visibility_state == "acknowledged":
+                            item.setForeground(QColor("#616161"))
+                        elif visibility_state == "snoozed":
+                            item.setForeground(QColor("#6a1b9a"))
+                        else:
+                            item.setForeground(QColor("#2e7d32"))
+
+                    table.setItem(r, c, item)
+
+            high_count = sum(1 for x in rows if x.get("priority") == "High")
+            summary_label.setText(
+                f"Rows: {len(rows)} | High: {high_count} | Payment Outstanding (in view): {total_payment:.2f}"
+            )
+
+        def apply_filters():
+            rows = all_rows
+
+            t = (type_combo.currentText() or "All").strip()
+            p = (priority_combo.currentText() or "All").strip()
+
+            if t != "All":
+                rows = [r for r in rows if str(r.get("type", "")) == t]
+
+            if p != "All":
+                rows = [r for r in rows if str(r.get("priority", "")) == p]
+
+            status_filter = (status_combo.currentText() or "Open Only").strip()
+            if status_filter == "Open Only":
+                rows = [r for r in rows if str(r.get("visibility_state", "open")) == "open"]
+            elif status_filter == "Asleep Only":
+                rows = [r for r in rows if str(r.get("visibility_state", "open")) == "snoozed"]
+            elif status_filter == "Done Only":
+                rows = [r for r in rows if str(r.get("visibility_state", "open")) == "acknowledged"]
+
+            render_rows(rows)
+
+        def reload_data():
+            nonlocal all_rows
+            all_rows = self.get_reminder_queue_rows(include_hidden_states=True)
+            apply_filters()
+
+        def get_selected_key():
+            row = table.currentRow()
+            if row < 0 or row >= len(visible_rows):
+                return ""
+            item = table.item(row, 0)
+            if not item:
+                return ""
+            return str(item.data(Qt.UserRole) or "")
+
+        def acknowledge_selected():
+            key = get_selected_key()
+            if not key:
+                return
+            self.set_reminder_state(key, state="acknowledged", clear_snooze=True)
+            reload_data()
+            self.load_reminder_summary()
+
+        def sleep_selected(days):
+            key = get_selected_key()
+            if not key:
+                return
+            self.set_reminder_state(key, state="open", snooze_days=days)
+            reload_data()
+            self.load_reminder_summary()
+
+        def wake_selected():
+            key = get_selected_key()
+            if not key:
+                return
+            self.set_reminder_state(key, state="open", clear_snooze=True)
+            reload_data()
+            self.load_reminder_summary()
+
+        reload_btn.clicked.connect(reload_data)
+        type_combo.currentIndexChanged.connect(lambda _: apply_filters())
+        priority_combo.currentIndexChanged.connect(lambda _: apply_filters())
+        status_combo.currentIndexChanged.connect(lambda _: apply_filters())
+        acknowledge_btn.clicked.connect(acknowledge_selected)
+        sleep_3_btn.clicked.connect(lambda: sleep_selected(3))
+        sleep_7_btn.clicked.connect(lambda: sleep_selected(7))
+        wake_btn.clicked.connect(wake_selected)
+
+        reload_data()
+        dialog.exec()
+
+
 
 
     
+    def load_low_stock_data(self):
+        rows = []
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT
+                p.id,
+                p.display_name,
+                COALESCE(SUM(b.quantity_remaining), 0) AS available_qty,
+                MAX(COALESCE(pp.reorder_level, 0)) AS reorder_level
+            FROM product p
+            LEFT JOIN price_pack pp
+                ON pp.product_id = p.id
+            LEFT JOIN batch b
+                ON b.product_id = p.id
+            WHERE
+                p.status = 'used'
+            GROUP BY
+                p.id, p.display_name
+            HAVING
+                COALESCE(SUM(b.quantity_remaining), 0) <= MAX(COALESCE(pp.reorder_level, 0))
+            ORDER BY
+                available_qty ASC,
+                p.display_name ASC
+            LIMIT 10
+        """)
+
+        if not query.exec():
+            print("Low stock query failed:", query.lastError().text())
+            return
+
+        while query.next():
+            rows.append({
+                "product_id": int(query.value(0) or 0),
+                "product_name": str(query.value(1) or ""),
+                "available_qty": float(query.value(2) or 0.0),
+                "reorder_level": float(query.value(3) or 0.0),
+            })
+
+        self.low_stock_rows = rows
+        self.low_stock_count.setText(str(len(rows)))
+
+        critical = sum(1 for r in rows if float(r.get("available_qty", 0)) <= 0)
+        if rows:
+            self.low_stock_meta.setText(f"Critical: {critical} | Showing top {len(rows)} items")
+        else:
+            self.low_stock_meta.setText("No low-stock alerts")
+
+
+
+    def load_expiry_data(self):
+        rows = []
+        query = QSqlQuery()
+        query.prepare("""
+            WITH parsed AS (
+                SELECT
+                    p.display_name,
+                    COALESCE(b.batch_no, '-') AS batch_no,
+                    b.expiry_date,
+                    CASE
+                        WHEN b.expiry_date LIKE '____-__-__' THEN date(b.expiry_date)
+                        WHEN b.expiry_date LIKE '__-__-____'
+                            THEN date(substr(b.expiry_date, 7, 4) || '-' || substr(b.expiry_date, 4, 2) || '-' || substr(b.expiry_date, 1, 2))
+                        ELSE NULL
+                    END AS expiry_norm
+                FROM batch b
+                JOIN product p ON p.id = b.product_id
+                WHERE
+                    p.status = 'used'
+                    AND b.quantity_remaining > 0
+                    AND b.expiry_date IS NOT NULL
+            )
+            SELECT
+                display_name,
+                batch_no,
+                expiry_date,
+                CASE
+                    WHEN expiry_norm < date('now', 'localtime') THEN 'Expired'
+                    WHEN expiry_norm <= date('now', 'localtime', '+180 days') THEN 'Expiring Soon'
+                END AS alert_status,
+                CAST(julianday(expiry_norm) - julianday(date('now', 'localtime')) AS INTEGER) AS remaining_days
+            FROM parsed
+            WHERE
+                expiry_norm IS NOT NULL
+                AND expiry_norm <= date('now', 'localtime', '+180 days')
+            ORDER BY
+                expiry_norm ASC,
+                display_name ASC
+            LIMIT 10
+        """)
+
+        if not query.exec():
+            print("Expiry query failed:", query.lastError().text())
+            return
+
+        while query.next():
+            rows.append({
+                "product_name": str(query.value(0) or ""),
+                "batch_no": str(query.value(1) or ""),
+                "expiry_date": str(query.value(2) or ""),
+                "status": str(query.value(3) or ""),
+                "remaining_days": int(query.value(4) or 0),
+            })
+
+        self.expiry_rows = rows
+        self.expiry_count.setText(str(len(rows)))
+
+        expired = sum(1 for r in rows if str(r.get("status", "")) == "Expired")
+        if rows:
+            self.expiry_meta.setText(f"Expired: {expired} | Showing top {len(rows)} items")
+        else:
+            self.expiry_meta.setText("No expiry alerts")
+
+
+    def show_low_stock_queue_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Low Stock Queue")
+        dialog.resize(900, 520)
+
+        layout = QVBoxLayout(dialog)
+
+        top_row = QHBoxLayout()
+        top_row.addWidget(QLabel("Products at/below reorder level"))
+        top_row.addStretch()
+        reload_btn = QPushButton("Reload", objectName="TopRightButton")
+        top_row.addWidget(reload_btn)
+        layout.addLayout(top_row)
+
+        table = QTableWidget()
+        table.setColumnCount(3)
+        table.setHorizontalHeaderLabels(["Product", "Available", "Reorder"])
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.setAlternatingRowColors(True)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        layout.addWidget(table)
+
+        summary = QLabel("Rows: 0")
+        summary.setStyleSheet("font-weight:bold;")
+        layout.addWidget(summary)
+
+        def reload_data():
+            self.load_low_stock_data()
+            rows = getattr(self, "low_stock_rows", [])
+            table.setRowCount(len(rows))
+
+            for r, row_data in enumerate(rows):
+                available_qty = float(row_data.get("available_qty", 0) or 0.0)
+                reorder_level = float(row_data.get("reorder_level", 0) or 0.0)
+                values = [
+                    str(row_data.get("product_name", "")),
+                    f"{available_qty:.0f}",
+                    f"{reorder_level:.0f}",
+                ]
+                for c, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    item.setFlags(item.flags() ^ Qt.ItemIsEditable)
+                    if available_qty <= 0:
+                        item.setBackground(QColor("#ffebee"))
+                    else:
+                        item.setBackground(QColor("#fff3e0"))
+                    table.setItem(r, c, item)
+
+            critical = sum(1 for x in rows if float(x.get("available_qty", 0) or 0) <= 0)
+            summary.setText(f"Rows: {len(rows)} | Critical: {critical}")
+
+        reload_btn.clicked.connect(reload_data)
+        reload_data()
+        dialog.exec()
+
+
+    def show_expiry_queue_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Expiry Queue")
+        dialog.resize(980, 560)
+
+        layout = QVBoxLayout(dialog)
+
+        top_row = QHBoxLayout()
+        top_row.addWidget(QLabel("Expired and near-expiry batches"))
+        top_row.addStretch()
+        reload_btn = QPushButton("Reload", objectName="TopRightButton")
+        top_row.addWidget(reload_btn)
+        layout.addLayout(top_row)
+
+        table = QTableWidget()
+        table.setColumnCount(5)
+        table.setHorizontalHeaderLabels(["Product", "Batch", "Expiry", "Status", "Remaining Days"])
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.setAlternatingRowColors(True)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        layout.addWidget(table)
+
+        summary = QLabel("Rows: 0")
+        summary.setStyleSheet("font-weight:bold;")
+        layout.addWidget(summary)
+
+        def reload_data():
+            self.load_expiry_data()
+            rows = getattr(self, "expiry_rows", [])
+            table.setRowCount(len(rows))
+
+            for r, row_data in enumerate(rows):
+                status = str(row_data.get("status", ""))
+                remaining_days = int(row_data.get("remaining_days", 0) or 0)
+                values = [
+                    str(row_data.get("product_name", "")),
+                    str(row_data.get("batch_no", "")),
+                    str(row_data.get("expiry_date", "")),
+                    status,
+                    str(remaining_days) if status == "Expiring Soon" else "-",
+                ]
+                for c, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    item.setFlags(item.flags() ^ Qt.ItemIsEditable)
+                    if status == "Expired":
+                        item.setBackground(QColor("#ffebee"))
+                    else:
+                        item.setBackground(QColor("#fff3e0"))
+                    table.setItem(r, c, item)
+
+            expired = sum(1 for x in rows if str(x.get("status", "")) == "Expired")
+            summary.setText(f"Rows: {len(rows)} | Expired: {expired}")
+
+        reload_btn.clicked.connect(reload_data)
+        reload_data()
+        dialog.exec()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
     def showEvent(self, event):
         
         super().showEvent(event)
-        
+        # Refresh alerts each time dashboard becomes visible.
+        # singleShot avoids blocking paint/show in some parent layouts.
+        QTimer.singleShot(0, self.refresh_dashboard_alerts)
         
         
 
-    
-    
-    
- 
-
-
-
-        
         
         
     

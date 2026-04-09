@@ -2,6 +2,7 @@ from PySide6.QtWidgets import QWidget, QPushButton, QGridLayout, QLabel, QVBoxLa
 from PySide6.QtCore import QFile, Qt,QDate
 from PySide6.QtSql import  QSqlQuery
 from utilities.stylus import load_stylesheets
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -9,12 +10,13 @@ from utilities.stylus import load_stylesheets
 class MainTransactionWidget(QWidget):
 
     def __init__(self, parent=None):
+        self._last_reconciliation_signature = None
 
         super().__init__(parent)
         
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
@@ -24,6 +26,7 @@ class MainTransactionWidget(QWidget):
         # self.transactionlist.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         # header_layout.addWidget(self.transactionlist)
 
         self.layout.addLayout(header_layout)
@@ -80,6 +83,11 @@ class MainTransactionWidget(QWidget):
         st_btn = QHBoxLayout()
         st_btn.addWidget(self.supplier_transactions_button)
         self.layout.addLayout(st_btn)
+
+        self.supplier_reconcile_notice = QLabel("")
+        self.supplier_reconcile_notice.setStyleSheet("color: #5A7183; font-size: 12px; font-weight: 600;")
+        self.supplier_reconcile_notice.hide()
+        self.layout.addWidget(self.supplier_reconcile_notice)
         
         
         
@@ -115,6 +123,11 @@ class MainTransactionWidget(QWidget):
         ct_btn = QHBoxLayout()
         ct_btn.addWidget(self.customer_transactions_button)
         self.layout.addLayout(ct_btn)
+
+        self.customer_reconcile_notice = QLabel("")
+        self.customer_reconcile_notice.setStyleSheet("color: #5A7183; font-size: 12px; font-weight: 600;")
+        self.customer_reconcile_notice.hide()
+        self.layout.addWidget(self.customer_reconcile_notice)
 
         
 
@@ -180,7 +193,70 @@ class MainTransactionWidget(QWidget):
             self.customer_payable_amount.setText(f"{total_payable:.2f}")
             self.customer_receiveable_amount.setText(f"{total_receiveable:.2f}")
         
-            
-            
-        
+        self.update_reconciliation_notices()
 
+    def get_reconciliation_counts(self):
+        counts = {"supplier": 0, "customer": 0}
+
+        supplier_query = QSqlQuery()
+        supplier_query.prepare("""
+            SELECT COUNT(*)
+            FROM supplier
+            WHERE COALESCE(payable, 0) > 0 AND COALESCE(receiveable, 0) > 0
+        """)
+        if supplier_query.exec() and supplier_query.next():
+            counts["supplier"] = int(supplier_query.value(0) or 0)
+
+        customer_query = QSqlQuery()
+        customer_query.prepare("""
+            SELECT COUNT(*)
+            FROM customer
+            WHERE COALESCE(payable, 0) > 0 AND COALESCE(receiveable, 0) > 0
+        """)
+        if customer_query.exec() and customer_query.next():
+            counts["customer"] = int(customer_query.value(0) or 0)
+
+        return counts
+
+    def update_reconciliation_notices(self):
+        counts = self.get_reconciliation_counts()
+
+        if counts["supplier"] > 0:
+            suffix = "supplier has" if counts["supplier"] == 1 else "suppliers have"
+            self.supplier_reconcile_notice.setText(
+                f"{counts['supplier']} {suffix} balances eligible for internal reconciliation."
+            )
+            self.supplier_reconcile_notice.show()
+        else:
+            self.supplier_reconcile_notice.hide()
+
+        if counts["customer"] > 0:
+            suffix = "customer has" if counts["customer"] == 1 else "customers have"
+            self.customer_reconcile_notice.setText(
+                f"{counts['customer']} {suffix} balances eligible for internal reconciliation."
+            )
+            self.customer_reconcile_notice.show()
+        else:
+            self.customer_reconcile_notice.hide()
+
+        signature = (counts["supplier"], counts["customer"])
+        if signature == self._last_reconciliation_signature:
+            return
+
+        self._last_reconciliation_signature = signature
+
+        if counts["supplier"] == 0 and counts["customer"] == 0:
+            return
+
+        lines = []
+        if counts["supplier"] > 0:
+            lines.append(f"Suppliers eligible for reconciliation: {counts['supplier']}")
+        if counts["customer"] > 0:
+            lines.append(f"Customers eligible for reconciliation: {counts['customer']}")
+
+        AppMessageBox.information(
+            self,
+            "Reconciliation Available",
+            "\n".join(lines) + "\n\nOpen the relevant transaction list to reconcile balances."
+        )
+        

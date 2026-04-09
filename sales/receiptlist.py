@@ -1,355 +1,241 @@
-from PySide6.QtWidgets import QWidget, QComboBox, QHBoxLayout, QFrame, QLabel, QDateEdit, QLineEdit, QPushButton, QHeaderView, QSizePolicy, QVBoxLayout, QTableWidget, QTableWidgetItem
-from PySide6.QtCore import QFile, Qt, QDate, Signal, QDateTime
-from PySide6.QtSql import QSqlDatabase, QSqlQuery
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QFrame, QLabel, QDateEdit, QLineEdit, QPushButton, QHeaderView, QSizePolicy, QVBoxLayout, QTableWidget, QTableWidgetItem
+from PySide6.QtCore import Qt, QDate, Signal, QDateTime, QTimer
+from PySide6.QtSql import QSqlQuery
 from functools import partial
-from datetime import date
 
 from utilities.stylus import load_stylesheets
-
+from utilities.table_helpers import centered_cell_widget, style_table_action_button
 
 
 class ReceiptListWidget(QWidget):
-    
+
     salesdetailsignal = Signal(int)
 
     def __init__(self, parent=None):
 
         super().__init__(parent)
 
-        
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self._sales_barcode_filter = None
 
-        # === Header Row ===
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
+
+        # Header
         header_layout = QHBoxLayout()
         heading = QLabel("Invoice Information", objectName="SectionTitle")
         self.addinvoice = QPushButton("Add Invoice", objectName="TopRightButton")
         self.addinvoice.setCursor(Qt.PointingHandCursor)
-        self.addinvoice.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.addinvoice)
-
         self.layout.addLayout(header_layout)
-        
 
         line = QFrame()
         line.setObjectName("lineSeparator")
-
         line.setFrameShape(QFrame.HLine)
         line.setFrameShadow(QFrame.Sunken)
-        line.setStyleSheet("""
-                QFrame#lineSeparator {
-                    border: none;
-                    border-top: 2px solid #333;
-                }
-            """)
-
+        line.setStyleSheet(
+            """
+            QFrame#lineSeparator {
+                border: none;
+                border-top: 2px solid #333;
+            }
+            """
+        )
         self.layout.addWidget(line)
-        self.layout.addSpacing(20)
-        
-        
-        
-        # Search Field
+        self.layout.addSpacing(10)
+
+        # Unified search + date filter
         search_layout = QHBoxLayout()
-        search_edit = QLineEdit()
-        search_edit.setPlaceholderText("Search Customer...")
-        search_edit.textChanged.connect(self.search_rows)
-        
-        search_layout.addWidget(search_edit, 4)
-        
-        
-        
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.setSpacing(10)
+
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search customer or scan barcode...")
+        self._sales_search_timer = QTimer()
+        self._sales_search_timer.setSingleShot(True)
+        self._sales_search_timer.timeout.connect(self.load_sales_into_table)
+        self.search_edit.textChanged.connect(self.on_sales_search_text_changed)
+        self.search_edit.returnPressed.connect(self.handle_sales_search_enter)
+        search_layout.addWidget(self.search_edit, 4)
+
         from_label = QLabel("Date From")
         self.date_from = QDateEdit()
         self.date_from.setCalendarPopup(True)
-        self.date_from.setDate(QDate.currentDate())
-        self.date_from.setStyleSheet("""
-            QCalendarWidget QWidget {
-                background-color: #2b2b2b;   /* dark gray background */
-                color: white;                /* white text */
-            }
-            QCalendarWidget QAbstractItemView:enabled {
-                background-color: #2b2b2b;
-                color: white;
-                selection-background-color: #5A9EC9;  /* blue highlight */
-                selection-color: white;
-            }
-            QCalendarWidget QToolButton {
-                background-color: #444;
-                color: white;
-                font-weight: bold;
-                border-radius: 5px;
-                margin: 2px;
-            }
-            QCalendarWidget QToolButton::menu-indicator {
-                image: none; /* hide dropdown arrow */
-            }
-            QCalendarWidget QSpinBox {
-                background-color: #444;
-                color: white;
-            }
-        """)
+        self.date_from.setDate(QDate.currentDate().addDays(-30))
 
-        
-        
-        
         to_label = QLabel("Date To")
         self.date_to = QDateEdit()
         self.date_to.setCalendarPopup(True)
-        self.date_to.setDate(QDate.currentDate()) 
-        self.date_to.setStyleSheet(self.date_from.styleSheet())
+        self.date_to.setDate(QDate.currentDate())
 
-        
         search_layout.addWidget(from_label)
         search_layout.addWidget(self.date_from)
-        
         search_layout.addWidget(to_label)
         search_layout.addWidget(self.date_to)
-        
-        
+
         search_data = QPushButton("Get Data")
         search_data.setStyleSheet("color: #333; padding: 3px 5px;")
-        
-        search_data.clicked.connect(self.filter_rows_by_date)
-        
+        search_data.clicked.connect(self.load_sales_into_table)
         search_layout.addWidget(search_data)
-        
+
         self.layout.addLayout(search_layout)
         self.layout.addSpacing(10)
-        
-        
-        
-        
-        
-        
-        
-        
 
-        self.row_height = 40
+        self.row_height = 35
 
         self.table = MyTable(column_ratios=[0.05, 0.15, 0.40, 0.10, 0.10, 0.08])
         headers = ["Id", "Customer", "Products", "Received", "Date", "Detail"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         self.table.setTextElideMode(Qt.ElideRight)
-        
+
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.table.verticalHeader().setDefaultSectionSize(self.row_height)
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         detail_col = headers.index("Detail")
         self.table.horizontalHeaderItem(detail_col).setTextAlignment(Qt.AlignCenter)
-        
-        self.table.setStyleSheet("QTableWidget::item { color: #333; }")
 
+        self.table.setStyleSheet("QTableWidget::item { color: #333; }")
         self.table.verticalHeader().setFixedWidth(0)
         header = self.table.horizontalHeader()
-        header.setStretchLastSection(True)   
-
+        header.setStretchLastSection(True)
         self.table.setMinimumWidth(1000)
-        
-        # Hide vertical header (row numbers)
-        self.table.verticalHeader().setVisible(False)
-        
-        # Alternating row colors
-        self.table.setAlternatingRowColors(True)
 
-        # Selection behaviour
+        self.table.verticalHeader().setVisible(False)
+        self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
 
         self.layout.addWidget(self.table)
-        
         self.layout.addStretch()
 
-
-
-
-        
         self.setStyleSheet(load_stylesheets())
 
+    def on_sales_search_text_changed(self):
+        text = (self.search_edit.text() or "").strip()
+        self._sales_barcode_filter = None
+        if text and text.isdigit():
+            return
+        self._sales_search_timer.start(400)
 
+    def handle_sales_search_enter(self):
+        text = (self.search_edit.text() or "").strip()
+        if text and text.isdigit():
+            self._sales_barcode_filter = text
+            self.load_sales_into_table()
+            return
 
-
-
-    def filter_rows_by_date(self):
-        print("Searching rows by date")
-        
-        from_date = self.date_from.date()
-        to_date = self.date_to.date()
-        
-        print("Dates are: ", from_date, " to ", to_date)
-
-        for row in range(self.table.rowCount()):
-            # adjust column index to your date column
-            date_item = self.table.item(row, 4)  
-            if not date_item:
-                self.table.setRowHidden(row, True)
-                continue
-            
-            
-            
-            row_dt = QDateTime.fromString(date_item.text(), "yyyy-MM-dd HH:mm:ss")
-            if not row_dt.isValid():
-                self.table.setRowHidden(row, True)
-                continue
-
-
-            row_date = row_dt.date()
-            # inclusive check
-            in_range = from_date <= row_date <= to_date
-            self.table.setRowHidden(row, not in_range)
-
-
-
-
-    def search_rows(self, text):
-        
-        for row in range(self.table.rowCount()):
-            match = False
-            for col in range(self.table.columnCount() - 1):
-                item = self.table.item(row, col)
-                if item and text.lower() in item.text().lower():
-                    match = True
-                    break
-            self.table.setRowHidden(row, not match)
-            
-            
-    
-    def showEvent(self, event):
-        
-        super().showEvent(event)
-        print("Widget shown — refreshing data")
+        self._sales_barcode_filter = None
         self.load_sales_into_table()
-        
 
-
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.load_sales_into_table()
 
     def load_sales_into_table(self):
-        
+        search_text = self.search_edit.text().strip()
+        from_date = self.date_from.date().toString("yyyy-MM-dd") + " 00:00:00"
+        to_date = self.date_to.date().toString("yyyy-MM-dd") + " 23:59:59"
+        pattern = f"%{search_text}%"
+        barcode_code = self._sales_barcode_filter
+
         query = QSqlQuery()
-        query.exec("SELECT id, customer, received, creation_date FROM sales")
+        if barcode_code:
+            query.prepare(
+                """
+                SELECT
+                    s.id,
+                    COALESCE(c.name, 'Walk-in Customer'),
+                    (
+                        SELECT GROUP_CONCAT(pr.display_name, ' | ')
+                        FROM salesitem si
+                        LEFT JOIN product pr ON pr.id = si.product_id
+                        WHERE si.sales_id = s.id
+                    ) AS products,
+                    s.received,
+                    s.creation_date
+                FROM sales s
+                LEFT JOIN customer c ON c.id = s.customer
+                WHERE s.creation_date BETWEEN ? AND ?
+                  AND EXISTS (
+                      SELECT 1
+                      FROM salesitem si2
+                      JOIN product p2 ON p2.id = si2.product_id
+                      WHERE si2.sales_id = s.id
+                        AND TRIM(CAST(p2.code AS TEXT)) = ?
+                  )
+                ORDER BY s.id DESC
+                """
+            )
+            query.addBindValue(from_date)
+            query.addBindValue(to_date)
+            query.addBindValue(barcode_code)
+        else:
+            query.prepare(
+                """
+                SELECT
+                    s.id,
+                    COALESCE(c.name, 'Walk-in Customer'),
+                    (
+                        SELECT GROUP_CONCAT(pr.display_name, ' | ')
+                        FROM salesitem si
+                        LEFT JOIN product pr ON pr.id = si.product_id
+                        WHERE si.sales_id = s.id
+                    ) AS products,
+                    s.received,
+                    s.creation_date
+                FROM sales s
+                LEFT JOIN customer c ON c.id = s.customer
+                WHERE s.creation_date BETWEEN ? AND ?
+                  AND (
+                    ? = ''
+                    OR c.name LIKE ?
+                    OR (s.customer IS NULL AND 'Walk-in Customer' LIKE ?)
+                  )
+                ORDER BY s.id DESC
+                """
+            )
+            query.addBindValue(from_date)
+            query.addBindValue(to_date)
+            query.addBindValue(search_text)
+            query.addBindValue(pattern)
+            query.addBindValue(pattern)
 
-        self.table.setRowCount(0)  # Clear existing rows
+        if not query.exec():
+            print("Sales query failed:", query.lastError().text())
+            return
 
+        self.table.setRowCount(0)
         row = 0
-        
+
         while query.next():
-            
             self.table.insertRow(row)
-            
+
             sales_id = int(query.value(0))
-            customer = query.value(1)
-            print("Customer type is: ", type(customer))
-            if customer is None or customer == '':
-                customer = 0
-                
-            customer = int(customer)
-            received = query.value(2)
-            creation = query.value(3)
-            
-            if customer == 0:
-                
-                customer = 'Walk-in Customer'
-                
-            else:
-            
-                query2 = QSqlQuery()
-                query2.prepare("SELECT name FROM customer WHERE id = ?")
-                query2.addBindValue(customer)
-                
-                if query2.exec() and query2.next():
-                    
-                    customer = str(query2.value(0))
-                    
-            
-            products = ''
-            
-            # get salesitems 
-            items_query = QSqlQuery()
-            items_query.prepare("SELECT product_id FROM salesitem WHERE sales_id = ? ")
-            items_query.addBindValue(sales_id)
-            
-            if items_query.exec():
-                
-                while items_query.next():
-                    
-                    product_id = items_query.value(0)
-                    
-                    product_query = QSqlQuery()
-                    product_query.prepare("SELECT display_name FROM product WHERE id=?")
-                    product_query.addBindValue(product_id)
-                    
-                    if product_query.exec() and product_query.next():
-                        
-                        product_name = product_query.value(0)
-                        
-                        products += f"[ {product_name} ]"
+            customer = str(query.value(1) or "Walk-in Customer")
+            products = str(query.value(2) or "")
+            received = str(query.value(3) or "")
+            creation = str(query.value(4) or "")
 
+            dt = QDateTime.fromString(creation, "yyyy-MM-dd HH:mm:ss")
+            if dt.isValid():
+                creation = dt.date().toString("dd-MM-yyyy")
 
+            self.table.setItem(row, 0, QTableWidgetItem(str(sales_id)))
+            self.table.setItem(row, 1, QTableWidgetItem(customer))
+            self.table.setItem(row, 2, QTableWidgetItem(products))
+            self.table.setItem(row, 3, QTableWidgetItem(received))
+            self.table.setItem(row, 4, QTableWidgetItem(creation))
 
-            
-            sales_id = str(sales_id)
-            customer = str(customer)
-            received = str(received)
-            
-            joining_date = creation
-            if isinstance(joining_date, QDateTime):
-                joining_date = joining_date.date().toString("dd-MM-yyyy")
-            elif isinstance(joining_date, QDate):
-                joining_date = joining_date.toString("dd-MM-yyyy")
-            else:
-                joining_date = str(joining_date)
-                        
-                        
-                    
-            creation = joining_date
-            
-            id = QTableWidgetItem(sales_id)
-            customer = QTableWidgetItem(customer)
-            products = QTableWidgetItem(products)
-            received = QTableWidgetItem(received)
-            creation = QTableWidgetItem(creation)
-
-
-            self.table.setItem(row, 0, id)
-            self.table.setItem(row, 1, customer)
-            self.table.setItem(row, 2, products)
-            self.table.setItem(row, 3, received)
-            self.table.setItem(row, 4, creation)
-            
-            
-            detail = QPushButton('Details')
-            detail.setStyleSheet("""
-                    QPushButton {
-                        background-color: transparent;
-                        color: #333;
-                        padding: 4px 12px;
-                        border-radius: 2px;
-                        font-weight: 600;
-                    }
-                    QPushButton:hover {
-                        background-color: #244A62;
-                        color: #fff;
-                    }
-                    QPushButton:pressed {
-                        background-color: #2F5D7C;
-                        color: #fff;
-                    }
-                
-            """)
-            
-            self.table.setCellWidget(row, 5, detail)
-            print("Sales ID:", sales_id)
-            sales_id = int(sales_id)  # Ensure sales_id is an integer for the signal
+            detail = style_table_action_button(QPushButton("Details"))
+            self.table.setCellWidget(row, 5, centered_cell_widget(detail))
             detail.clicked.connect(partial(self.salesdetailsignal.emit, sales_id))
-            
+
             row += 1
-        
-
-
 
 
 class MyTable(QTableWidget):
@@ -357,7 +243,7 @@ class MyTable(QTableWidget):
         super().__init__(rows, cols, parent)
         self.column_ratios = column_ratios or []
         header = self.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Interactive)  # user can drag
+        header.setSectionResizeMode(QHeaderView.Interactive)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -368,6 +254,3 @@ class MyTable(QTableWidget):
         for i, ratio in enumerate(self.column_ratios):
             col_width = int(width * (ratio / total))
             self.setColumnWidth(i, col_width)
-
-
-

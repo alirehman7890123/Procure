@@ -1,16 +1,17 @@
-from PySide6.QtSql import QSqlQuery
+import warnings
 
-def get_current_session(self):
-        
-        query = QSqlQuery()
-        query.prepare("SELECT id FROM daily_session WHERE status = 'open' LIMIT 1;")
+from utilities.session_service import get_active_session_id
 
-        if not query.exec():
-            print("Error fetching current session:", query.lastError().text())
-            return None
 
-        if query.next():
-            return query.value(0)
-
-        print("No active session found.")
-        return None
+def get_current_session(self=None):
+    """
+    Backward-compatible wrapper.
+    Legacy callers pass self; it is ignored.
+    """
+    warnings.warn(
+        "get_current_session is deprecated. Use utilities.session_service.get_active_session_id instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    _ = self
+    return get_active_session_id(strict=False)

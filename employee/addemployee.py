@@ -2,7 +2,9 @@ from PySide6.QtWidgets import QWidget, QPushButton,QMessageBox, QVBoxLayout, QHB
 from PySide6.QtCore import QFile, Qt, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 
+from utilities.permissions import Permissions
 from utilities.stylus import load_stylesheets
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -15,17 +17,17 @@ class AddEmployeeWidget(QWidget):
         super().__init__(parent)
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Employee Information", objectName="SectionTitle")
         self.employeelist = QPushButton("Employee List", objectName="TopRightButton")
         self.employeelist.setCursor(Qt.PointingHandCursor)
-        self.employeelist.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.employeelist)
 
         self.layout.addLayout(header_layout)
@@ -87,7 +89,7 @@ class AddEmployeeWidget(QWidget):
             row.addWidget(field, 8)
 
             self.layout.addLayout(row)
-            self.layout.setSpacing(15)  # reduce space between rows
+            self.layout.setSpacing(10)  # reduce space between rows
             
             # Keep mapping
             self.indicators[field] = indicator
@@ -120,6 +122,7 @@ class AddEmployeeWidget(QWidget):
 
     
     
+    @Permissions.require_permission('employee.create')
     def save_employee(self):
         
         name = self.editname.text()
@@ -147,7 +150,7 @@ class AddEmployeeWidget(QWidget):
         if not query.exec():
             print("Insert failed:", query.lastError().text())
         else:
-            QMessageBox.information(None, "Success", 'Employee Record Saved Successfully')
+            AppMessageBox.information(None, "Success", 'Employee Record Saved Successfully')
             # Clear the input fields after saving
         
             self.editname.clear()
@@ -167,7 +170,6 @@ class AddEmployeeWidget(QWidget):
         
         
         
-
 
 
 

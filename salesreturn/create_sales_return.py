@@ -9,8 +9,12 @@ import os
 import math
 
 from utilities.stylus import load_stylesheets
-from utilities.get_session import get_current_session
+from utilities.activity_logger import log_activity
+from utilities.permissions import Permissions
+from utilities.session_gate import require_open_session
+from utilities.session_service import get_active_session_id
 from utilities.payment_handler import PaymentMethodHandler
+from utilities.app_messagebox import AppMessageBox
 
 
 class KeyUpLineEdit(QLineEdit):
@@ -31,7 +35,7 @@ class AddSalesReturnWidget(QWidget):
         super().__init__(parent)
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
+        self.layout.setContentsMargins(10, 10, 10, 10)
         self.layout.setSpacing(10)
 
         # === Header Row ===
@@ -39,9 +43,9 @@ class AddSalesReturnWidget(QWidget):
         heading = QLabel("Sales Return Invoice", objectName="SectionTitle")
         self.invoicelist = QPushButton("Sales Returns List", objectName="TopRightButton")
         self.invoicelist.setCursor(Qt.PointingHandCursor)
-        self.invoicelist.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.invoicelist)
 
         self.layout.addLayout(header_layout)
@@ -243,12 +247,23 @@ class AddSalesReturnWidget(QWidget):
         self.layout.addWidget(self.note)
         
         
-        # === Add Button ===
+        # === Action Buttons ===
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(10)
+
         savebutton = QPushButton("Save Return Information", objectName="SaveButton")
         savebutton.setCursor(Qt.PointingHandCursor)
         savebutton.clicked.connect(lambda: self.save_sales_return())
 
-        self.layout.addWidget(savebutton)
+        clear_button = QPushButton("Clear Return", objectName="TopRightButton")
+        clear_button.setCursor(Qt.PointingHandCursor)
+        clear_button.clicked.connect(self.confirm_clear_return)
+
+        action_row.addWidget(savebutton, 1)
+        action_row.addWidget(clear_button)
+
+        self.layout.addLayout(action_row)
         self.layout.addStretch()
         
         
@@ -276,14 +291,19 @@ class AddSalesReturnWidget(QWidget):
         
     def get_sales_order(self):
         
-        order_id = self.salesorder.text()
-        if order_id == '':
-            QMessageBox.information(self, "Error", "Please enter the sales id")
+        order_id_text = self.salesorder.text().strip()
+        if order_id_text == '':
+            AppMessageBox.information(self, "Error", "Please enter the sales id")
             return
-        else:
-            order_id = int(order_id) if order_id else 0
-            
-            self.load_sales_data(order_id)
+        try:
+            order_id = int(order_id_text)
+        except ValueError:
+            AppMessageBox.information(self, "Not Found", f"No sales record found for '{order_id_text}'.")
+            self.salesorder.clear()
+            self.salesorder.setFocus()
+            return
+
+        self.load_sales_data(order_id)
             
             
 
@@ -294,23 +314,32 @@ class AddSalesReturnWidget(QWidget):
         self.salesorder_id = id
         print("Loading Sales ID:", id)
         query = QSqlQuery()
-        query.prepare("SELECT * FROM sales WHERE id = ?")
+        query.prepare("""
+            SELECT
+                customer,
+                salesman,
+                discount,
+                tax,
+                creation_date
+            FROM sales
+            WHERE id = ?
+        """)
         query.addBindValue(id)
         
         if query.exec() and query.next():
             
-            customer = query.value(1)
-            salesman = query.value(2)
+            customer = query.value(0)
+            salesman = query.value(1)
             
             self.customer_id = customer
             self.salesman_id = salesman
             
             print("customer and salesman is: ", customer, salesman)
             
-            discount = query.value(4)
-            tax = query.value(7)
+            discount = query.value(2)
+            tax = query.value(3)
             
-            invoicedate = query.value(17)
+            invoicedate = query.value(4)
             
             joining_date = invoicedate
             
@@ -372,8 +401,9 @@ class AddSalesReturnWidget(QWidget):
             self.load_items_into_table(id)
             
         else:
-            print(query.lastError().text())
-            QMessageBox.critical(self, 'Error', query.lastError().text())    
+            self.salesorder.clear()
+            self.salesorder.setFocus()
+            AppMessageBox.information(self, "Not Found", f"No sales record found for ID {id}.")
         
 
 
@@ -383,7 +413,15 @@ class AddSalesReturnWidget(QWidget):
         print("Loading Sales items into table")
         
         query = QSqlQuery()
-        query.prepare("SELECT * FROM salesitem where sales_id = ?")
+        query.prepare("""
+            SELECT
+                id,
+                product_id,
+                qty_sold,
+                effective_line_total
+            FROM salesitem
+            WHERE sales_id = ?
+        """)
         query.addBindValue(id)
 
         self.table.setRowCount(0)  # Clear existing rows
@@ -400,11 +438,11 @@ class AddSalesReturnWidget(QWidget):
                 self.table.insertRow(row)
                 
                 item_id = str(query.value(0))
-                product = int(query.value(2))
+                product = int(query.value(1))
                 
-                quantity = int(query.value(3))
+                quantity = int(query.value(2))
                 print("Loading Sold Quantity that is: ", quantity)
-                effective_total = float(query.value(9))
+                effective_total = float(query.value(3) or 0.0)
                 
                 rate = effective_total / quantity if quantity else 0
                 
@@ -565,19 +603,22 @@ class AddSalesReturnWidget(QWidget):
                 self.salesman.addItem(salesman_name, salesman_id)  # Text shown, ID stored as data
             
         else:
-            QMessageBox.information(None, 'Error', query.lastError().text() )
+            AppMessageBox.information(None, 'Error', query.lastError().text() )
         
         self.salesman.blockSignals(False)
         
         
 
         
+    @Permissions.require_permission('salesreturn.create')
     def save_sales_return(self):
+        if not require_open_session(self):
+            return
 
         db = QSqlDatabase.database()
 
         if not db.transaction():
-            QMessageBox.critical(None, "Database Error", "Could not start transaction.")
+            AppMessageBox.critical(None, "Database Error", "Could not start transaction.")
             return
 
         try:
@@ -589,6 +630,19 @@ class AddSalesReturnWidget(QWidget):
             total = self.final_amountdata.text()
             paid = self.paid.text()
             remaining = self.remaining.text()
+            return_item_count = 0
+            for row in range(self.table.rowCount()):
+                returned_widget = self.table.cellWidget(row, 4)
+                if returned_widget is None:
+                    continue
+                try:
+                    if int(returned_widget.text() or 0) > 0:
+                        return_item_count += 1
+                except ValueError:
+                    continue
+
+            if return_item_count <= 0:
+                raise ValueError("Enter at least one returned item before saving the sales return.")
 
             subtotal = float(subtotal) if subtotal else 0.0
             roundoff = float(roundoff) if roundoff else 0.0
@@ -616,7 +670,7 @@ class AddSalesReturnWidget(QWidget):
                 payable = 0.0
                 receiveable = abs(remaining)
 
-            session_id = get_current_session(self)
+            session_id = get_active_session_id(strict=True)
             if session_id is None:
                 raise Exception("No active session found.")
 
@@ -636,7 +690,7 @@ class AddSalesReturnWidget(QWidget):
                 customer_id = None
 
                 if remaining != 0 and not self.checkbox.isChecked():
-                    QMessageBox.critical(self, "Error", "A Walk-In Customer has to be Paid Full Amount")
+                    AppMessageBox.critical(self, "Error", "A Walk-In Customer has to be Paid Full Amount")
                     raise Exception("Walk-in customer must be settled fully.")
 
             query.addBindValue(self.salesorder_id)
@@ -711,18 +765,24 @@ class AddSalesReturnWidget(QWidget):
                     payable_before = float(customer_query.value(0) or 0.0)
                     receiveable_before = float(customer_query.value(1) or 0.0)
                 else:
-                    QMessageBox.critical(self, "Error", "Customer not found.")
+                    AppMessageBox.critical(self, "Error", "Customer not found.")
                     raise Exception("Customer not found.")
 
                 payable_after = payable_before + current_payable
                 receiveable_after = receiveable_before + current_receiveable
 
-                due_amount = total
-                remaining_due = remaining
-
-                receiveable_now = 0.0
-                received = 0.0
-                remaining_now = 0.0
+                if current_payable > 0.0:
+                    due_amount = total
+                    remaining_due = current_payable
+                    receiveable_now = 0.0
+                    received = 0.0
+                    remaining_now = receiveable_before
+                else:
+                    due_amount = 0.0
+                    remaining_due = payable_before
+                    receiveable_now = current_receiveable
+                    received = 0.0
+                    remaining_now = receiveable_after
 
             # ===============================
             # WALK-IN CUSTOMER
@@ -739,12 +799,18 @@ class AddSalesReturnWidget(QWidget):
                 payable_after = 0.0
                 receiveable_after = 0.0
 
-                due_amount = total
-                remaining_due = remaining
-
-                receiveable_now = 0.0
-                received = 0.0
-                remaining_now = 0.0
+                if current_payable > 0.0:
+                    due_amount = total
+                    remaining_due = current_payable
+                    receiveable_now = 0.0
+                    received = 0.0
+                    remaining_now = 0.0
+                else:
+                    due_amount = 0.0
+                    remaining_due = 0.0
+                    receiveable_now = 0.0
+                    received = 0.0
+                    remaining_now = 0.0
 
             note = (
                 f"Sales Return ID {return_id} recorded with total {total}, "
@@ -795,7 +861,7 @@ class AddSalesReturnWidget(QWidget):
             query.addBindValue(session_id)
 
             if not query.exec():
-                QMessageBox.critical(None, "Error", query.lastError().text())
+                AppMessageBox.critical(None, "Error", query.lastError().text())
                 raise Exception(query.lastError().text())
 
             if customer_id is not None:
@@ -812,7 +878,7 @@ class AddSalesReturnWidget(QWidget):
                 update_customer.addBindValue(customer)
 
                 if not update_customer.exec():
-                    QMessageBox.critical(self, "Error", update_customer.lastError().text())
+                    AppMessageBox.critical(self, "Error", update_customer.lastError().text())
                     raise Exception(update_customer.lastError().text())
 
             for row in range(self.table.rowCount()):
@@ -839,11 +905,10 @@ class AddSalesReturnWidget(QWidget):
                     line_total = float(self.table.item(row, 6).text())
 
                     if returned <= 0:
-                        raise Exception("Return quantity must be greater than zero")
+                        continue
 
                 except Exception as e:
-                    print("Row Error:", str(e))
-                    continue
+                    raise Exception(f"Row {row + 1}: {str(e)}")
 
                 item_query = QSqlQuery()
                 item_query.prepare("""
@@ -873,13 +938,27 @@ class AddSalesReturnWidget(QWidget):
 
         except Exception as e:
             print("An error occurred:", str(e))
-            QMessageBox.critical(None, "Error", f"An error occurred while saving the Sales Return: {str(e)}")
+            AppMessageBox.critical(None, "Error", f"An error occurred while saving the Sales Return: {str(e)}")
             db.rollback()
 
         else:
             db.commit()
+            customer_label = str(self.customer_id) if self.customer_id not in (None, "") else "Walk-in"
+            log_activity(
+                category="sales",
+                action="sales_return_created",
+                entity_type="sales_return",
+                entity_id=int(return_id),
+                note=(
+                    f"Sales return #{return_id} was recorded for customer {customer_label}. "
+                    f"It is linked to sale #{self.salesorder_id}, covers {return_item_count} item(s), "
+                    f"and totals {total}."
+                ),
+                previous_value=None,
+                new_value=str(total)
+            )
             print("Transaction committed successfully")
-            QMessageBox.information(None, "Success", "Sales return saved successfully")
+            AppMessageBox.information(None, "Success", "Sales return saved successfully")
             self.clear_fields()
 
         finally:
@@ -1014,63 +1093,7 @@ class AddSalesReturnWidget(QWidget):
 
 
         
-    def load_product_suggestions(self, item, completer):
-        
-        print("Loading Medicine Suggestions")
-        item = item
-        completer = completer
-        current_text = item.currentText() 
-        print("Current Text is: ", current_text)
-        
-        if current_text == '':
-            return 
-        
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT id, display_name
-            FROM product
-            WHERE display_name LIKE ? LIMIT 10 """)
-        
-        value = f"%{current_text}%"
-        query.addBindValue(value)
-        
-        products = []
-        
-        if not query.exec():
-            
-            print("Something wrong happened...")
-        
-        else:
-        
-            while query.next():
-                
-                product_id = query.value(0)
-                name = query.value(1)
-                
-                label = f"{name}".strip()
-                products.append(label)
-                item.addItem(label, product_id)
-                
-        print(products)
-
-        
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        
-        data = products
-        model = QStringListModel()
-        model.setStringList(data)
-        
-        
-        completer.setModel(model)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        item.setCompleter(completer)
-        
-        completer.highlighted[str].connect(partial(self.on_completer_highlighted, item=item))
-
-        print("Setting Current Text")
-        item.lineEdit().setText(current_text)        
-        
-        
+    
         
   
 
@@ -1122,7 +1145,7 @@ class AddSalesReturnWidget(QWidget):
                 
             else:
             
-                QMessageBox.information(None, 'Error', stock_query.lastError().text())
+                AppMessageBox.information(None, 'Error', stock_query.lastError().text())
 
         except Exception as e:
                 
@@ -1142,7 +1165,8 @@ class AddSalesReturnWidget(QWidget):
         
         query = QSqlQuery()
         query.prepare("""
-            SELECT * FROM product
+            SELECT display_name, brand
+            FROM product
             WHERE id = ? """)
         
         query.addBindValue(data)
@@ -1170,7 +1194,7 @@ class AddSalesReturnWidget(QWidget):
             
             if int(qty_text) > int(sold):
                 
-                QMessageBox.information(None, "Error", "Returned Quantity cannot be greater than Sold Qty")
+                AppMessageBox.information(None, "Error", "Returned Quantity cannot be greater than Sold Qty")
                 self.table.cellWidget(row, 4).setText("0")
                 qty_text = 0
             
@@ -1233,6 +1257,18 @@ class AddSalesReturnWidget(QWidget):
         self.payment_method.blockSignals(True); 
         self.payment_method.setCurrentIndex(0) 
         self.payment_method.blockSignals(False)
+        self.salesorder.setFocus()
+
+    def confirm_clear_return(self):
+        _, accepted = AppMessageBox.confirm(
+            self,
+            "Clear Sales Return",
+            "Clear the current sales return and reset all fields?",
+            confirm_label="Clear Return",
+            cancel_label="Keep Editing",
+        )
+        if accepted:
+            self.clear_fields()
         
         
   
@@ -1253,4 +1289,3 @@ class MyTable(QTableWidget):
         for i, ratio in enumerate(self.column_ratios):
             col_width = int(width * (ratio / total))
             self.setColumnWidth(i, col_width)
-

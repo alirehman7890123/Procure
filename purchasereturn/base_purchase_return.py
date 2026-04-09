@@ -61,8 +61,10 @@ class BasePurchaseReturnWidget(BasePage):
 
     # 🔑 reset method
     def reset_to_default(self):
-        self.stacked_layout.setCurrentWidget(self.addpurhcase_return_widget)
-
+        if Permissions.has_permission('purchasereturn.view'):
+            self.stacked_layout.setCurrentWidget(self.purchase_return_list_widget)
+        elif Permissions.has_permission('purchasereturn.create'):
+            self.stacked_layout.setCurrentWidget(self.addpurhcase_return_widget)
 
 
 

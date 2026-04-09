@@ -1,178 +1,141 @@
-
-from PySide6.QtWidgets import QWidget, QPushButton, QGridLayout, QLabel, QLineEdit, QComboBox,QMessageBox, QVBoxLayout, QTableWidget, QTableWidgetItem, QSpacerItem, QSizePolicy
-from PySide6.QtCore import QFile, Qt, QDateTime
-from PySide6.QtSql import  QSqlQuery
+from PySide6.QtWidgets import (
+    QWidget,
+    QPushButton,
+    QGridLayout,
+    QLabel,
+    QVBoxLayout,
+    QHBoxLayout,
+    QFrame,
+    QSizePolicy,
+)
+from PySide6.QtCore import Qt
+from PySide6.QtSql import QSqlQuery
 
 from utilities.stylus import load_stylesheets
-
-
-
-
+from utilities.app_messagebox import AppMessageBox
 
 
 class CustomerTransactionDetailWidget(QWidget):
 
     def __init__(self, parent=None):
-
         super().__init__(parent)
 
-        layout = QGridLayout()
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
-        layout.setContentsMargins(0,0,0,0)
-        layout.setSpacing(0)
-
-        heading = QLabel("Transaction Detail", objectName='SectionTitle')
-        self.transactionlist = QPushButton('Transactions List', objectName='TopRightButton')
+        header_layout = QHBoxLayout()
+        heading = QLabel("Transaction Detail", objectName="SectionTitle")
+        self.transactionlist = QPushButton("Transactions List", objectName="TopRightButton")
         self.transactionlist.setCursor(Qt.PointingHandCursor)
+        header_layout.addWidget(heading, 1)
+        header_layout.addWidget(self.transactionlist)
+        self.layout.addLayout(header_layout)
 
-        layout.addWidget(heading, 0, 0, 1, 12)
-        layout.addWidget(self.transactionlist, 0,2)
+        self.identity_frame, identity_layout = self._create_section_card("Customer Information")
+        self.customer_name = QLabel("-")
+        self.customer_contact = QLabel("-")
+        self.salesman = QLabel("-")
+        self.creation_date = QLabel("-")
 
-        
-        customer_label = QLabel("Customer Information")
-        
-        self.customer_name = QLabel()
-        self.customer_contact = QLabel()
-        self.creation_date = QLabel()
-        
-        layout.addWidget(customer_label, 2, 1)
-        layout.addWidget(self.customer_name, 2, 3)
-        layout.addWidget(self.customer_contact, 3, 3)
-        layout.addWidget(self.creation_date, 4, 3)
-        
-        salesman_label = QLabel("Sales Rep")
-        self.salesman = QLabel()
-        
-        transaction_label = QLabel("Transaction Type")
-        self.transaction = QLabel()
+        self._add_info_row(identity_layout, 0, "Customer", self.customer_name, "Contact", self.customer_contact)
+        self._add_info_row(identity_layout, 1, "Sales Rep", self.salesman, "Date / Time", self.creation_date)
+        self.layout.addWidget(self.identity_frame)
 
-        balance_label = QLabel("Before Balance")
-        self.balance = QLabel()
-        
-        paid_label = QLabel("Paid Amount")
-        self.paid = QLabel()
-        
-        received_label = QLabel("Received Amount")
-        self.received = QLabel()
-        
-        after_balance_label = QLabel("After Balance")
-        self.after_balance = QLabel("0.00")
-        
-        layout.addWidget(salesman_label, 6, 1)
-        layout.addWidget(self.salesman, 6, 3)
-        
-        layout.addWidget(transaction_label, 7, 1)
-        layout.addWidget(self.transaction)
-        
-        layout.addWidget(balance_label, 8, 1)
-        layout.addWidget(self.balance, 8, 3)
-        
-        layout.addWidget(paid_label, 9, 1)
-        layout.addWidget(self.paid, 9, 3)
-        
-        layout.addWidget(received_label, 10, 1)
-        layout.addWidget(self.received, 10, 3)
-        
-        layout.addWidget(after_balance_label, 11, 1)
-        layout.addWidget(self.after_balance, 11, 3)
-        
-        note_label = QLabel("Note")
-        self.note = QLabel()
-        
-        layout.addWidget(note_label, 12, 1)
-        layout.addWidget(self.note, 12, 3)
-        
+        self.summary_frame, summary_layout = self._create_section_card("Transaction Summary")
+        self.transaction = QLabel("-")
+        self.payable_before = QLabel("0.00")
+        self.receivable_before = QLabel("0.00")
+        self.paid = QLabel("0.00")
+        self.received = QLabel("0.00")
+        self.payable_created = QLabel("0.00")
+        self.receivable_created = QLabel("0.00")
+        self.reconciled_amount = QLabel("-")
+        self.payable_after = QLabel("0.00")
+        self.receivable_after = QLabel("0.00")
 
-        spacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
-        layout.addItem(spacer, 17, 0, 1, 3)
-        
-        
+        self._add_info_row(summary_layout, 0, "Transaction Type", self.transaction, "Reconciled Amount", self.reconciled_amount)
+        self._add_info_row(summary_layout, 1, "Payable Before", self.payable_before, "Receivable Before", self.receivable_before)
+        self._add_info_row(summary_layout, 2, "Paid Amount", self.paid, "Received Amount", self.received)
+        self._add_info_row(summary_layout, 3, "Payable Created / Remaining", self.payable_created, "Receivable Created / Remaining", self.receivable_created)
+        self._add_info_row(summary_layout, 4, "Payable After", self.payable_after, "Receivable After", self.receivable_after)
+        self.layout.addWidget(self.summary_frame)
+
+        self.note_frame, note_layout = self._create_section_card("Note")
+        self.note = QLabel("-")
+        self.note.setWordWrap(True)
+        self.note.setStyleSheet("padding-left: 0; color: #30485A;")
+        note_layout.addWidget(self.note)
+        self.layout.addWidget(self.note_frame)
+
+        self.layout.addStretch(1)
         self.setStyleSheet(load_stylesheets())
 
-        self.setLayout(layout)
+    def _create_section_card(self, title):
+        frame = QFrame()
+        frame.setObjectName("sectionCard")
+        frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
 
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(10)
 
+        heading = QLabel(title, objectName="SubHeading")
+        layout.addWidget(heading)
+        layout.addStretch()
 
-        
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(8)
+        layout.addLayout(grid)
+        return frame, grid
 
-    
+    def _value_label(self, initial_text="-"):
+        label = QLabel(initial_text)
+        label.setWordWrap(True)
+        label.setStyleSheet(
+            """
+            padding: 6px 8px;
+            background-color: #F7FAFC;
+            border: 1px solid #D8E3EB;
+            border-radius: 4px;
+            color: #203546;
+            font-weight: 600;
+            """
+        )
+        return label
+
+    def _field_label(self, text):
+        label = QLabel(text)
+        label.setStyleSheet("font-weight: 700; color: #35556C; padding-left: 0;")
+        return label
+
+    def _add_info_row(self, layout, row, left_label, left_value_widget, right_label, right_value_widget):
+        layout.addWidget(self._field_label(left_label), row, 0)
+        layout.addWidget(left_value_widget, row, 1)
+        layout.addWidget(self._field_label(right_label), row, 2)
+        layout.addWidget(right_value_widget, row, 3)
+        layout.setColumnStretch(1, 1)
+        layout.setColumnStretch(3, 1)
+
     def showEvent(self, event):
-        
         super().showEvent(event)
         print("Widget shown — refreshing data")
-        
 
-
-    # def load_data(self, id):
-        
-    #     query = QSqlQuery()
-    #     query.prepare("SELECT customer, transaction_type, balance_before, paid, received, balance_after, salesman, creation_date, note FROM customer_transaction WHERE id = ?")
-        
-    #     query.addBindValue(id)
-        
-    #     if query.exec() and query.next():
-            
-    #         customer_id = int(query.value(0))
-    #         transaction_type = query.value(1)
-    #         before = query.value(2)
-    #         paid = query.value(3)
-    #         received = query.value(4)
-    #         after = query.value(5)
-    #         salesman = query.value(6)
-    #         creation = query.value(7)
-    #         note = query.value(8)
-            
-    #         # Get Customer name from database
-    #         customer_query = QSqlQuery()
-    #         customer_query.prepare("SELECT name, contact FROM customer WHERE id = ?")
-    #         customer_query.addBindValue(customer_id)
-            
-    #         if customer_query.exec() and customer_query.next():
-                
-    #             customer_name = customer_query.value(0)
-    #             customer_contact = customer_query.value(1)
-
-    #             self.customer_name.setText(customer_name)
-    #             self.customer_contact.setText(customer_contact)
-                
-    #         self.transaction.setText(transaction_type)
-    #         self.balance.setText(str(before))
-    #         self.paid.setText(str(paid))
-    #         self.received.setText(str(received))
-    #         self.after_balance.setText(str(after))
-    #         self.creation_date.setText(creation.toString("dd-MM-yyyy"))
-    #         self.note.setText(note)
-            
-            
-        
-    #     salesman = int(salesman)
-    #     # salesman Query   
-    #     salesman_query = QSqlQuery()
-    #     salesman_query.prepare("SELECT name FROM employee WHERE id = ?")
-    #     salesman_query.addBindValue(salesman)
-        
-        
-    #     if salesman_query.exec() and salesman_query.next():
-
-    #         salesman_name = salesman_query.value(0)
-    #         self.salesman.setText(salesman_name)
-            
-    #     else:
-            
-    #         QMessageBox.critical(self, "Error", salesman_query.lastError().text())
-                
     def get_customer_transaction(self, id):
-    
         query = QSqlQuery()
-        query.prepare("""
-            SELECT 
+        query.prepare(
+            """
+            SELECT
                 customer, transaction_type, ref, return_ref,
                 payable_before, due_amount, paid, remaining_due, payable_after,
                 receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
                 salesman, note, creation_date
-            FROM customer_transaction 
+            FROM customer_transaction
             WHERE id = ?
-        """)
+            """
+        )
         query.addBindValue(id)
 
         if not query.exec():
@@ -183,87 +146,48 @@ class CustomerTransactionDetailWidget(QWidget):
             record = query.record()
             row_dict = {}
             for i in range(record.count()):
-                field_name = record.fieldName(i)
-                value = query.value(i)
-                row_dict[field_name] = value
+                row_dict[record.fieldName(i)] = query.value(i)
             return row_dict
-        
         return None
-    
-        
-    
-    
-    def load_data(self, id):
-    
-        row = self.get_customer_transaction(id)
-        
-        if not row:
-            QMessageBox.critical(self, "Error", "Transaction not found.")
-            return
 
-        print("Customer Transaction Query Executed")
+    def load_data(self, id):
+        row = self.get_customer_transaction(id)
+        if not row:
+            AppMessageBox.critical(self, "Error", "Transaction not found.")
+            return
 
         customer_id = row["customer"]
         transaction_type = row["transaction_type"]
-        before = row["payable_before"]
+        payable_before = float(row["payable_before"] or 0.0)
+        receivable_before = float(row["receiveable_before"] or 0.0)
         paid = row["paid"]
         received = row["received"]
-        after = row["payable_after"]
+        payable_after = float(row["payable_after"] or 0.0)
+        receivable_after = float(row["receiveable_after"] or 0.0)
+        payable_created = float(row["remaining_due"] or 0.0)
+        receivable_created = float(row["receiveable_now"] or 0.0)
         salesman = row["salesman"]
         creation = row["creation_date"]
         note = row["note"]
 
-        # ==========================
-        # Customer Info
-        # ==========================
-
         if customer_id is not None:
-
             customer_query = QSqlQuery()
             customer_query.prepare("SELECT name, contact FROM customer WHERE id = ?")
             customer_query.addBindValue(int(customer_id))
-            
             if customer_query.exec() and customer_query.next():
-                
-                print("Customer Query Executed")
-                
                 customer_name = customer_query.value(0)
                 customer_contact = customer_query.value(1)
-
             else:
-                QMessageBox.critical(self, "Error", customer_query.lastError().text())
+                AppMessageBox.critical(self, "Error", customer_query.lastError().text())
                 return
-
         else:
-            
             customer_name = "Walk-in Customer"
             customer_contact = "-"
 
-        self.customer_name.setText(str(customer_name))
-        self.customer_contact.setText(str(customer_contact))
-
-        # ==========================
-        # Transaction Info
-        # ==========================
-
-        self.transaction.setText(str(transaction_type))
-        self.balance.setText(str(before))
-        self.paid.setText(str(paid))
-        self.received.setText(str(received))
-        self.after_balance.setText(str(after))
-        self.creation_date.setText(str(creation))
-        self.note.setText(str(note))
-
-        # ==========================
-        # Salesman Info
-        # ==========================
-
         if salesman is not None:
-
             rep_query = QSqlQuery()
             rep_query.prepare("SELECT name FROM employee WHERE id = ?")
             rep_query.addBindValue(int(salesman))
-            
             if rep_query.exec() and rep_query.next():
                 salesman_name = rep_query.value(0)
             else:
@@ -271,84 +195,25 @@ class CustomerTransactionDetailWidget(QWidget):
         else:
             salesman_name = "-"
 
+        self.customer_name.setText(str(customer_name))
+        self.customer_contact.setText(str(customer_contact or "-"))
         self.salesman.setText(str(salesman_name))
+        self.creation_date.setText(str(creation or "-"))
 
-    
-        
-    # def load_data(self, id):
-        
-    #     print("Looking for transaction ID:", id)
+        self.transaction.setText(str(transaction_type or "-"))
+        self.payable_before.setText(f"{payable_before:.2f}")
+        self.receivable_before.setText(f"{receivable_before:.2f}")
+        self.paid.setText(f"{float(paid or 0.0):.2f}")
+        self.received.setText(f"{float(received or 0.0):.2f}")
+        self.payable_created.setText(f"{payable_created:.2f}")
+        self.receivable_created.setText(f"{receivable_created:.2f}")
+        self.payable_after.setText(f"{payable_after:.2f}")
+        self.receivable_after.setText(f"{receivable_after:.2f}")
 
-    #     debug_query = QSqlQuery()
-    #     debug_query.exec("SELECT id FROM customer_transaction")
-    #     while debug_query.next():
-    #         print("Existing ID:", debug_query.value(0))
+        if str(transaction_type) == "INTERNAL_RECONCILIATION":
+            reconcile_amount = float(row["due_amount"] or 0.0)
+            self.reconciled_amount.setText(f"{reconcile_amount:.2f}")
+        else:
+            self.reconciled_amount.setText("-")
 
-    #     query = QSqlQuery()
-    #     query.prepare("""
-    #         SELECT 
-    #             ct.customer,
-    #             COALESCE(c.name, 'Walk-in Customer'),
-    #             COALESCE(c.contact, '-'),
-    #             ct.transaction_type,
-    #             ct.balance_before,
-    #             ct.paid,
-    #             ct.received,
-    #             ct.balance_after,
-    #             COALESCE(e.name, '-'),
-    #             ct.creation_date,
-    #             ct.note
-    #         FROM customer_transaction ct
-    #         LEFT JOIN customer c ON ct.customer = c.id
-    #         LEFT JOIN employee e ON ct.salesman = e.id
-    #         WHERE ct.id = ?
-    #     """)
-
-    #     query.addBindValue(id)
-
-    #     if not query.exec():
-    #         QMessageBox.critical(self, "Error", query.lastError().text())
-    #         return
-
-    #     if not query.next():
-    #         QMessageBox.critical(self, "Error", "Transaction not found.")
-    #         return
-
-    #     # --- Extract Values ---
-    #     customer_name = str(query.value(1))
-    #     customer_contact = str(query.value(2))
-    #     transaction_type = str(query.value(3))
-    #     before = float(query.value(4) or 0)
-    #     paid = float(query.value(5) or 0)
-    #     received = float(query.value(6) or 0)
-    #     after = float(query.value(7) or 0)
-    #     salesman_name = str(query.value(8))
-    #     creation_value = query.value(9)
-    #     note = str(query.value(10) or "")
-
-    #     # --- Handle Date ---
-    #     if isinstance(creation_value, QDateTime):
-    #         creation_str = creation_value.toString("dd-MM-yyyy")
-    #     else:
-    #         dt = QDateTime.fromString(str(creation_value), "yyyy-MM-dd HH:mm:ss")
-    #         creation_str = dt.toString("dd-MM-yyyy") if dt.isValid() else str(creation_value)
-
-    #     # --- Set UI ---
-    #     self.customer_name.setText(customer_name)
-    #     self.customer_contact.setText(customer_contact)
-
-    #     self.transaction.setText(transaction_type)
-    #     self.balance.setText(f"{before:.2f}")
-    #     self.paid.setText(f"{paid:.2f}")
-    #     self.received.setText(f"{received:.2f}")
-    #     self.after_balance.setText(f"{after:.2f}")
-
-    #     self.salesman.setText(salesman_name)
-    #     self.creation_date.setText(creation_str)
-    #     self.note.setText(note)
-
-
-
-
-        
-        
+        self.note.setText(str(note or "-"))

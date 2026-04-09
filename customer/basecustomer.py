@@ -55,7 +55,10 @@ class BaseCustomerWidget(BasePage):
     # 🔑 reset method
     def reset_to_default(self):
         """Always show customer list when entering the module"""
-        self.stacked_layout.setCurrentWidget(self.customerlist_widget)
+        if Permissions.has_permission('customer.view'):
+            self.stacked_layout.setCurrentWidget(self.customerlist_widget)
+        elif Permissions.has_permission('customer.create'):
+            self.stacked_layout.setCurrentWidget(self.addcustomer_widget)
         
         
         

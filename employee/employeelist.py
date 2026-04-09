@@ -4,6 +4,7 @@ from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from functools import partial
 from datetime import date
 from utilities.stylus import load_stylesheets
+from utilities.table_helpers import centered_cell_widget, style_table_action_button
 
 
 
@@ -17,17 +18,17 @@ class EmployeeListWidget(QWidget):
 
         
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Employee Information", objectName="SectionTitle")
         self.addemployee = QPushButton("Add Employee", objectName="TopRightButton")
         self.addemployee.setCursor(Qt.PointingHandCursor)
-        self.addemployee.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.addemployee)
 
         self.layout.addLayout(header_layout)
@@ -52,6 +53,8 @@ class EmployeeListWidget(QWidget):
         
         # Search Field
         search_layout = QHBoxLayout()
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.setSpacing(10)
         search_edit = QLineEdit()
         search_edit.setPlaceholderText("Search Employee...")
         search_edit.textChanged.connect(self.search_rows)
@@ -61,7 +64,7 @@ class EmployeeListWidget(QWidget):
         
         
         
-        self.row_height = 40
+        self.row_height = 35
 
         self.table = MyTable(column_ratios=[0.05, 0.25, 0.15, 0.20, 0.15, 0.10, 0.10])
         headers = ["No.", "Name", "Contact", "Role", "Badge", "Status", "Detail"]
@@ -81,7 +84,7 @@ class EmployeeListWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)   
 
-        self.table.setMinimumWidth(1000)
+        self.table.setMinimumWidth(900)
         
         # Hide vertical header (row numbers)
         self.table.verticalHeader().setVisible(False)
@@ -164,15 +167,10 @@ class EmployeeListWidget(QWidget):
             
             
             
-            detail = QPushButton('Details')
-            detail.setStyleSheet("""
-                    background-color: #777;
-                    color: blue;              
-                    font-weight: 600;
-                
-            """)
+            detail = style_table_action_button(QPushButton("Details"))
+            detail.setCursor(Qt.PointingHandCursor)
             
-            self.table.setCellWidget(row, 6, detail)
+            self.table.setCellWidget(row, 6, centered_cell_widget(detail))
             detail.clicked.connect(partial(self.detailpagesignal.emit, employee_id))
             
             row += 1
@@ -197,8 +195,6 @@ class MyTable(QTableWidget):
         for i, ratio in enumerate(self.column_ratios):
             col_width = int(width * (ratio / total))
             self.setColumnWidth(i, col_width)
-
-
 
 
 

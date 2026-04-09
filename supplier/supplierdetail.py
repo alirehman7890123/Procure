@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QFile, Qt, QDate, QDateTime
 from PySide6.QtSql import QSqlQuery
 from utilities.stylus import load_stylesheets
+from utilities.permissions import Permissions
 
 
 class SupplierDetailWidget(QWidget):
@@ -17,21 +18,20 @@ class SupplierDetailWidget(QWidget):
         self.edit_mode = False
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Supplier Detail", objectName="SectionTitle")
         self.supplierlist = QPushButton("Suppliers List", objectName="TopRightButton")
         self.supplierlist.setCursor(Qt.PointingHandCursor)
-        self.supplierlist.setFixedWidth(200)
 
         self.edit_btn = QPushButton("Edit", objectName="TopRightButton")
         self.edit_btn.setCursor(Qt.PointingHandCursor)
-        self.edit_btn.setFixedWidth(100)
         self.edit_btn.clicked.connect(self.toggle_edit_mode)
 
+        header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
         header_layout.addStretch()
         header_layout.addWidget(self.edit_btn)
@@ -51,9 +51,15 @@ class SupplierDetailWidget(QWidget):
                 }
             """)
         self.layout.addWidget(line)
-        self.layout.addSpacing(20)
+        self.layout.addSpacing(10)
 
         # === Labels + Fields ===
+        info_frame = QFrame()
+        info_frame.setObjectName("sectionCard")
+        info_layout = QVBoxLayout(info_frame)
+        info_layout.setContentsMargins(10, 10, 10, 10)
+        info_layout.setSpacing(8)
+
         labels = [
             "Supplier", "Contact", "Email", "Website", "Address",
             "Registration No.", "Status", "Joining Date",
@@ -106,8 +112,12 @@ class SupplierDetailWidget(QWidget):
                 edit_field.hide()
                 row.addWidget(edit_field, 8)
 
-            self.layout.addLayout(row)
+            if lbl_field in (self.addressdata, self.websitedata):
+                lbl_field.setWordWrap(True)
 
+            info_layout.addLayout(row)
+
+        self.layout.addWidget(info_frame)
         self.layout.addStretch()
 
         
@@ -119,6 +129,7 @@ class SupplierDetailWidget(QWidget):
         
 
     # === Toggle Edit Mode ===
+    @Permissions.require_permission('supplier.update')
     def toggle_edit_mode(self):
         
         self.edit_mode = not self.edit_mode
@@ -158,6 +169,7 @@ class SupplierDetailWidget(QWidget):
 
 
     # === Save Changes ===
+    @Permissions.require_permission('supplier.update')
     def save_changes(self):
         
         if not self.supplier_id:
@@ -199,18 +211,34 @@ class SupplierDetailWidget(QWidget):
     def load_supplier_data(self, id):
         self.supplier_id = id
         query = QSqlQuery()
-        query.prepare("SELECT * FROM supplier WHERE id = ?")
+        query.prepare(
+            """
+            SELECT
+                name,
+                contact,
+                email,
+                website,
+                address,
+                status,
+                creation_date,
+                reg_no,
+                payable,
+                receiveable
+            FROM supplier
+            WHERE id = ?
+            """
+        )
         query.addBindValue(id)
 
         if query.exec() and query.next():
-            self.namedata.setText(query.value(1))
-            self.contactdata.setText(query.value(2))
-            self.emaildata.setText(query.value(3))
-            self.websitedata.setText(query.value(4))
-            self.addressdata.setText(query.value(5))
-            self.statusdata.setText(query.value(6))
+            self.namedata.setText(str(query.value(0) or "-"))
+            self.contactdata.setText(str(query.value(1) or "-"))
+            self.emaildata.setText(str(query.value(2) or "-"))
+            self.websitedata.setText(str(query.value(3) or "-"))
+            self.addressdata.setText(str(query.value(4) or "-"))
+            self.statusdata.setText(str(query.value(5) or "-"))
 
-            joining_date = query.value(7)
+            joining_date = query.value(6)
             if isinstance(joining_date, QDateTime):
                 joining_date = joining_date.date().toString("dd-MM-yyyy")
             elif isinstance(joining_date, QDate):
@@ -219,9 +247,9 @@ class SupplierDetailWidget(QWidget):
                 joining_date = str(joining_date)
 
             self.joiningdata.setText(joining_date)
-            self.regdata.setText(query.value(8))
-            self.payabledata.setText(str(query.value(9)))
-            self.receiveabledata.setText(str(query.value(10)))
+            self.regdata.setText(str(query.value(7) or "-"))
+            self.payabledata.setText(f"{float(query.value(8) or 0):.2f}")
+            self.receiveabledata.setText(f"{float(query.value(9) or 0):.2f}")
             
             
             
@@ -251,9 +279,6 @@ class MyTable(QTableWidget):
             
             
             
-
-
-
 
 
 

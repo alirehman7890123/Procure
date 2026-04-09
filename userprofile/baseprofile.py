@@ -94,8 +94,14 @@ class BaseProfileWidget(BasePage):
 
     # 🔑 reset method
     def reset_to_default(self):
-        self.stacked_layout.setCurrentWidget(self.profile_widget)
-
+        if Permissions.has_permission('profile.view'):
+            self.stacked_layout.setCurrentWidget(self.profile_widget)
+        elif Permissions.has_permission('users.view'):
+            self.stacked_layout.setCurrentWidget(self.userlist_widget)
+        elif Permissions.has_permission('profile.update'):
+            self.stacked_layout.setCurrentWidget(self.changepassword_widget)
+        elif Permissions.has_permission('users.create'):
+            self.stacked_layout.setCurrentWidget(self.adduser_widget)
 
 
 

@@ -27,17 +27,17 @@ class UserListWidget(QWidget):
         
         
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("User Information", objectName="SectionTitle")
         self.adduser = QPushButton("Add User", objectName="TopRightButton")
         self.adduser.setCursor(Qt.PointingHandCursor)
-        self.adduser.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.adduser)
 
         self.layout.addLayout(header_layout)
@@ -62,6 +62,8 @@ class UserListWidget(QWidget):
         
         # Search Field
         search_layout = QHBoxLayout()
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.setSpacing(10)
         search_edit = QLineEdit()
         search_edit.setPlaceholderText("Search User...")
         search_edit.textChanged.connect(self.search_rows)
@@ -71,7 +73,7 @@ class UserListWidget(QWidget):
 
 
 
-        self.row_height = 40
+        self.row_height = 35
 
         self.table = MyTable(column_ratios=[0.05, 0.25, 0.15, 0.20, 0.15, 0.10, 0.10, 0.10])
         headers = ["No.", "First Name","Last Name", "Email", "Username", "Role", "Status", "Detail"]
@@ -91,7 +93,7 @@ class UserListWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)   
 
-        self.table.setMinimumWidth(1000)
+        self.table.setMinimumWidth(900)
         
         # Hide vertical header (row numbers)
         self.table.verticalHeader().setVisible(False)

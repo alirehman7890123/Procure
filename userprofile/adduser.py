@@ -2,6 +2,8 @@ from PySide6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QL
 from PySide6.QtCore import QSize, Qt, QFile, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 import bcrypt
+from utilities.permissions import Permissions
+from utilities.app_messagebox import AppMessageBox
 
 
 def load_stylesheet(filename):
@@ -16,6 +18,12 @@ def load_stylesheet(filename):
     return css
 
 
+def validate_password_strength(password):
+    if len(password or "") < 8:
+        return "Password must be at least 8 characters long."
+    return None
+
+
 
 
 class AddUserWidget(QWidget):
@@ -26,8 +34,8 @@ class AddUserWidget(QWidget):
         
     
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
 
         # === Header Row ===
@@ -35,9 +43,9 @@ class AddUserWidget(QWidget):
         heading = QLabel("Add New User", objectName="SectionTitle")
         self.userlist = QPushButton("User List", objectName="TopRightButton")
         self.userlist.setCursor(Qt.PointingHandCursor)
-        self.userlist.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.userlist)
         
 
@@ -71,7 +79,7 @@ class AddUserWidget(QWidget):
         self.editpassword = QLineEdit()
         self.editpassword.setEchoMode(QLineEdit.Password)
         self.selectrole = QComboBox()
-        self.selectrole.addItems(["manager", "regular"])
+        self.selectrole.addItems(Permissions.assignable_roles())
 
         fields = [
             self.editfirstname, self.editlastname, self.editemail, self.editusername, self.editpassword, self.selectrole
@@ -100,7 +108,7 @@ class AddUserWidget(QWidget):
             row.addWidget(field, 8)
 
             self.layout.addLayout(row)
-            self.layout.setSpacing(15)  # reduce space between rows
+            self.layout.setSpacing(10)  # reduce space between rows
             
             # Keep mapping
             self.indicators[field] = indicator
@@ -136,6 +144,7 @@ class AddUserWidget(QWidget):
     
 
     
+    @Permissions.require_permission('users.create')
     def save_user(self):
         
         firstname = self.editfirstname.text()
@@ -144,11 +153,20 @@ class AddUserWidget(QWidget):
         username = self.editusername.text()
         password = self.editpassword.text()
         role = self.selectrole.currentText()
+
+        if role not in Permissions.known_roles():
+            AppMessageBox.warning(None, "Warning", f"Unknown role '{role}'. Please select a valid role.")
+            return
         
         username_exists = self.check_username(username)
         
         if username_exists:
-            QMessageBox.warning(None, "Warning", "Username already exists. Please choose another.")
+            AppMessageBox.warning(None, "Warning", "Username already exists. Please choose another.")
+            return
+
+        password_error = validate_password_strength(password)
+        if password_error:
+            AppMessageBox.warning(None, "Weak Password", password_error)
             return
         
         
@@ -174,9 +192,9 @@ class AddUserWidget(QWidget):
         
         if not query.exec():
             print("Insert failed:", query.lastError().text())
-            QMessageBox.critical(None, "Error", query.lastError().text())
+            AppMessageBox.critical(None, "Error", query.lastError().text())
         else:
-            QMessageBox.information(None, "Success", 'New User Record Saved Successfully')
+            AppMessageBox.information(None, "Success", 'New User Record Saved Successfully')
             
             
         # inserting Employee
@@ -195,9 +213,9 @@ class AddUserWidget(QWidget):
     
         if not employee_query.exec():
             print("Insert failed:", employee_query.lastError().text())
-            QMessageBox.critical(None, "Error", employee_query.lastError().text())
+            AppMessageBox.critical(None, "Error", employee_query.lastError().text())
         else:
-            QMessageBox.information(None, "Success", 'Employee Record Saved Successfully')
+            AppMessageBox.information(None, "Success", 'Employee Record Saved Successfully')
             
     
         

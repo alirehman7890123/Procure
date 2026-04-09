@@ -5,6 +5,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QFile, Qt, QDate, QDateTime
 from PySide6.QtSql import QSqlQuery
 from utilities.stylus import load_stylesheets
+from utilities.permissions import Permissions
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -16,21 +18,20 @@ class SalesRepDetailWidget(QWidget):
         self.edit_mode = False
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # Header
         header_layout = QHBoxLayout()
         heading = QLabel("Sales Rep Detail", objectName="SectionTitle")
         self.salesreplist = QPushButton("Sales Reps List", objectName="TopRightButton")
         self.salesreplist.setCursor(Qt.PointingHandCursor)
-        self.salesreplist.setFixedWidth(200)
 
         self.edit_btn = QPushButton("Edit", objectName="TopRightButton")
         self.edit_btn.setCursor(Qt.PointingHandCursor)
-        self.edit_btn.setFixedWidth(100)
         self.edit_btn.clicked.connect(self.toggle_edit_mode)
 
+        header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
         header_layout.addStretch()
         header_layout.addWidget(self.edit_btn)
@@ -49,7 +50,7 @@ class SalesRepDetailWidget(QWidget):
             }
         """)
         self.layout.addWidget(line)
-        self.layout.addSpacing(20)
+        self.layout.addSpacing(10)
 
         # Labels -> display QLabel + edit widgets (supplier stays read-only)
         labels = ["Rep Name", "Supplier", "Contact", "Status", "Joining Date"]
@@ -111,6 +112,7 @@ class SalesRepDetailWidget(QWidget):
         
 
     # Toggle between edit/read modes
+    @Permissions.require_permission('rep.update')
     def toggle_edit_mode(self):
         self.edit_mode = not self.edit_mode
         if self.edit_mode:
@@ -170,9 +172,10 @@ class SalesRepDetailWidget(QWidget):
                 display.show()
 
     # Persist changes to DB
+    @Permissions.require_permission('rep.update')
     def save_changes(self) -> bool:
         if not self.current_id:
-            QMessageBox.warning(self, "Error", "No Sales Rep loaded to save.")
+            AppMessageBox.warning(self, "Error", "No Sales Rep loaded to save.")
             return False
 
         name = self.salesrep_edit.text().strip()
@@ -180,7 +183,7 @@ class SalesRepDetailWidget(QWidget):
         status = self.status_combo.currentText()
 
         if not name or not contact:
-            QMessageBox.warning(self, "Missing Data", "Rep name and contact are required.")
+            AppMessageBox.warning(self, "Missing Data", "Rep name and contact are required.")
             return False
 
         try:
@@ -196,25 +199,34 @@ class SalesRepDetailWidget(QWidget):
             query.addBindValue(self.current_id)
 
             if not query.exec():
-                QMessageBox.critical(self, "Error", f"Failed to update: {query.lastError().text()}")
+                AppMessageBox.critical(self, "Error", f"Failed to update: {query.lastError().text()}")
                 return False
 
-            QMessageBox.information(self, "Success", "Sales Rep updated successfully.")
+            AppMessageBox.information(self, "Success", "Sales Rep updated successfully.")
             return True
 
         except Exception as e:
-            QMessageBox.critical(self, "Unexpected Error", str(e))
+            AppMessageBox.critical(self, "Unexpected Error", str(e))
             return False
 
     # Load DB values into both display and edit widgets
     def load_salesrep_data(self, rep_id):
         self.current_id = rep_id
         query = QSqlQuery()
-        query.prepare("SELECT * FROM rep WHERE id = ?")
+        query.prepare("""
+            SELECT
+                name,
+                supplier,
+                contact,
+                status,
+                joining_date
+            FROM rep
+            WHERE id = ?
+        """)
         query.addBindValue(rep_id)
 
         if query.exec() and query.next():
-            supplier = query.value(2)
+            supplier = query.value(1)
             try:
                 supplier = int(supplier)
             except Exception:
@@ -222,22 +234,22 @@ class SalesRepDetailWidget(QWidget):
             supplier_name = self.get_supplier_name(supplier) if supplier else "Unknown"
 
             # populate label & edit widgets
-            name_val = str(query.value(1) or "")
+            name_val = str(query.value(0) or "")
             self.salesrep.setText(name_val)
             self.salesrep_edit.setText(name_val)
 
             self.supplier.setText(supplier_name)  # readonly label only
 
-            contact_val = str(query.value(3) or "")
+            contact_val = str(query.value(2) or "")
             self.contact.setText(contact_val)
             self.contact_edit.setText(contact_val)
 
-            status_value = str(query.value(4) or "")
+            status_value = str(query.value(3) or "")
             self.status.setText(status_value)
             idx = self.status_combo.findText(status_value, Qt.MatchFixedString)
             self.status_combo.setCurrentIndex(idx if idx >= 0 else 0)
 
-            joining_date = query.value(5)
+            joining_date = query.value(4)
             if isinstance(joining_date, QDateTime):
                 joining_date = joining_date.date().toString("dd-MM-yyyy")
             elif isinstance(joining_date, QDate):

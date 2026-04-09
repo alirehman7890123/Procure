@@ -9,7 +9,10 @@ from PySide6.QtGui import QKeySequence, QShortcut
 
 from utilities.stylus import load_stylesheets
 from utilities.payment_handler import PaymentMethodHandler
-from utilities.get_session import get_current_session
+from utilities.permissions import Permissions
+from utilities.session_gate import require_open_session
+from utilities.session_service import get_active_session_id
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -20,17 +23,17 @@ class CreateSupplierTransactionWidget(QWidget):
         super().__init__(parent)
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
         
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Pay / Receive Payment by Supplier", objectName="SectionTitle")
         self.transactionlist = QPushButton("All Transactions", objectName="TopRightButton")
         self.transactionlist.setCursor(Qt.PointingHandCursor)
-        self.transactionlist.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.transactionlist)
 
         self.layout.addLayout(header_layout)
@@ -327,7 +330,7 @@ class CreateSupplierTransactionWidget(QWidget):
     #             else:
     #                 excess = received_amount - receiveable_before
 
-    #                 reply = QMessageBox.question(
+    #                 reply = AppMessageBox.question(
     #                     self,
     #                     "Excess Receipt",
     #                     "Received amount exceeds receivable.\n"
@@ -393,7 +396,7 @@ class CreateSupplierTransactionWidget(QWidget):
 
     #         db.commit()
 
-    #         QMessageBox.information(self, "Success", "Transaction Saved Successfully.")
+    #         AppMessageBox.information(self, "Success", "Transaction Saved Successfully.")
 
     #         self.load_data(self.supp_id)
     #         self.paid.setText("0")
@@ -402,16 +405,21 @@ class CreateSupplierTransactionWidget(QWidget):
 
     #     except Exception as e:
     #         db.rollback()
-    #         QMessageBox.critical(self, "Error", str(e))
+    #         AppMessageBox.critical(self, "Error", str(e))
     
     
 
     
+    @Permissions.require_permission('transactions.create')
     def save_payment(self):
+
+        if not require_open_session(self):
+            return
+
         db = QSqlDatabase.database()
 
         if not db.transaction():
-            QMessageBox.critical(self, "Error", "Could not start database transaction.")
+            AppMessageBox.critical(self, "Error", "Could not start database transaction.")
             return
 
         try:
@@ -421,7 +429,7 @@ class CreateSupplierTransactionWidget(QWidget):
             if not db.commit():
                 raise Exception("Could not commit supplier transaction.")
 
-            QMessageBox.information(self, "Success", "Transaction Saved Successfully.")
+            AppMessageBox.information(self, "Success", "Transaction Saved Successfully.")
 
             self.load_data(self.supp_id)
             self.paid.setText("0")
@@ -430,7 +438,7 @@ class CreateSupplierTransactionWidget(QWidget):
 
         except Exception as e:
             db.rollback()
-            QMessageBox.critical(self, "Error", str(e))
+            AppMessageBox.critical(self, "Error", str(e))
 
 
 
@@ -484,7 +492,7 @@ class CreateSupplierTransactionWidget(QWidget):
                 remaining_due = payable_before - paid_amount
                 payable_after = remaining_due
                 receiveable_now = 0.0
-                remaining_now = receiveable_before
+                remaining_now = 0.0
                 receiveable_after = receiveable_before
             else:
                 overpayment = paid_amount - payable_before
@@ -499,9 +507,9 @@ class CreateSupplierTransactionWidget(QWidget):
             received = received_amount
 
             due_amount = 0.0
-            remaining_due = payable_before
+            remaining_due = 0.0
 
-            receiveable_now = receiveable_before
+            receiveable_now = 0.0
 
             if received_amount <= receiveable_before:
                 remaining_now = receiveable_before - received_amount
@@ -510,24 +518,26 @@ class CreateSupplierTransactionWidget(QWidget):
             else:
                 excess = received_amount - receiveable_before
 
-                reply = QMessageBox.question(
+                _, accepted = AppMessageBox.confirm(
                     self,
                     "Excess Receipt",
                     "Received amount exceeds receivable.\n"
                     "Excess will be moved to Payable.\n\nContinue?",
-                    QMessageBox.Yes | QMessageBox.No
+                    confirm_label="Continue",
+                    cancel_label="Cancel",
+                    kind="warning",
                 )
 
-                if reply == QMessageBox.No:
+                if not accepted:
                     raise Exception("Receipt cancelled by user.")
 
                 remaining_now = 0.0
                 receiveable_after = 0.0
                 payable_after = payable_before + excess
-                remaining_due = payable_after
+                remaining_due = excess
 
 
-        session_id = get_current_session(self)
+        session_id = get_active_session_id(strict=True)
         if session_id is None:
             raise Exception("No active session found.")
 
@@ -659,4 +669,3 @@ class CreateSupplierTransactionWidget(QWidget):
         self.payment_method.blockSignals(False)
         
         self.populate_reps()                    
-

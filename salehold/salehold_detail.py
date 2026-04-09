@@ -1,10 +1,9 @@
-from PySide6.QtWidgets import QWidget, QSizePolicy, QPushButton, QLabel, QSpacerItem, QMessageBox, QComboBox, QLineEdit, QVBoxLayout, QGridLayout, QTableWidget, QTableWidgetItem
-from PySide6.QtCore import QFile, Qt, QDate, Signal
-from PySide6.QtSql import QSqlDatabase, QSqlQuery
-from sales.basesales import BaseSalesWidget
-from functools import partial
+from PySide6.QtWidgets import QWidget, QSizePolicy, QPushButton, QLabel, QSpacerItem, QVBoxLayout, QGridLayout, QTableWidget, QTableWidgetItem
+from PySide6.QtCore import Qt, QDate, Signal
+from PySide6.QtSql import QSqlQuery
 
 from utilities.stylus import load_stylesheets
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -26,16 +25,17 @@ class HoldSalesDetailWidget(QWidget):
         grid_widget.setLayout(grid_layout)
 
         
-        heading = QLabel("Sales Orders - ON HOLD", objectName='myheading')
-        self.holdinglist = QPushButton('Hold Sales', objectName='supplierlist')
+        heading = QLabel("Sales Orders - On Hold", objectName='SectionTitle')
+        self.holdinglist = QPushButton('Hold Sales', objectName='TopRightButton')
+        self.holdinglist.setCursor(Qt.PointingHandCursor)
         
         grid_layout.addWidget(heading, 0,0,1,7)
         grid_layout.addWidget(self.holdinglist, 0,7,1,1)
         
-        orderlabel = QLabel("Sales Receipt Id")
+        orderlabel = QLabel("Hold Sale Id")
         statuslabel = QLabel("Order Status")
         customerlabel = QLabel("Customer")
-        salesman = QLabel("Sales Man")
+        salesman = QLabel("User")
         datelabel = QLabel("Date")
 
         grid_layout.addWidget(orderlabel, 1, 0)
@@ -63,9 +63,9 @@ class HoldSalesDetailWidget(QWidget):
         
         self.supplier_table = MyTable()
         
-        self.supplier_table.setColumnCount(7)
+        self.supplier_table.setColumnCount(8)
         self.supplier_table.setHorizontalHeaderLabels([
-            "##", "Product", "Qty", "Rate", "Disc (%)", "Disc", "Total"
+            "##", "Product", "Qty", "Rate", "Disc (%)", "Disc", "Tax %", "Total"
         ])
         self.supplier_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.supplier_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -74,54 +74,7 @@ class HoldSalesDetailWidget(QWidget):
         header = self.supplier_table.horizontalHeader()
         header.setStretchLastSection(False)
 
-        self.supplier_table.setStyleSheet("""
-                                QTableWidget { margin: 30px; color: #333; }
-                                QHeaderView::section { background-color: #333; } 
-                                
-                                
-                QTableWidget::item {
-                    padding: 0px;
-                }
-
-                QLineEdit {
-                    margin: 4px;
-                    border: 1px solid #ccc;
-                    border-radius: 2px;
-                    padding: 4px;
-                    background-color: #fdfdfd;
-                    font-size: 14px;
-                }
-                
-                QLineEdit::placeholder {
-                    color: green;
-                }
-
-                QComboBox {
-                    border: 1px solid #ccc;
-                    border-radius: 2px;
-                    padding: 2px 4px;
-                    background-color: #fdfdfd;
-                    font-size: 14px;
-                }
-
-                QPushButton {
-                    border: 1px solid #888;
-                    border-radius: 3px;
-                    background-color: #333;
-                    padding: 2px 8px;
-                    color: #ccc;
-                    width: 100px;
-                    
-                }
-
-                QPushButton:hover {
-                    background-color: #555;
-                }
-
-                QPushButton:pressed {
-                    background-color: #ccc;
-                }
-            """)
+        self.supplier_table.setStyleSheet("QTableWidget::item { color: #333; }")
 
         
 
@@ -145,7 +98,7 @@ class HoldSalesDetailWidget(QWidget):
         grid_layout.addItem(spacer, 10, 0)
         
         self.reload_data_btn = QPushButton("Reload Sale Order")
-        self.reload_data_btn.setObjectName("supplierlist")
+        self.reload_data_btn.setObjectName("TopRightButton")
         self.reload_data_btn.setCursor(Qt.PointingHandCursor)
         
         
@@ -202,26 +155,21 @@ class HoldSalesDetailWidget(QWidget):
                     
                 
                 print("salesman Id isl ", salesmanid)
-                if salesmanid == 0:
-                    
-                    QMessageBox.critical(self, "Error", "Salesman Not Found")
-                    return
-                
-                else:
-                    
+                salesman = "-"
+                if salesmanid:
                     salesmanquery = QSqlQuery()
-                    salesmanquery.prepare("SELECT name FROM employee WHERE id = ?")
+                    salesmanquery.prepare("SELECT username FROM auth WHERE id = ?")
                     salesmanquery.addBindValue(salesmanid)
 
                     if salesmanquery.exec() and salesmanquery.next():
-                        
-                        salesman = salesmanquery.value(0)
-                        salesman = str(salesman)
-                    
+                        salesman = str(salesmanquery.value(0) or "-")
                     else:
-                        
-                        print("Salesman not found for ID:", salesmanid)
-                        return
+                        salesmanquery = QSqlQuery()
+                        salesmanquery.prepare("SELECT name FROM employee WHERE id = ?")
+                        salesmanquery.addBindValue(salesmanid)
+
+                        if salesmanquery.exec() and salesmanquery.next():
+                            salesman = str(salesmanquery.value(0) or "-")
         
                 self.orderid.setText(str(id))
                 self.status.setText(status)
@@ -238,7 +186,7 @@ class HoldSalesDetailWidget(QWidget):
             
             e = str(e)
             print("Error loading sales data:", e)
-            QMessageBox.critical(self, "Error", f"Error loading sales data: {e}")
+            AppMessageBox.critical(self, "Error", f"Error loading sales data: {e}")
             
             
             
@@ -249,7 +197,11 @@ class HoldSalesDetailWidget(QWidget):
         print("Loading items into table")
         
         query = QSqlQuery()
-        query.prepare("SELECT product, qty, unitrate, discount, discountamount, total FROM holditems where holdsale = ?")
+        query.prepare("""
+            SELECT product, qty, unitrate, discount, discountamount, COALESCE(tax, 0), total
+            FROM holditems
+            WHERE holdsale = ?
+        """)
         query.addBindValue(id)
 
         self.supplier_table.setRowCount(0)  # Clear existing rows
@@ -271,10 +223,11 @@ class HoldSalesDetailWidget(QWidget):
                 rate = str(query.value(2))
                 discount = str(query.value(3))
                 discountamount = str(query.value(4))
-                total = str(query.value(5))
+                tax = str(query.value(5))
+                total = str(query.value(6))
 
                 query2 = QSqlQuery()
-                query2.prepare("SELECT name FROM product WHERE id = ?")
+                query2.prepare("SELECT display_name FROM product WHERE id = ?")
                 query2.addBindValue(product)
                 
                 if query2.exec() and query2.next():
@@ -287,6 +240,7 @@ class HoldSalesDetailWidget(QWidget):
                 rate = QTableWidgetItem(rate)
                 discount = QTableWidgetItem(discount)
                 discountamount = QTableWidgetItem(discountamount)
+                tax = QTableWidgetItem(tax)
                 total = QTableWidgetItem(total)
                 
                 self.supplier_table.setItem(row, 0, counter)
@@ -295,7 +249,8 @@ class HoldSalesDetailWidget(QWidget):
                 self.supplier_table.setItem(row, 3, rate)
                 self.supplier_table.setItem(row, 4, discount)
                 self.supplier_table.setItem(row, 5, discountamount)
-                self.supplier_table.setItem(row, 6, total)
+                self.supplier_table.setItem(row, 6, tax)
+                self.supplier_table.setItem(row, 7, total)
                 
 
                 row += 1
@@ -304,6 +259,10 @@ class HoldSalesDetailWidget(QWidget):
             
             # self.reload_data_btn.clicked.connect(partial(self.reload_btn_clicked))
 
+            try:
+                self.reload_data_btn.clicked.disconnect()
+            except Exception:
+                pass
             self.reload_data_btn.clicked.connect(lambda: self.reload_order_signal.emit(id))
             print("Signal connected!")
 
@@ -339,9 +298,6 @@ class MyTable(QTableWidget):
         
         
         
-
-
-
 
 
 

@@ -4,7 +4,10 @@ from PySide6.QtCore import QSize, Qt, QFile, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from utilities.stylus import load_stylesheets
 from utilities.payment_handler import PaymentMethodHandler
-from utilities.get_session import get_current_session
+from utilities.permissions import Permissions
+from utilities.session_gate import require_open_session
+from utilities.session_service import get_active_session_id
+from utilities.app_messagebox import AppMessageBox
 
 class AddExpenseWidget(QWidget):
 
@@ -13,17 +16,17 @@ class AddExpenseWidget(QWidget):
         super().__init__(parent)
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Expense Information", objectName="SectionTitle")
         self.expenselist = QPushButton("Expense List", objectName="TopRightButton")
         self.expenselist.setCursor(Qt.PointingHandCursor)
-        self.expenselist.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.expenselist)
 
         self.layout.addLayout(header_layout)
@@ -109,7 +112,7 @@ class AddExpenseWidget(QWidget):
             row.addWidget(field, 8)
 
             self.layout.addLayout(row)
-            self.layout.setSpacing(15)  # reduce space between rows
+            self.layout.setSpacing(10)  # reduce space between rows
 
             # Keep mapping
             self.indicators[field] = indicator
@@ -152,8 +155,11 @@ class AddExpenseWidget(QWidget):
     
     
 
+    @Permissions.require_permission('expense.create')
     def save_expense(self):
-        
+        if not require_open_session(self):
+            return
+
         # Create database connection
         db = QSqlDatabase.database()
         query = QSqlQuery(db)
@@ -166,7 +172,7 @@ class AddExpenseWidget(QWidget):
 
         # Validate required fields
         if not amount or amount == '':
-            QMessageBox.warning(self, "Required Fields", "Amount are required fields")
+            AppMessageBox.warning(self, "Required Fields", "Amount are required fields")
             return
 
         
@@ -174,10 +180,10 @@ class AddExpenseWidget(QWidget):
         print(payment)
         print("Payment data is as above")
         
-        session_id = get_current_session(self)
+        session_id = get_active_session_id(strict=True)
             
         if session_id is None:
-            QMessageBox.warning(self, "Validation Error", "No active session found.")
+            AppMessageBox.warning(self, "Validation Error", "No active session found.")
             return None
         
         
@@ -193,7 +199,7 @@ class AddExpenseWidget(QWidget):
             user_id = user_query.value(0)
         else:
             user_id = None
-            return QMessageBox.critical(self, "Error", "User not found in database.")
+            return AppMessageBox.critical(self, "Error", "User not found in database.")
 
         # Insert customer data
         query.prepare("""
@@ -216,10 +222,10 @@ class AddExpenseWidget(QWidget):
         query.addBindValue(payment.get("payment_reference") or None)
 
         if query.exec():
-            QMessageBox.information(self, "Success", "Expense added successfully")
+            AppMessageBox.information(self, "Success", "Expense added successfully")
             self.clear_fields()
         else:
-            QMessageBox.critical(self, "Error", f"Error adding customer: {query.lastError().text()}")    
+            AppMessageBox.critical(self, "Error", f"Error adding customer: {query.lastError().text()}")    
 
 
 

@@ -58,4 +58,7 @@ class BaseSupplierWidget(BasePage):
 
     # 🔑 reset method
     def reset_to_default(self):
-        self.stacked_layout.setCurrentWidget(self.supplierlist_widget)
+        if Permissions.has_permission('supplier.view'):
+            self.stacked_layout.setCurrentWidget(self.supplierlist_widget)
+        elif Permissions.has_permission('supplier.create'):
+            self.stacked_layout.setCurrentWidget(self.addsupplier_widget)

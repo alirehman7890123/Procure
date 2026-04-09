@@ -19,6 +19,14 @@ class BaseBusinessWidget(BasePage):
         
         self.setLayout(self.stacked_layout)
 
+    @Permissions.require_permission('business.view')
+    def set_business_widget(self):
+        self.stacked_layout.setCurrentWidget(self.business_widget)
+
+    def reset_to_default(self):
+        if Permissions.has_permission('business.view'):
+            self.stacked_layout.setCurrentWidget(self.business_widget)
+
 
 
     

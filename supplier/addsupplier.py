@@ -11,8 +11,10 @@ import traceback
 
 
 from utilities.basepage import BasePage
+from utilities.permissions import Permissions
 
 from utilities.stylus import load_stylesheets
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -24,17 +26,17 @@ class AddSupplierWidget(BasePage):
         
         
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(8)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Supplier Information", objectName="SectionTitle")
         self.supplierlist = QPushButton("Suppliers List", objectName="TopRightButton")
         self.supplierlist.setCursor(Qt.PointingHandCursor)
-        self.supplierlist.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.supplierlist)
 
         self.layout.addLayout(header_layout)
@@ -55,7 +57,7 @@ class AddSupplierWidget(BasePage):
 
 
         self.layout.addWidget(line)
-        self.layout.addSpacing(20)
+        self.layout.addSpacing(10)
 
         # Labels + Fields
         labels = ["Supplier", "Contact", "Email", "Website", "Address", "Registration No.", "Payable", "Receivable"]
@@ -67,6 +69,7 @@ class AddSupplierWidget(BasePage):
         self.editreg_no = QLineEdit()
         self.editpayable = QLineEdit()
         self.editreceiveable = QLineEdit()
+        self.save_button = QPushButton("Add Supplier", objectName="SaveButton")
 
         fields = [
             self.editname, self.editcontact, self.editemail, self.editwebsite,
@@ -97,7 +100,6 @@ class AddSupplierWidget(BasePage):
             row.addWidget(field, 8)
 
             self.layout.addLayout(row)
-            self.layout.setSpacing(15)  # reduce space between rows
             
             # Keep mapping
             self.indicators[field] = indicator
@@ -105,8 +107,10 @@ class AddSupplierWidget(BasePage):
             # Install event filters to track focus
             field.installEventFilter(self)
             
-       
-        self.layout.addSpacing(10)
+        for field in (self.editpayable, self.editreceiveable):
+            field.setText("0.00")
+
+        self.layout.addSpacing(8)
         
         
           
@@ -114,20 +118,36 @@ class AddSupplierWidget(BasePage):
         
 
         # === Add Button ===
-        addsupplier = QPushButton("Add Supplier", objectName="SaveButton")
-        addsupplier.setCursor(Qt.PointingHandCursor)
-        addsupplier.clicked.connect(lambda: self.save_supplier())
+        self.save_button.setCursor(Qt.PointingHandCursor)
+        self.save_button.clicked.connect(lambda: self.save_supplier())
         
         shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
         shortcut.activated.connect(self.save_supplier)
 
-        self.layout.addWidget(addsupplier)
+        self.layout.addWidget(self.save_button)
         self.layout.addStretch()
+
+        self.configure_focus_flow()
         
 
         # Apply external stylesheet if present
         
         self.setStyleSheet(load_stylesheets())
+
+    def configure_focus_flow(self):
+        self.editname.returnPressed.connect(lambda: self.focus_field(self.editcontact))
+        self.editcontact.returnPressed.connect(lambda: self.focus_field(self.editemail))
+        self.editemail.returnPressed.connect(lambda: self.focus_field(self.editwebsite))
+        self.editwebsite.returnPressed.connect(lambda: self.focus_field(self.editaddress))
+        self.editaddress.returnPressed.connect(lambda: self.focus_field(self.editreg_no))
+        self.editreg_no.returnPressed.connect(lambda: self.focus_field(self.editpayable))
+        self.editpayable.returnPressed.connect(lambda: self.focus_field(self.editreceiveable))
+        self.editreceiveable.returnPressed.connect(lambda: self.focus_field(self.save_button))
+
+    def focus_field(self, widget):
+        widget.setFocus()
+        if hasattr(widget, "selectAll"):
+            widget.selectAll()
         
         
         
@@ -138,7 +158,6 @@ class AddSupplierWidget(BasePage):
         if valid:
             
             print(f"[VALIDATION SUCCESS] {message}")
-            QMessageBox.information(self, "Validation Success", message)
             
             name, contact, email, website, address, registeration, payable, receiveable = cleaned
 
@@ -149,7 +168,7 @@ class AddSupplierWidget(BasePage):
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                 """)
                 query.addBindValue(name)
-                query.addBindValue(contact)
+                query.addBindValue(contact if contact else None)
                 query.addBindValue(email)
                 query.addBindValue(website)
                 query.addBindValue(address)
@@ -183,7 +202,7 @@ class AddSupplierWidget(BasePage):
         else:
             
             print(f"[VALIDATION ERROR] {message}")
-            QMessageBox.warning(self, "Validation Error", message)
+            AppMessageBox.warning(self, "Validation Error", message)
             return False
 
     
@@ -207,13 +226,10 @@ class AddSupplierWidget(BasePage):
         if not name or not name.strip():
             return False, "Supplier name cannot be empty.", ""
 
-        if not contact or not contact.strip():
-            return False, "Contact cannot be empty.", ""
-
-        if not contact.isdigit():
+        if contact and not contact.isdigit():
             return False, "Contact must contain only digits.", ""
 
-        if len(contact) < 7:
+        if contact and len(contact) < 7:
             return False, "Contact must be at least 7 digits.", ""
 
         if email and ("@" not in email or "." not in email):
@@ -263,6 +279,7 @@ class AddSupplierWidget(BasePage):
 
     
     
+    @Permissions.require_permission('supplier.create')
     def save_supplier(self):
 
         print("[ACTION] Save Supplier button clicked.")
@@ -290,12 +307,18 @@ class AddSupplierWidget(BasePage):
                 f"Exception Type: {type(e).__name__}\n"
                 f"Message: {e}\n"
                 f"Traceback: {traceback.format_exc()}")
-            QMessageBox.critical(self, "Error", "An error occurred while saving supplier information.")
+            AppMessageBox.critical(self, "Error", "An error occurred while saving supplier information.")
             return
 
         else:
+            if not supplier_id:
+                db.rollback()
+                return
             db.commit()
             print("[DB] Transaction committed successfully.")
+            self.clear_fields()
+            AppMessageBox.success(self, "Success", "Supplier saved successfully.")
+            self.editname.setFocus()
 
 
     
@@ -305,7 +328,8 @@ class AddSupplierWidget(BasePage):
     def clear_fields(self):
         for field in [
             self.editname, self.editcontact, self.editemail,
-            self.editwebsite, self.editaddress, self.editreg_no,
-            self.editpayable, self.editreceiveable
+            self.editwebsite, self.editaddress, self.editreg_no
         ]:
             field.clear()
+        self.editpayable.setText("0.00")
+        self.editreceiveable.setText("0.00")

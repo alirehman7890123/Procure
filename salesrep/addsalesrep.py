@@ -3,6 +3,8 @@ from PySide6.QtCore import QSize, Qt, QFile, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 
 from utilities.stylus import load_stylesheets
+from utilities.permissions import Permissions
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -15,8 +17,8 @@ class AddSalesRepWidget(QWidget):
         
     
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
 
         # === Header Row ===
@@ -24,9 +26,9 @@ class AddSalesRepWidget(QWidget):
         heading = QLabel("Sales Rep Information", objectName="SectionTitle")
         self.replist = QPushButton("Rep List", objectName="TopRightButton")
         self.replist.setCursor(Qt.PointingHandCursor)
-        self.replist.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.replist)
         
 
@@ -84,7 +86,7 @@ class AddSalesRepWidget(QWidget):
             row.addWidget(field, 8)
 
             self.layout.addLayout(row)
-            self.layout.setSpacing(15)  # reduce space between rows
+            self.layout.setSpacing(10)  # reduce space between rows
             
             # Keep mapping
             self.indicators[field] = indicator
@@ -139,12 +141,13 @@ class AddSalesRepWidget(QWidget):
                 self.selectsupplier.addItem(supplier_name, supplier_id)  # Text shown, ID stored as data
             
         else:
-            QMessageBox.information(None, 'Error', query.lastError().text() )
+            AppMessageBox.information(None, 'Error', query.lastError().text() )
         
             
             
     
     
+    @Permissions.require_permission('rep.create')
     def save_salesrep(self):
         
         suppliername = self.selectsupplier.currentText()
@@ -169,9 +172,9 @@ class AddSalesRepWidget(QWidget):
             
         if not query.exec():
             print("Insert failed:", query.lastError().text())
-            QMessageBox.critical(None, "Error", 'query.lastError().text()')
+            AppMessageBox.critical(None, "Error", 'query.lastError().text()')
         else:
-            QMessageBox.information(None, "Success", 'Rep Record Saved Successfully')
+            AppMessageBox.information(None, "Success", 'Rep Record Saved Successfully')
             
             self.editname.setText("")
             self.editcontact.setText("")
@@ -179,6 +182,5 @@ class AddSalesRepWidget(QWidget):
             
             
     
-
 
 

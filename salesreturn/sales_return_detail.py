@@ -2,6 +2,7 @@ from PySide6.QtWidgets import QWidget, QSizePolicy, QPushButton, QLabel,QMessage
 from PySide6.QtCore import QFile, Qt, QDate
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from utilities.stylus import load_stylesheets
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -28,22 +29,26 @@ class SalesReturnDetailWidget(QWidget):
         orderlabel = QLabel("Sales Return Id")
         sellerorderlabel = QLabel("Sales Order Id")
         customerlabel = QLabel("Customer")
+        salesmanlabel = QLabel("Salesman")
         datelabel = QLabel("Return Date")
 
         grid_layout.addWidget(orderlabel, 1, 0)
         grid_layout.addWidget(sellerorderlabel, 2, 0)
         grid_layout.addWidget(customerlabel, 3, 0)
-        grid_layout.addWidget(datelabel, 4, 0)
+        grid_layout.addWidget(salesmanlabel, 4, 0)
+        grid_layout.addWidget(datelabel, 5, 0)
         
         self.orderid = QLabel()
         self.salesorder = QLabel()
         self.customer = QLabel()
+        self.salesman = QLabel()
         self.dateandtime = QLabel()
 
         grid_layout.addWidget(self.orderid, 1, 1)
         grid_layout.addWidget(self.salesorder, 2, 1)
         grid_layout.addWidget(self.customer, 3, 1)
-        grid_layout.addWidget(self.dateandtime, 4, 1)
+        grid_layout.addWidget(self.salesman, 4, 1)
+        grid_layout.addWidget(self.dateandtime, 5, 1)
         
         
         layout.addWidget(grid_widget)
@@ -58,9 +63,6 @@ class SalesReturnDetailWidget(QWidget):
         ])
         self.supplier_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.supplier_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)#
-        self.supplier_table.setFixedHeight(300)
-        
-
         header = self.supplier_table.horizontalHeader()
         header.setStretchLastSection(False)
 
@@ -233,7 +235,7 @@ class SalesReturnDetailWidget(QWidget):
             
             
     #     else:
-    #         QMessageBox.information(self, "Error", query.lastError().text() )
+    #         AppMessageBox.information(self, "Error", query.lastError().text() )
 
 
     def load_sales_data(self, salesreturn_id: int) -> None:
@@ -244,14 +246,14 @@ class SalesReturnDetailWidget(QWidget):
         query.prepare("""
             SELECT salesorder, customer, creation_date,
                 subtotal, roundoff, total,
-                paid, remaining, writeoff
+                paid, remaining, writeoff, salesman
             FROM salesreturn
             WHERE id = ?
         """)
         query.addBindValue(salesreturn_id)
 
         if not query.exec() or not query.next():
-            QMessageBox.information(self, "Error", query.lastError().text())
+            AppMessageBox.information(self, "Error", query.lastError().text())
             return
 
         salesorder_id = query.value(0)
@@ -264,6 +266,7 @@ class SalesReturnDetailWidget(QWidget):
         paid      = query.value(6)
         remaining = query.value(7)
         writeoff  = query.value(8)
+        salesman_id = query.value(9)
 
         # Date formatting
         if isinstance(invoice_date, QDate):
@@ -295,6 +298,15 @@ class SalesReturnDetailWidget(QWidget):
                 self.customer.setText("Unknown Customer")
         else:
             self.customer.setText("Walk-In Customer")
+
+        salesman_name = "-"
+        if salesman_id not in (None, "", 0):
+            salesman_query = QSqlQuery()
+            salesman_query.prepare("SELECT name FROM employee WHERE id = ?")
+            salesman_query.addBindValue(salesman_id)
+            if salesman_query.exec() and salesman_query.next():
+                salesman_name = salesman_query.value(0) or "-"
+        self.salesman.setText(str(salesman_name))
 
         # 🔥 Correct call
         self.load_items_into_table(salesreturn_id)
@@ -381,7 +393,6 @@ class MyTable(QTableWidget):
         
         
         
-
 
 
 

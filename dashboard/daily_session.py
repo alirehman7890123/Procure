@@ -1,23 +1,29 @@
-from PySide6.QtWidgets import QSizePolicy, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QGridLayout, QPushButton, QLabel, QDialog, QComboBox, QFrame, QSpacerItem
-from PySide6.QtCore import Qt, QFile, QDate, Signal, QTimer
-import sys, os
-from PySide6.QtSql import QSqlQuery, QSqlDatabase
-from PySide6.QtCore import QDate
-from functools import partial
-from utilities import mylogin
-import pyqtgraph as pg
-
-
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QGridLayout, QPushButton,
+    QLabel, QDialog, QComboBox, QFrame, QMessageBox, QTableWidget,
+    QTableWidgetItem, QHeaderView, QSizePolicy, QDateEdit
+)
+from PySide6.QtCore import Qt, QDate
+from PySide6.QtGui import QColor
+from PySide6.QtSql import QSqlQuery
+import logging
 import os
 import sys
+
+from utilities.session_service import SessionErrorCode, check_active_session, get_active_session_id
+from utilities.permissions import Permissions
+from utilities.app_messagebox import AppMessageBox
+
+
+logger = logging.getLogger(__name__)
 
 
 def resource_path(relative_path):
     """Return the absolute path to a resource, works for dev and PyInstaller."""
     try:
-        base_path = sys._MEIPASS  # PyInstaller extracts files here
+        base_path = sys._MEIPASS
     except AttributeError:
-        base_path = os.path.abspath(".")  # running from source
+        base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
 
@@ -33,60 +39,105 @@ def load_stylesheets():
                 css_file = os.path.join(styles_dir, file)
                 with open(css_file, "r") as f:
                     css_content += f.read() + "\n"
-                    
+
     return css_content
 
 
+class MyTable(QTableWidget):
+    def __init__(self, rows=0, cols=0, column_ratios=None, parent=None):
+        super().__init__(rows, cols, parent)
+        self.column_ratios = column_ratios or []
+        header = self.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setMinimumSectionSize(20)
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self.column_ratios:
+            return
+        total = float(sum(self.column_ratios) or 0)
+        if total <= 0:
+            return
+        width = max(0, self.viewport().width())
+        for index, ratio in enumerate(self.column_ratios):
+            self.setColumnWidth(index, int(width * (ratio / total)))
 
 
 class DailySession(QWidget):
-    
-    
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # main vertical layout
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(20, 20, 20, 20)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
-        # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Daily Sessions", objectName="SectionTitle")
         self.dashboard_btn = QPushButton("See Dashboard", objectName="TopRightButton")
         self.dashboard_btn.setCursor(Qt.PointingHandCursor)
-        self.dashboard_btn.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
         header_layout.addWidget(self.dashboard_btn)
-        
-        
         self.layout.addLayout(header_layout)
-        
-        
-        
-        self.add_current_session_section()
-        
-        self.update_session_buttons()
-        
-        
-        # push content to top
+
+        self.add_history_summary_section()
+        self.add_session_filters_section()
+        self.add_session_history_section()
+
         self.layout.addStretch()
-        
-        # set stylesheets
         self.setStyleSheet(load_stylesheets())
-        
 
+        self.update_session_buttons()
+        self.load_session_history()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.update_session_buttons()
+        self.load_session_history()
 
+    def _show_session_state_error(self, result, action_label="continue"):
+        if result.code == SessionErrorCode.MULTIPLE_OPEN_SESSIONS:
+            AppMessageBox.critical(
+                self,
+                "Session Data Error",
+                "Multiple open daily sessions were found.\n\n"
+                f"Please fix duplicate sessions before you {action_label}.",
+            )
+            return
 
+        if result.code == SessionErrorCode.DB_ERROR:
+            AppMessageBox.critical(
+                self,
+                "Database Error",
+                f"Could not check daily session state.\n\n{result.error_text}",
+            )
+            return
+
+        if result.code == SessionErrorCode.INVALID_SESSION_ROW:
+            AppMessageBox.critical(
+                self,
+                "Session Data Error",
+                "Daily session data is invalid. Please repair the latest open session record.",
+            )
+
+    def _get_strict_active_session_id(self, action_label="continue"):
+        result = check_active_session(strict=True)
+        if result.ok:
+            return int(result.session_id)
+
+        if result.code != SessionErrorCode.NO_OPEN_SESSION:
+            self._show_session_state_error(result, action_label=action_label)
+        return None
 
     def get_open_session(self):
+        active_session_id = self._get_strict_active_session_id(action_label="view session details")
+        if active_session_id is None:
+            return None
 
         query = QSqlQuery()
-        query.prepare("""
-            SELECT 
+        query.prepare(
+            """
+            SELECT
                 id,
                 session_date,
                 opening_cash,
@@ -97,13 +148,13 @@ class DailySession(QWidget):
                 cash_difference,
                 status
             FROM daily_session
-            WHERE status = 'open'
-            LIMIT 1
-        """)
+            WHERE id = ?
+            """
+        )
+        query.addBindValue(int(active_session_id))
 
         if query.exec() and query.next():
-
-            session_data = {
+            return {
                 "id": query.value(0),
                 "session_date": query.value(1),
                 "opening_cash": query.value(2),
@@ -115,16 +166,9 @@ class DailySession(QWidget):
                 "status": query.value(8),
             }
 
-            return session_data
-
         return None
 
-
-    
     def open_session_dialog(self):
-        
-        
-
         dialog = QDialog(self)
         dialog.setWindowTitle("Open Daily Session")
         dialog.setMinimumWidth(400)
@@ -163,128 +207,183 @@ class DailySession(QWidget):
 
         added_cash_edit.textChanged.connect(update_opening)
         update_opening()
+        result_data = {}
 
         form.addWidget(QLabel("Date"), 0, 0)
         form.addWidget(date_edit, 0, 1)
-
         form.addWidget(QLabel("Carry Forward"), 1, 0)
         form.addWidget(carry_forward_edit, 1, 1)
-
         form.addWidget(QLabel("Added Cash"), 2, 0)
         form.addWidget(added_cash_edit, 2, 1)
-
         form.addWidget(QLabel("Opening Cash"), 3, 0)
         form.addWidget(opening_cash_edit, 3, 1)
-
         layout.addLayout(form)
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-
         open_btn = QPushButton("Open Session")
         cancel_btn = QPushButton("Cancel")
-
         btn_layout.addWidget(open_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
-        
-
         cancel_btn.clicked.connect(dialog.reject)
+
+        def reset_form():
+            carry_forward_edit.setText(str(self.get_previous_balance() or 0))
+            added_cash_edit.setText("0")
+            update_opening()
 
         def handle_open():
             try:
-                float(added_cash_edit.text() or 0)
-                float(opening_cash_edit.text() or 0)
+                added_cash = float(added_cash_edit.text() or 0)
+                opening_cash = float(opening_cash_edit.text() or 0)
+                if added_cash < 0:
+                    AppMessageBox.warning(dialog, "Invalid Input", "Added cash cannot be negative.")
+                    return
+                if opening_cash < 0:
+                    AppMessageBox.warning(dialog, "Invalid Input", "Opening cash cannot be negative.")
+                    return
+                result_data["session_date"] = date_edit.text().strip()
+                result_data["carry_forward"] = float(carry_forward_edit.text() or 0)
+                result_data["added_cash"] = added_cash
+                result_data["opening_cash"] = opening_cash
+                reset_form()
                 dialog.accept()
             except ValueError:
-                return
+                AppMessageBox.warning(dialog, "Invalid Input", "Please enter valid numeric values.")
 
         open_btn.clicked.connect(handle_open)
 
         if dialog.exec() == QDialog.Accepted:
-            return {
+            return result_data or {
                 "session_date": date_edit.text().strip(),
                 "carry_forward": float(carry_forward_edit.text() or 0),
                 "added_cash": float(added_cash_edit.text() or 0),
                 "opening_cash": float(opening_cash_edit.text() or 0),
             }
-
         return None
 
-    
-    
-    
-    
     def get_previous_balance(self):
-
         query = QSqlQuery()
-        query.prepare("""
-            SELECT 
-                actual_cash, withdraw_amount
+        query.prepare(
+            """
+            SELECT actual_cash, withdrawal
             FROM daily_session
             WHERE status = 'closed'
             ORDER BY id DESC
             LIMIT 1
-        """)
+            """
+        )
 
         if query.exec() and query.next():
-            
             actual_cash = query.value(0) or 0
             withdraw_amount = query.value(1) or 0
-            
             return max(0, actual_cash - withdraw_amount)
-
         return 0
-    
-    
-    
-    def get_cash_expenses(self):
 
-        cash_expenses = 0.0
+    def get_cash_expenses(self):
+        active_session_id = self._get_strict_active_session_id(action_label="close the session")
+        if active_session_id is None:
+            return 0.0
 
         query = QSqlQuery()
-        query.prepare("""
+        query.prepare(
+            """
             SELECT COALESCE(SUM(e.amount), 0)
             FROM expense e
-            JOIN daily_session s ON e.session_id = s.id
-            WHERE s.status = 'open'
-            AND e.payment_method = 'Cash'
-        """)
+            WHERE e.session_id = ?
+              AND e.payment_method = 'Cash'
+            """
+        )
+        query.addBindValue(int(active_session_id))
 
         if query.exec() and query.next():
-            cash_expenses = float(query.value(0) or 0)
+            return float(query.value(0) or 0)
+        return 0.0
 
-        return cash_expenses
-    
-    
+    def get_session_payment_method_summary(self, methods=None):
+        active_session_id = self._get_strict_active_session_id(action_label="close the session")
+        if active_session_id is None:
+            return {}
+
+        method_names = methods or ["Bank Transfer", "EasyPaisa", "JazzCash"]
+        summary = {
+            method: {
+                "received": 0.0,
+                "paid": 0.0,
+                "expense": 0.0,
+                "net": 0.0,
+            }
+            for method in method_names
+        }
+
+        def accumulate_transaction_table(table_name):
+            for method in method_names:
+                query = QSqlQuery()
+                query.prepare(
+                    f"""
+                    SELECT
+                        COALESCE(SUM(received), 0),
+                        COALESCE(SUM(paid), 0)
+                    FROM {table_name}
+                    WHERE session_id = ?
+                      AND payment_method = ?
+                    """
+                )
+                query.addBindValue(int(active_session_id))
+                query.addBindValue(method)
+                if query.exec() and query.next():
+                    summary[method]["received"] += float(query.value(0) or 0.0)
+                    summary[method]["paid"] += float(query.value(1) or 0.0)
+
+        accumulate_transaction_table("customer_transaction")
+        accumulate_transaction_table("supplier_transaction")
+
+        for method in method_names:
+            query = QSqlQuery()
+            query.prepare(
+                """
+                SELECT COALESCE(SUM(amount), 0)
+                FROM expense
+                WHERE session_id = ?
+                  AND payment_method = ?
+                """
+            )
+            query.addBindValue(int(active_session_id))
+            query.addBindValue(method)
+            if query.exec() and query.next():
+                summary[method]["expense"] = float(query.value(0) or 0.0)
+
+            summary[method]["net"] = (
+                summary[method]["received"]
+                - summary[method]["paid"]
+                - summary[method]["expense"]
+            )
+
+        return summary
+
     def close_session_dialog(self, session_data):
-        
-        # You should calculate system_cash before this
         session_id, inflows, outflows = self.get_current_session_cash_flows()
-        print("Session Data is: ", session_id, inflows, outflows)
-        
-        
-        # get opening cash
+        logger.debug(
+            "Daily session close dialog cash flow snapshot",
+            extra={"session_id": session_id, "inflows": inflows, "outflows": outflows},
+        )
+
         opening_cash = self.get_opening_cash()
-        
-        
-        # get expenses
         cash_expenses = self.get_cash_expenses()
-        
-        
+        non_cash_summary = self.get_session_payment_method_summary()
+
         dialog = QDialog(self)
         dialog.setWindowTitle("Close Daily Session")
-        dialog.setMinimumWidth(400)
+        dialog.setMinimumWidth(560)
 
         layout = QVBoxLayout(dialog)
-
         heading = QLabel("Close Daily Session")
         heading.setAlignment(Qt.AlignCenter)
         heading.setStyleSheet("font-size:16px; font-weight:bold;")
         layout.addWidget(heading)
 
         form = QGridLayout()
-
         opening_cash_edit = QLineEdit()
         opening_cash_edit.setReadOnly(True)
         opening_cash_edit.setText(str(session_data.get("opening_cash", 0)))
@@ -307,9 +406,8 @@ class DailySession(QWidget):
             try:
                 system = float(system_cash_edit.text() or 0)
                 actual = float(actual_cash_edit.text() or 0)
-                diff = actual - system
-                difference_edit.setText(str(diff))
-            except:
+                difference_edit.setText(str(actual - system))
+            except ValueError:
                 difference_edit.setText("0")
 
         actual_cash_edit.textChanged.connect(update_difference)
@@ -317,48 +415,92 @@ class DailySession(QWidget):
 
         form.addWidget(QLabel("Opening Cash"), 0, 0)
         form.addWidget(opening_cash_edit, 0, 1)
-
         form.addWidget(QLabel("System Cash"), 1, 0)
         form.addWidget(system_cash_edit, 1, 1)
-
         form.addWidget(QLabel("Actual Cash"), 2, 0)
         form.addWidget(actual_cash_edit, 2, 1)
-
         form.addWidget(QLabel("Withdraw Amount"), 3, 0)
         form.addWidget(withdraw_edit, 3, 1)
-
         form.addWidget(QLabel("Difference"), 4, 0)
         form.addWidget(difference_edit, 4, 1)
-
         layout.addLayout(form)
-        
-        
+
         opening_cash_edit.setText(str(opening_cash))
-        
-        # calculate system cash
         system_cash = opening_cash + inflows - outflows - cash_expenses
-        
         system_cash_edit.setText(str(system_cash))
+
+        non_cash_frame = QFrame()
+        non_cash_frame.setObjectName("sectionCard")
+        non_cash_layout = QVBoxLayout(non_cash_frame)
+        non_cash_layout.setContentsMargins(10, 10, 10, 10)
+        non_cash_layout.setSpacing(8)
+
+        non_cash_title = QLabel("Non-Cash Session Summary")
+        non_cash_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #223746; padding-left: 0;")
+        non_cash_layout.addWidget(non_cash_title)
+
+        non_cash_hint = QLabel("These amounts are informational and are not included in drawer cash.")
+        non_cash_hint.setStyleSheet("font-size: 11px; color: #5A7183; padding-left: 0;")
+        non_cash_layout.addWidget(non_cash_hint)
+
+        non_cash_grid = QGridLayout()
+        non_cash_grid.setHorizontalSpacing(12)
+        non_cash_grid.setVerticalSpacing(6)
+
+        headers = ["Method", "Received", "Paid", "Expense", "Net"]
+        for col, header_text in enumerate(headers):
+            header = QLabel(header_text)
+            header.setStyleSheet("font-weight: 700; color: #2F5D7C; padding-left: 0;")
+            align = Qt.AlignLeft if col == 0 else Qt.AlignRight
+            header.setAlignment(align | Qt.AlignVCenter)
+            non_cash_grid.addWidget(header, 0, col)
+
+        for row, method in enumerate(["Bank Transfer", "EasyPaisa", "JazzCash"], start=1):
+            values = non_cash_summary.get(method, {})
+            method_label = QLabel(method)
+            method_label.setStyleSheet("font-weight: 600; color: #223746; padding-left: 0;")
+            method_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            non_cash_grid.addWidget(method_label, row, 0)
+
+            for col, key in enumerate(["received", "paid", "expense", "net"], start=1):
+                amount = float(values.get(key, 0.0) or 0.0)
+                amount_label = QLabel(f"{amount:,.2f}")
+                color = "#223746"
+                if key == "net" and amount > 0:
+                    color = "#2E7D5A"
+                elif key == "net" and amount < 0:
+                    color = "#B74A4A"
+                amount_label.setStyleSheet(
+                    f"font-weight: {'700' if key == 'net' else '600'}; color: {color}; padding-left: 0;"
+                )
+                amount_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                non_cash_grid.addWidget(amount_label, row, col)
+
+        non_cash_layout.addLayout(non_cash_grid)
+        layout.addWidget(non_cash_frame)
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-
         close_btn = QPushButton("Close Session")
         cancel_btn = QPushButton("Cancel")
-
         btn_layout.addWidget(close_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
-
         cancel_btn.clicked.connect(dialog.reject)
 
         def handle_close():
             try:
-                float(actual_cash_edit.text() or 0)
-                float(withdraw_edit.text() or 0)
+                actual_cash = float(actual_cash_edit.text() or 0)
+                withdraw_amount = float(withdraw_edit.text() or 0)
+                if actual_cash < 0:
+                    AppMessageBox.warning(dialog, "Invalid Input", "Actual cash cannot be negative.")
+                    return
+                if withdraw_amount < 0:
+                    AppMessageBox.warning(dialog, "Invalid Input", "Withdraw amount cannot be negative.")
+                    return
                 dialog.accept()
             except ValueError:
-                return
+                AppMessageBox.warning(dialog, "Invalid Input", "Please enter valid numeric values.")
 
         close_btn.clicked.connect(handle_close)
 
@@ -369,76 +511,81 @@ class DailySession(QWidget):
                 "withdraw_amount": float(withdraw_edit.text() or 0),
                 "cash_difference": float(difference_edit.text() or 0),
             }
+        return None
 
-        return None  
-        
-        
-    
     def get_opening_cash(self):
-        
-        opening_cash = 0.0
+        active_session_id = self._get_strict_active_session_id(action_label="close the session")
+        if active_session_id is None:
+            return 0.0
 
         query = QSqlQuery()
-        query.prepare("""
+        query.prepare(
+            """
             SELECT opening_cash
             FROM daily_session
-            WHERE status = 'open'
-            ORDER BY id DESC
-            LIMIT 1
-        """)
+            WHERE id = ?
+            """
+        )
+        query.addBindValue(int(active_session_id))
 
         if query.exec() and query.next():
-            opening_cash = float(query.value(0) or 0)
+            return float(query.value(0) or 0)
+        return 0.0
 
-        return opening_cash    
-        
-        
-        
+    @Permissions.require_permission('dashboard')
     def handle_open_session(self):
+        logger.info("Handling daily session open request")
+        active_session = check_active_session(strict=True)
+        if active_session.ok:
+            AppMessageBox.info(self, "Session Already Open", "A daily session is already open.")
+            self.update_session_buttons()
+            return
 
-        print("Handling the opening of session")
+        if active_session.code not in {SessionErrorCode.NO_OPEN_SESSION}:
+            self._show_session_state_error(active_session, action_label="open a new session")
+            self.update_session_buttons()
+            return
+
         session_data = self.open_session_dialog()
-
         if not session_data:
             return
 
         query = QSqlQuery()
-        query.prepare("""
-            INSERT INTO daily_session (
-                session_date,
-                opening_cash,
-                status
-            )
+        query.prepare(
+            """
+            INSERT INTO daily_session (session_date, opening_cash, status)
             VALUES (?, ?, 'open')
-        """)
+            """
+        )
         query.addBindValue(session_data["session_date"])
         query.addBindValue(session_data["opening_cash"])
 
         if not query.exec():
-            print("Error opening session:", query.lastError().text())
+            logger.error("Error opening session", extra={"error": query.lastError().text()})
+            AppMessageBox.error(self, "Database Error", f"Could not open daily session.\n\n{query.lastError().text()}")
             return
 
-        self.update_session_buttons()    
-        print("Session opened successfully")
-        
-    
+        self.update_session_buttons()
+        self.load_session_history()
+        AppMessageBox.success(self, "Session Opened", "Daily session opened successfully.")
+        logger.info("Daily session opened successfully")
+
+    @Permissions.require_permission('dashboard')
     def handle_close_session(self):
-
         session = self.get_open_session()
-        
         if not session:
+            AppMessageBox.warning(self, "No Active Session", "There is no active daily session to close.")
             return
-        
 
         result = self.close_session_dialog(session)
-
         if not result:
             return
 
         query = QSqlQuery()
-        query.prepare("""
+        query.prepare(
+            """
             UPDATE daily_session
-            SET 
+            SET
                 system_cash = ?,
                 actual_cash = ?,
                 withdrawal = ?,
@@ -446,8 +593,8 @@ class DailySession(QWidget):
                 closed_at = CURRENT_TIMESTAMP,
                 status = 'closed'
             WHERE id = ?
-        """)
-
+            """
+        )
         query.addBindValue(result["system_cash"])
         query.addBindValue(result["actual_cash"])
         query.addBindValue(result["withdraw_amount"])
@@ -455,123 +602,280 @@ class DailySession(QWidget):
         query.addBindValue(session["id"])
 
         if not query.exec():
-            print("Error closing session:", query.lastError().text())
+            logger.error("Error closing session", extra={"error": query.lastError().text()})
+            AppMessageBox.error(self, "Database Error", f"Could not close daily session.\n\n{query.lastError().text()}")
             return
 
         self.update_session_buttons()
-    
-    
-    
-    def add_current_session_section(self):
-        
-        # ---------------------------
-        # Session Section Frame
-        # ---------------------------
-        session_frame = QFrame()
-        session_frame.setObjectName("sectionCard")
+        self.load_session_history()
+        AppMessageBox.success(self, "Session Closed", "Daily session closed successfully.")
 
-        session_layout = QVBoxLayout(session_frame)
-        session_layout.setContentsMargins(5, 10, 5, 10)
-        session_layout.setSpacing(8)
-
-        # Top Row Layout
-        top_row = QHBoxLayout()
-        top_row.setSpacing(15)
-
-        self.session_msg = QLabel("")
-        self.open_session = QPushButton("Open Day", objectName="TopRightButton")
-        self.close_session = QPushButton("Close Day", objectName="TopRightButton")
-        
-        
-        self.open_session.clicked.connect(self.handle_open_session)
-        self.close_session.clicked.connect(self.handle_close_session)
-        
-        # Add widgets
-        top_row.addWidget(self.session_msg, 10)
-        top_row.addWidget(self.open_session, 1)
-        top_row.addWidget(self.close_session, 1)
-        
-        
-        spacer = QLabel()
-        top_row.addWidget(spacer)
-           
-        session_layout.addLayout(top_row)
-
-        # Add frame to main layout
-        self.layout.addWidget(session_frame)
-        
-        
-        
-        
-    
     def update_session_buttons(self):
-
-        session = self.get_open_session()
-
-        if session:  # session is open
-            self.open_session.hide()
-            self.close_session.show()
+        session_check = check_active_session(strict=True)
+        if session_check.ok:
             self.session_msg.setText("Session is OPEN")
-        else:        # no open session
-            self.open_session.show()
-            self.close_session.hide()
+        elif session_check.code == SessionErrorCode.NO_OPEN_SESSION:
             self.session_msg.setText("No active session")
-    
-    
-    
-    
+        elif session_check.code == SessionErrorCode.MULTIPLE_OPEN_SESSIONS:
+            self.session_msg.setText("Session data error: multiple open sessions")
+        else:
+            self.session_msg.setText("Session status unavailable")
 
     def get_current_session_cash_flows(self):
-        
-        session_id = None
-        inflows = 0.0
-        outflows = 0.0
-
-        # Get current open session
-        session_query = QSqlQuery()
-        session_query.prepare("""
-            SELECT id
-            FROM daily_session
-            WHERE status = 'open'
-            ORDER BY id DESC
-            LIMIT 1
-        """)
-
-        if not (session_query.exec() and session_query.next()):
+        session_id = self._get_strict_active_session_id(action_label="close the session")
+        if session_id is None:
             return None, 0.0, 0.0
-
-        session_id = int(session_query.value(0))
 
         def fetch_sums(table_name):
             query = QSqlQuery()
-            query.prepare(f"""
+            query.prepare(
+                f"""
                 SELECT
                     COALESCE(SUM(received), 0),
                     COALESCE(SUM(paid), 0)
                 FROM {table_name}
                 WHERE session_id = ?
-                AND payment_method = 'Cash'
-            """)
+                  AND payment_method = 'Cash'
+                """
+            )
             query.addBindValue(session_id)
 
             if query.exec() and query.next():
-                received = float(query.value(0) or 0)
-                paid = float(query.value(1) or 0)
-                return received, paid
-
+                return float(query.value(0) or 0), float(query.value(1) or 0)
             return 0.0, 0.0
 
         customer_received, customer_paid = fetch_sums("customer_transaction")
         supplier_received, supplier_paid = fetch_sums("supplier_transaction")
+        return session_id, customer_received + supplier_received, customer_paid + supplier_paid
 
-        inflows = customer_received + supplier_received
-        outflows = customer_paid + supplier_paid
+    def add_history_summary_section(self):
+        summary_frame = QFrame()
+        summary_frame.setObjectName("sectionCard")
+        summary_layout = QHBoxLayout(summary_frame)
+        summary_layout.setContentsMargins(10, 10, 10, 10)
+        summary_layout.setSpacing(10)
 
-        return session_id, inflows, outflows
+        self.session_msg = QLabel("")
+        self.session_msg.setStyleSheet("font-weight: 600; color: #2F5D7C;")
+        summary_layout.addWidget(self.session_msg)
+        summary_layout.addStretch()
 
+        hint = QLabel("Open and close sessions from the Dashboard page.")
+        hint.setStyleSheet("color: #666;")
+        summary_layout.addWidget(hint)
 
+        self.layout.addWidget(summary_frame)
 
+    def add_session_filters_section(self):
+        filter_frame = QFrame()
+        filter_frame.setObjectName("sectionCard")
+        filter_layout = QHBoxLayout(filter_frame)
+        filter_layout.setContentsMargins(10, 10, 10, 10)
+        filter_layout.setSpacing(12)
 
+        count_label = QLabel("Show")
+        count_label.setStyleSheet("font-weight: 600; color: #444;")
+        filter_layout.addWidget(count_label)
 
+        self.session_count_combo = QComboBox()
+        self.session_count_combo.addItems(["10", "25", "50", "100"])
+        self.session_count_combo.setCurrentText("10")
+        self.session_count_combo.currentTextChanged.connect(self.load_session_history)
+        filter_layout.addWidget(self.session_count_combo)
 
+        status_label = QLabel("Status")
+        status_label.setStyleSheet("font-weight: 600; color: #444;")
+        filter_layout.addWidget(status_label)
 
+        self.session_status_combo = QComboBox()
+        self.session_status_combo.addItems(["All", "Open", "Closed"])
+        self.session_status_combo.currentTextChanged.connect(self.load_session_history)
+        filter_layout.addWidget(self.session_status_combo)
+
+        date_from_label = QLabel("From")
+        date_from_label.setStyleSheet("font-weight: 600; color: #444;")
+        filter_layout.addWidget(date_from_label)
+
+        self.session_date_from = QDateEdit()
+        self.session_date_from.setCalendarPopup(True)
+        self.session_date_from.setDisplayFormat("yyyy-MM-dd")
+        self.session_date_from.setSpecialValueText("Any")
+        self.session_date_from.setDateRange(QDate(2000, 1, 1), QDate(2099, 12, 31))
+        self.session_date_from.setDate(QDate(2000, 1, 1))
+        self.session_date_from.dateChanged.connect(self.load_session_history)
+        filter_layout.addWidget(self.session_date_from)
+
+        date_to_label = QLabel("To")
+        date_to_label.setStyleSheet("font-weight: 600; color: #444;")
+        filter_layout.addWidget(date_to_label)
+
+        self.session_date_to = QDateEdit()
+        self.session_date_to.setCalendarPopup(True)
+        self.session_date_to.setDisplayFormat("yyyy-MM-dd")
+        self.session_date_to.setSpecialValueText("Any")
+        self.session_date_to.setDateRange(QDate(2000, 1, 1), QDate(2099, 12, 31))
+        self.session_date_to.setDate(QDate(2000, 1, 1))
+        self.session_date_to.dateChanged.connect(self.load_session_history)
+        filter_layout.addWidget(self.session_date_to)
+
+        self.session_date_clear_btn = QPushButton("Clear Dates", objectName="TopRightButton")
+        self.session_date_clear_btn.setCursor(Qt.PointingHandCursor)
+        self.session_date_clear_btn.clicked.connect(self.clear_session_date_filters)
+        filter_layout.addWidget(self.session_date_clear_btn)
+
+        filter_layout.addStretch()
+
+        self.session_summary_label = QLabel("")
+        self.session_summary_label.setStyleSheet("color: #666;")
+        filter_layout.addWidget(self.session_summary_label)
+
+        self.session_reload_btn = QPushButton("Reload", objectName="TopRightButton")
+        self.session_reload_btn.setCursor(Qt.PointingHandCursor)
+        self.session_reload_btn.clicked.connect(self.load_session_history)
+        filter_layout.addWidget(self.session_reload_btn)
+
+        self.layout.addWidget(filter_frame)
+
+    def clear_session_date_filters(self):
+        minimum_date = QDate(2000, 1, 1)
+        self.session_date_from.blockSignals(True)
+        self.session_date_to.blockSignals(True)
+        self.session_date_from.setDate(minimum_date)
+        self.session_date_to.setDate(minimum_date)
+        self.session_date_from.blockSignals(False)
+        self.session_date_to.blockSignals(False)
+        self.load_session_history()
+
+    def add_session_history_section(self):
+        history_frame = QFrame()
+        history_frame.setObjectName("sectionCard")
+        history_layout = QVBoxLayout(history_frame)
+        history_layout.setContentsMargins(10, 10, 10, 10)
+        history_layout.setSpacing(8)
+
+        title_row = QHBoxLayout()
+        title = QLabel("Session History")
+        title.setObjectName("SectionTitle")
+        title_row.addWidget(title)
+        title_row.addStretch()
+        history_layout.addLayout(title_row)
+
+        self.session_table = MyTable(
+            column_ratios=[0.06, 0.10, 0.12, 0.10, 0.10, 0.10, 0.10, 0.10, 0.09, 0.13]
+        )
+        headers = [
+            "ID", "Date", "Opened At", "Opening", "System", "Actual",
+            "Withdraw", "Difference", "Status", "Closed At",
+        ]
+        self.session_table.setColumnCount(len(headers))
+        self.session_table.setHorizontalHeaderLabels(headers)
+        self.session_table.verticalHeader().setVisible(False)
+        self.session_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.session_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.session_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.session_table.setAlternatingRowColors(True)
+        self.session_table.setWordWrap(False)
+        self.session_table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.session_table.setMinimumWidth(900)
+        self.session_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        history_layout.addWidget(self.session_table)
+        self.layout.addWidget(history_frame)
+
+    def load_session_history(self):
+        try:
+            limit = int(self.session_count_combo.currentText() or "10")
+        except Exception:
+            limit = 10
+
+        status_filter = str(self.session_status_combo.currentText() or "All").strip().lower()
+        minimum_date = QDate(2000, 1, 1)
+        date_from = self.session_date_from.date() if self.session_date_from.date() > minimum_date else None
+        date_to = self.session_date_to.date() if self.session_date_to.date() > minimum_date else None
+
+        query = QSqlQuery()
+        sql = """
+            SELECT
+                id,
+                COALESCE(session_date, ''),
+                COALESCE(opened_at, ''),
+                COALESCE(opening_cash, 0),
+                COALESCE(system_cash, 0),
+                COALESCE(actual_cash, 0),
+                COALESCE(withdrawal, 0),
+                COALESCE(cash_difference, 0),
+                COALESCE(status, ''),
+                COALESCE(closed_at, '')
+            FROM daily_session
+        """
+        where_clauses = []
+        bind_values = []
+
+        if status_filter in {"open", "closed"}:
+            where_clauses.append("LOWER(COALESCE(status, '')) = ?")
+            bind_values.append(status_filter)
+        if date_from is not None:
+            where_clauses.append("DATE(COALESCE(session_date, opened_at, closed_at)) >= ?")
+            bind_values.append(date_from.toString("yyyy-MM-dd"))
+        if date_to is not None:
+            where_clauses.append("DATE(COALESCE(session_date, opened_at, closed_at)) <= ?")
+            bind_values.append(date_to.toString("yyyy-MM-dd"))
+
+        if where_clauses:
+            sql += " WHERE " + " AND ".join(where_clauses)
+        sql += " ORDER BY id DESC LIMIT ?"
+
+        query.prepare(sql)
+        for value in bind_values:
+            query.addBindValue(value)
+        query.addBindValue(limit)
+
+        if not query.exec():
+            self.session_table.setRowCount(0)
+            self.session_summary_label.setText("Could not load sessions")
+            AppMessageBox.critical(self, "Database Error", f"Could not load sessions.\n\n{query.lastError().text()}")
+            return
+
+        rows = []
+        while query.next():
+            row = []
+            for col in range(10):
+                value = query.value(col)
+                if 3 <= col <= 7:
+                    try:
+                        row.append(f"{float(value or 0):.2f}")
+                    except Exception:
+                        row.append("0.00")
+                else:
+                    row.append(str(value or ""))
+            rows.append(row)
+
+        self.session_table.setRowCount(len(rows))
+        for r, values in enumerate(rows):
+            status_text = str(values[8] or "").strip().lower()
+            if status_text == "open":
+                bg_color = QColor("#E7F6EC")
+            elif status_text == "closed":
+                bg_color = QColor("#EEF3F8")
+            else:
+                bg_color = QColor("#FFFFFF")
+            for c, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                item.setBackground(bg_color)
+                if c == 8:
+                    if status_text == "open":
+                        item.setForeground(Qt.darkGreen)
+                    elif status_text == "closed":
+                        item.setForeground(Qt.darkBlue)
+                self.session_table.setItem(r, c, item)
+
+        filter_label = status_filter.title() if status_filter in {"open", "closed"} else "All"
+        date_parts = []
+        if date_from is not None:
+            date_parts.append(f"From {date_from.toString('yyyy-MM-dd')}")
+        if date_to is not None:
+            date_parts.append(f"To {date_to.toString('yyyy-MM-dd')}")
+        date_summary = " | ".join(date_parts) if date_parts else "All dates"
+        self.session_summary_label.setText(
+            f"Showing {len(rows)} session(s) | Filter: {filter_label} | {date_summary}"
+        )

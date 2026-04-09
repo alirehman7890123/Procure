@@ -7,8 +7,11 @@ from PySide6.QtGui import QKeySequence, QShortcut
 
 from utilities.stylus import load_stylesheets
 from utilities.payment_handler import PaymentMethodHandler
+from utilities.permissions import Permissions
     
-from utilities.get_session import get_current_session
+from utilities.session_gate import require_open_session
+from utilities.session_service import get_active_session_id
+from utilities.app_messagebox import AppMessageBox
 
 
 
@@ -20,18 +23,18 @@ class CreateCustomerTransactionWidget(QWidget):
         super().__init__(parent)
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Receive / Refund Payment by Customer", objectName="SectionTitle")
         self.transactionlist = QPushButton("All Transactions", objectName="TopRightButton")
         self.transactionlist.setCursor(Qt.PointingHandCursor)
-        self.transactionlist.setFixedWidth(200)
 
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.transactionlist)
 
         self.layout.addLayout(header_layout)
@@ -48,7 +51,7 @@ class CreateCustomerTransactionWidget(QWidget):
         """)
 
         self.layout.addWidget(line)
-        self.layout.addSpacing(20)
+        self.layout.addSpacing(10)
 
         # === Customer Information Section ===
         customer_heading_layout = QHBoxLayout()
@@ -309,7 +312,7 @@ class CreateCustomerTransactionWidget(QWidget):
     #             else:
     #                 excess = received_amount - receiveable_before
 
-    #                 reply = QMessageBox.question(
+    #                 reply = AppMessageBox.question(
     #                     self,
     #                     "Excess Receipt",
     #                     "Received exceeds receivable.\n"
@@ -336,7 +339,7 @@ class CreateCustomerTransactionWidget(QWidget):
     #             else:
     #                 excess = paid_amount - payable_before
 
-    #                 reply = QMessageBox.question(
+    #                 reply = AppMessageBox.question(
     #                     self,
     #                     "Excess Refund",
     #                     "Refund exceeds payable.\n"
@@ -397,7 +400,7 @@ class CreateCustomerTransactionWidget(QWidget):
 
     #         db.commit()
 
-    #         QMessageBox.information(self, "Success", "Customer Transaction Saved Successfully.")
+    #         AppMessageBox.information(self, "Success", "Customer Transaction Saved Successfully.")
 
     #         self.load_data(self.cust_id)
     #         self.paid.setText("0")
@@ -406,15 +409,19 @@ class CreateCustomerTransactionWidget(QWidget):
 
     #     except Exception as e:
     #         db.rollback()
-    #         QMessageBox.critical(self, "Error", str(e))
+    #         AppMessageBox.critical(self, "Error", str(e))
 
     
+    @Permissions.require_permission('transactions.create')
     def save_payment(self):
+
+        if not require_open_session(self):
+            return
         
         db = QSqlDatabase.database()
 
         if not db.transaction():
-            QMessageBox.critical(self, "Error", "Could not start database transaction.")
+            AppMessageBox.critical(self, "Error", "Could not start database transaction.")
             return
 
         try:
@@ -424,7 +431,7 @@ class CreateCustomerTransactionWidget(QWidget):
             if not db.commit():
                 raise Exception("Could not commit customer transaction.")
 
-            QMessageBox.information(self, "Success", "Customer Transaction Saved Successfully.")
+            AppMessageBox.information(self, "Success", "Customer Transaction Saved Successfully.")
 
             self.load_data(self.cust_id)
             self.paid.setText("0")
@@ -433,7 +440,7 @@ class CreateCustomerTransactionWidget(QWidget):
 
         except Exception as e:
             db.rollback()
-            QMessageBox.critical(self, "Error", str(e))
+            AppMessageBox.critical(self, "Error", str(e))
 
 
     def _collect_customer_payment_data(self):
@@ -484,8 +491,8 @@ class CreateCustomerTransactionWidget(QWidget):
             received = received_amount
 
             due_amount = 0.0
-            remaining_due = payable_before
-            receiveable_now = receiveable_before
+            remaining_due = 0.0
+            receiveable_now = 0.0
 
             if received_amount <= receiveable_before:
                 remaining_now = receiveable_before - received_amount
@@ -494,21 +501,23 @@ class CreateCustomerTransactionWidget(QWidget):
             else:
                 excess = received_amount - receiveable_before
 
-                reply = QMessageBox.question(
+                _, accepted = AppMessageBox.confirm(
                     self,
                     "Excess Receipt",
                     "Received exceeds receivable.\n"
                     "Excess will be moved to Payable.\n\nContinue?",
-                    QMessageBox.Yes | QMessageBox.No
+                    confirm_label="Continue",
+                    cancel_label="Cancel",
+                    kind="warning",
                 )
 
-                if reply == QMessageBox.No:
+                if not accepted:
                     raise Exception("Transaction cancelled.")
 
                 remaining_now = 0.0
                 receiveable_after = 0.0
                 payable_after = payable_before + excess
-                remaining_due = payable_after
+                remaining_due = excess
 
         # ====================================
         # REFUND (You pay customer)
@@ -523,20 +532,22 @@ class CreateCustomerTransactionWidget(QWidget):
                 remaining_due = payable_before - paid_amount
                 payable_after = remaining_due
                 receiveable_now = 0.0
-                remaining_now = receiveable_before
+                remaining_now = 0.0
                 receiveable_after = receiveable_before
             else:
                 excess = paid_amount - payable_before
 
-                reply = QMessageBox.question(
+                _, accepted = AppMessageBox.confirm(
                     self,
                     "Excess Refund",
                     "Refund exceeds payable.\n"
                     "Excess will be moved to Receivable.\n\nContinue?",
-                    QMessageBox.Yes | QMessageBox.No
+                    confirm_label="Continue",
+                    cancel_label="Cancel",
+                    kind="warning",
                 )
 
-                if reply == QMessageBox.No:
+                if not accepted:
                     raise Exception("Transaction cancelled.")
 
                 remaining_due = 0.0
@@ -545,7 +556,7 @@ class CreateCustomerTransactionWidget(QWidget):
                 remaining_now = receiveable_before + excess
                 receiveable_after = receiveable_before + excess
 
-        session_id = get_current_session(self)
+        session_id = get_active_session_id(strict=True)
         if session_id is None:
             raise Exception("No active session found.")
 
@@ -670,4 +681,3 @@ class CreateCustomerTransactionWidget(QWidget):
             
             
             
-

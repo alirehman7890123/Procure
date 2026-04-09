@@ -20,17 +20,17 @@ class SalesDetailWidget(QWidget):
         super().__init__(parent)
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Receipt Detail", objectName="SectionTitle")
         self.receiptlist = QPushButton("Receipt List", objectName="TopRightButton")
         self.receiptlist.setCursor(Qt.PointingHandCursor)
-        self.receiptlist.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.receiptlist)
 
         self.layout.addLayout(header_layout)
@@ -52,15 +52,16 @@ class SalesDetailWidget(QWidget):
         self.layout.addSpacing(20)
         
         
-        labels = ["Receipt Id", "Customer", "Salesman",  "Order Date"]
+        labels = ["Receipt Id", "Customer", "Salesman", "Order Date", "Due Date"]
         
         
         self.orderid = QLabel()
         self.customer = QLabel()
         self.salesman = QLabel()
         self.orderdate = QLabel()
+        self.duedate = QLabel("No Due Date")
         
-        fields = [self.orderid, self.customer, self.salesman, self.orderdate]
+        fields = [self.orderid, self.customer, self.salesman, self.orderdate, self.duedate]
         
         for (label, field) in zip(labels, fields):
 
@@ -82,8 +83,8 @@ class SalesDetailWidget(QWidget):
         
         self.row_height = 40
 
-        self.table = MyTable(column_ratios=[0.05, 0.25, 0.15, 0.20, 0.15, 0.10, 0.10])
-        headers = ["##", "Product", "Qty", "Rate", "Disc (%)", "Disc", "Total"]
+        self.table = MyTable(column_ratios=[0.05, 0.24, 0.12, 0.16, 0.11, 0.10, 0.10, 0.12])
+        headers = ["##", "Product", "Qty", "Rate", "Disc (%)", "Disc", "Tax (%)", "Total"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         
@@ -116,16 +117,42 @@ class SalesDetailWidget(QWidget):
         
 
         
-        labels = ["Sub Total", "Discount", "Tax", "Total", "Round off", "Final Amount"]
+        labels = [
+            "Sub Total",
+            "Discount",
+            "Taxable",
+            "Tax",
+            "Net Amount",
+            "Additional Charges",
+            "Grand Total",
+            "Received",
+            "Remaining",
+            "Write-Off",
+        ]
         
         self.subtotal = QLabel()
         self.discount = QLabel()
+        self.taxable = QLabel()
         self.tax = QLabel()
         self.total = QLabel()
         self.roundoff = QLabel()
         self.finalamount = QLabel()
+        self.received = QLabel()
+        self.remaining = QLabel()
+        self.writeoff = QLabel()
         
-        fields = [ self.subtotal, self.discount, self.tax, self.total, self.roundoff, self.finalamount ]
+        fields = [
+            self.subtotal,
+            self.discount,
+            self.taxable,
+            self.tax,
+            self.total,
+            self.roundoff,
+            self.finalamount,
+            self.received,
+            self.remaining,
+            self.writeoff,
+        ]
         
         
         for (label, field) in zip(labels, fields):
@@ -166,7 +193,27 @@ class SalesDetailWidget(QWidget):
         
         print("Loading Sales ID:", id)
         query = QSqlQuery()
-        query.prepare("SELECT customer,salesman,creation_date,subtotal,discount,taxable, tax,net_amount, additional_charges,total, received, remaining, writeoff FROM sales WHERE id = ?")
+        query.prepare(
+            """
+            SELECT
+                customer,
+                salesman,
+                creation_date,
+                subtotal,
+                discount,
+                taxable,
+                tax,
+                net_amount,
+                additional_charges,
+                total,
+                received,
+                remaining,
+                writeoff,
+                due_date
+            FROM sales
+            WHERE id = ?
+            """
+        )
         query.addBindValue(id)
         
         if query.exec() and query.next():
@@ -208,6 +255,7 @@ class SalesDetailWidget(QWidget):
             received = float(query.value(10))
             remaining = float(query.value(11))
             writeoff = float(query.value(12))
+            due_date = query.value(13)
             
 
 
@@ -233,12 +281,17 @@ class SalesDetailWidget(QWidget):
             self.customer.setText(str(customer))
             self.salesman.setText(str(salesman))
             self.orderdate.setText(str(invoicedate))
-            self.subtotal.setText(str(subtotal))
-            self.discount.setText(str(discount))
-            self.tax.setText(str(tax))
-            self.total.setText(str(net_amount))
-            self.roundoff.setText(str(additional_charges))
-            self.finalamount.setText(str(total))
+            self.duedate.setText(str(due_date or "No Due Date"))
+            self.subtotal.setText(f"{subtotal:.2f}")
+            self.discount.setText(f"{discount:.2f}")
+            self.taxable.setText(f"{taxable:.2f}")
+            self.tax.setText(f"{tax:.2f}")
+            self.total.setText(f"{net_amount:.2f}")
+            self.roundoff.setText(f"{additional_charges:.2f}")
+            self.finalamount.setText(f"{total:.2f}")
+            self.received.setText(f"{received:.2f}")
+            self.remaining.setText(f"{remaining:.2f}")
+            self.writeoff.setText(f"{writeoff:.2f}")
         
             print("Sales data loaded successfully for ID:", id)
             
@@ -257,7 +310,7 @@ class SalesDetailWidget(QWidget):
 
         query = QSqlQuery()
         query.prepare("""
-            SELECT product_id, qty_sold, unit_price, discount, tax, line_total
+            SELECT product_id, qty_sold, unit_price, discount, discount_amount, tax, line_total
             FROM salesitem 
             WHERE sales_id = ?
         """)
@@ -274,8 +327,9 @@ class SalesDetailWidget(QWidget):
                 qty = str(query.value(1))
                 rate = str(query.value(2))
                 discount = str(query.value(3))
-                tax = str(query.value(4))
-                total = str(query.value(5))
+                discount_amount = str(query.value(4))
+                tax = str(query.value(5))
+                total = str(query.value(6))
 
                 # Get product name
                 product_name = ""
@@ -301,8 +355,9 @@ class SalesDetailWidget(QWidget):
                 self.table.setItem(row, 2, qty_item)
                 self.table.setItem(row, 3, rate_item)
                 self.table.setItem(row, 4, discount_item)
-                self.table.setItem(row, 5, tax_item)
-                self.table.setItem(row, 6, total_item)
+                self.table.setItem(row, 5, QTableWidgetItem(discount_amount))
+                self.table.setItem(row, 6, tax_item)
+                self.table.setItem(row, 7, total_item)
 
                 row += 1
         else:
@@ -326,7 +381,22 @@ class SalesDetailWidget(QWidget):
         # Loading Sales data 
         
         salesquery = QSqlQuery()
-        salesquery.prepare("SELECT customer,salesman,creation_date,subtotal,discamount,taxamount,totalaftertax,roundoff,total FROM sales WHERE id = ?")
+        salesquery.prepare(
+            """
+            SELECT
+                customer,
+                salesman,
+                creation_date,
+                subtotal,
+                discount,
+                tax,
+                net_amount,
+                additional_charges,
+                total
+            FROM sales
+            WHERE id = ?
+            """
+        )
         salesquery.addBindValue(sales_id)
         
         if salesquery.exec() and salesquery.next():
@@ -390,9 +460,9 @@ class SalesDetailWidget(QWidget):
         
         query = QSqlQuery()
         query.prepare("""
-            SELECT product, qty, unitrate, discount, discountamount, total
+            SELECT product_id, qty_sold, unit_price, discount, discount_amount, line_total
             FROM salesitem 
-            WHERE sales = ?
+            WHERE sales_id = ?
         """)
         query.addBindValue(sales_id)
         
@@ -422,17 +492,11 @@ class SalesDetailWidget(QWidget):
                 # Get product name
                 product_name = ""
                 query2 = QSqlQuery()
-                query2.prepare("SELECT name, strength, form FROM product WHERE id = ?")
+                query2.prepare("SELECT display_name FROM product WHERE id = ?")
                 query2.addBindValue(product_id)
 
                 if query2.exec() and query2.next():
                     product_name = query2.value(0)
-                    strength = query2.value(1)
-                    form = query2.value(2)
-                    if strength:
-                        product_name += f" {strength}"
-                    if form:
-                        product_name += f" {form}"
                 else:
                     print("Product not found for ID:", product_id)
                     
@@ -675,12 +739,4 @@ class MyTable(QTableWidget):
 
             
         
-
-
-
-
-
-
-
-
 

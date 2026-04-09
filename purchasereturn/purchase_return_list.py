@@ -17,17 +17,17 @@ class PurchaseReturnListWidget(QWidget):
         super().__init__(parent)
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(40, 40, 40, 40)
-        self.layout.setSpacing(20)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Purchase Return List", objectName="SectionTitle")
         self.addPurchaseReturn = QPushButton("Purchase Returns List", objectName="TopRightButton")
         self.addPurchaseReturn.setCursor(Qt.PointingHandCursor)
-        self.addPurchaseReturn.setFixedWidth(200)
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
+        header_layout.addStretch()
         header_layout.addWidget(self.addPurchaseReturn)
 
         self.layout.addLayout(header_layout)
@@ -48,7 +48,7 @@ class PurchaseReturnListWidget(QWidget):
         self.layout.addWidget(line)
         self.layout.addSpacing(20)
         
-        self.row_height = 40
+        self.row_height = 35
         self.min_visible_rows = 5
         
     

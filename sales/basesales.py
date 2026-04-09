@@ -79,8 +79,10 @@ class BaseSalesWidget(BasePage):
         
         
     def reset_to_default(self):
-        self.stacked_layout.setCurrentWidget(self.createsales_widget)
-
+        if Permissions.has_permission('sales.view'):
+            self.stacked_layout.setCurrentWidget(self.receiptlist_widget)
+        elif Permissions.has_permission('sales.create'):
+            self.stacked_layout.setCurrentWidget(self.createsales_widget)
 
 
 
