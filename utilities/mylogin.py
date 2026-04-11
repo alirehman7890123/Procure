@@ -34,6 +34,7 @@ from utilities.sizehintfinder import print_size_hints
 from functools import wraps
 from PySide6.QtWidgets import QMessageBox, QApplication
 from utilities.permissions import Permissions
+from utilities.license_core import get_current_license_payload, get_license_days_remaining, is_demo_license
 
 
 
@@ -69,8 +70,11 @@ class MainWindow(QMainWindow):
     def __init__(self):
 
         super().__init__()
-        
-        self.setWindowTitle('ProCure Medical - Login')
+        self.license_payload = get_current_license_payload()
+        self.demo_mode = is_demo_license(self.license_payload)
+        self.demo_days_remaining = get_license_days_remaining(self.license_payload)
+
+        self.setWindowTitle(self._build_window_title())
         
         connection = SQLiteConnectionManager('ProcureApp')
         # connection = PostgresConnectionManager()
@@ -507,6 +511,7 @@ class MainWindow(QMainWindow):
 
     
         self.apply_role_permissions()
+        self.apply_demo_restrictions()
 
 
 
@@ -654,6 +659,28 @@ class MainWindow(QMainWindow):
         self.main_content_layout.currentChanged.connect(self.on_main_page_changed)
         QTimer.singleShot(0, self.initialize_navigation_history)
         
+        
+        
+    def _build_window_title(self):
+        if not self.demo_mode:
+            return 'ProCure Medical - Login'
+
+        if self.demo_days_remaining is None:
+            return 'ProCure Medical - Demo'
+
+        day_label = "day" if self.demo_days_remaining == 1 else "days"
+        return f'ProCure Medical - Demo ({self.demo_days_remaining} {day_label} left)'
+
+    def apply_demo_restrictions(self):
+        if not self.demo_mode:
+            return
+
+        demo_tooltip = "Reports are unavailable in the 15-day demo."
+        self.reports_button.setEnabled(False)
+        self.rail_reports_button.setEnabled(False)
+        self.reports_button.setToolTip(demo_tooltip)
+        self.rail_reports_button.setToolTip(demo_tooltip)
+
         
         
     
@@ -868,6 +895,13 @@ class MainWindow(QMainWindow):
     
         
     def set_reports(self, widget, layout):
+        if self.demo_mode:
+            AppMessageBox.warning(
+                self,
+                "Demo Restriction",
+                "Reports are disabled in the 15-day demo. Install a full license to unlock them.",
+            )
+            return
         if not self._require_any_permission(("reports.view",), "Reports"):
             return
         self.navigate_to_page(widget, layout)

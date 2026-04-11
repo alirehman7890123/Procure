@@ -8,6 +8,7 @@ from utilities.stylus import load_stylesheets
 from utilities.table_helpers import centered_cell_widget, style_table_action_button
 
 
+
 class MyTable(QTableWidget):
     def __init__(self, column_ratios=None, parent=None):
         super().__init__(parent)

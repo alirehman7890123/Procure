@@ -2306,19 +2306,20 @@ class AuthWindow(QMainWindow):
 
     
 
-from utilities.license import LicenseDialog
+from utilities.license import ensure_valid_license
 from utilities.app_messagebox import AppMessageBox
 
 if __name__ == '__main__':
 
     app = QApplication([])
-    
+
+    if not ensure_valid_license():
+        sys.exit(0)
+
     window = AuthWindow()
     window.show()
-    
-    license_dialog = LicenseDialog()
-    
-    app.exec()
+
+    sys.exit(app.exec())
     
     
     

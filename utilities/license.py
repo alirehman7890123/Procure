@@ -1,40 +1,30 @@
-# gimmick_license.py
-import sys
-import os
-import uuid
-import hashlib
+import json
+from pathlib import Path
+
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QVBoxLayout, QLabel, QLineEdit,
-    QPushButton, QMessageBox, QMainWindow
+    QApplication,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QPlainTextEdit,
+    QVBoxLayout,
 )
-from PySide6.QtCore import Qt, QTimer
+
 from utilities.app_messagebox import AppMessageBox
-
-LICENSE_FILE = os.path.expanduser("~/.myapp_license_key")  # simple local store
-
-
-def get_machine_id_short():
-    mac = uuid.getnode()
-    # short readable id (not secure) — just for show
-    return hashlib.sha1(str(mac).encode()).hexdigest()[:12].upper()
-
-
-def save_license(key: str):
-    try:
-        with open(LICENSE_FILE, "w") as f:
-            f.write(key)
-    except Exception:
-        pass
-
-
-def load_saved_license():
-    try:
-        if os.path.exists(LICENSE_FILE):
-            with open(LICENSE_FILE, "r") as f:
-                return f.read().strip()
-    except Exception:
-        pass
-    return None
+from utilities.license_core import (
+    LICENSE_PATH,
+    LicenseError,
+    get_machine_id_short,
+    get_machine_request_payload,
+    load_and_validate_saved_license,
+    parse_license_text,
+    save_license_text,
+    validate_license_document,
+)
 
 
 class LicenseDialog(QDialog):
@@ -42,97 +32,118 @@ class LicenseDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Activation Required")
         self.setWindowModality(Qt.ApplicationModal)
-        self.setFixedWidth(420)
+        self.setMinimumWidth(560)
 
-        self.layout = QVBoxLayout()
-        self.setLayout(self.layout)
+        self.layout = QVBoxLayout(self)
+        self.layout.setSpacing(10)
 
-        self._info = QLabel(
-            "This copy requires activation.\n"
-            "Please enter the activation key provided to you.\n"
-            "Machine ID (for activation):"
+        self.info_label = QLabel(
+            "This machine is not activated yet.\n"
+            "Send the Machine ID to the vendor, then paste or import the license file you receive."
         )
-        self.layout.addWidget(self._info)
+        self.info_label.setWordWrap(True)
+        self.layout.addWidget(self.info_label)
 
-        self.machine_id = QLabel(get_machine_id_short())
-        self.machine_id.setStyleSheet("font-family: monospace; font-weight: bold;")
-        self.layout.addWidget(self.machine_id)
+        self.machine_id_input = QLineEdit(get_machine_id_short())
+        self.machine_id_input.setReadOnly(True)
+        self.machine_id_input.setStyleSheet("font-family: monospace; font-weight: 700;")
 
-        self.layout.addSpacing(6)
-        self.key_input = QLineEdit()
-        self.key_input.setPlaceholderText("Enter activation key here")
-        self.layout.addWidget(self.key_input)
+        machine_row = QHBoxLayout()
+        machine_label = QLabel("Machine ID")
+        copy_button = QPushButton("Copy")
+        copy_button.clicked.connect(self.copy_machine_request)
+        machine_row.addWidget(machine_label)
+        machine_row.addWidget(self.machine_id_input, 1)
+        machine_row.addWidget(copy_button)
+        self.layout.addLayout(machine_row)
 
-        self.activate_btn = QPushButton("Activate")
-        self.activate_btn.clicked.connect(self._on_activate)
-        self.layout.addWidget(self.activate_btn)
+        self.request_box = QPlainTextEdit()
+        self.request_box.setReadOnly(True)
+        self.request_box.setPlainText(json.dumps(get_machine_request_payload(), indent=2))
+        self.request_box.setPlaceholderText("Machine request details")
+        self.request_box.setMaximumHeight(140)
+        self.layout.addWidget(self.request_box)
 
-        self.status = QLabel("")  # status text (verifying / success / fail)
-        self.layout.addWidget(self.status)
+        self.license_input = QPlainTextEdit()
+        self.license_input.setPlaceholderText("Paste the full license JSON here")
+        self.license_input.setMinimumHeight(180)
+        self.layout.addWidget(self.license_input)
 
-        # keep small hint to user
-        self.layout.addStretch()
+        button_row = QHBoxLayout()
+        import_button = QPushButton("Import License File")
+        import_button.clicked.connect(self.import_license_file)
+        activate_button = QPushButton("Activate")
+        activate_button.clicked.connect(self.activate_license)
+        button_row.addWidget(import_button)
+        button_row.addStretch(1)
+        button_row.addWidget(activate_button)
+        self.layout.addLayout(button_row)
 
-    def _on_activate(self):
-        key = self.key_input.text().strip()
-        if not key:
-            AppMessageBox.warning(self, "No key", "Please enter a key to continue.")
-            return
+        self.status_label = QLabel("")
+        self.status_label.setWordWrap(True)
+        self.layout.addWidget(self.status_label)
 
-        # disable UI while "verifying"
-        self.key_input.setEnabled(False)
-        self.activate_btn.setEnabled(False)
-        self.status.setText("Verifying activation key…")
-        QApplication.processEvents()
-
-        # fake network / heavy check delay (2 seconds)
-        QTimer.singleShot(2000, lambda: self._finish_verify(key))
-
-    def _finish_verify(self, key):
-        # GIMMICK LOGIC: accept any non-empty key (we'll make it feel "real")
-        # You can replace this with actual server or cryptographic check later.
-        accepted = bool(key)
-
-        if accepted:
-            save_license(key)
-            self.status.setText("Activation successful ✅")
-            QTimer.singleShot(600, self.accept)  # close shortly after success
+        startup_result = load_and_validate_saved_license()
+        if not startup_result.valid:
+            self.status_label.setText(startup_result.reason)
         else:
-            self.status.setText("Activation failed ✖")
-            self.key_input.setEnabled(True)
-            self.activate_btn.setEnabled(True)
+            self.status_label.setText("A valid license is already installed.")
 
+    def copy_machine_request(self):
+        clipboard = QApplication.clipboard()
+        clipboard.setText(self.request_box.toPlainText())
+        self.status_label.setText("Machine request details copied to clipboard.")
 
-class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("My App (Demo)")
-        label = QLabel("App unlocked — enjoy the demo!", self)
-        label.setAlignment(Qt.AlignCenter)
-        self.setCentralWidget(label)
-        self.resize(600, 400)
-
-
-def main():
-    app = QApplication(sys.argv)
-
-    # if saved license exists, skip dialog (gimmick behavior)
-    saved = load_saved_license()
-    if saved:
-        # optional: show a very short "verifying" toast — for realism
-        # (we'll just proceed)
-        pass
-    else:
-        dlg = LicenseDialog()
-        if dlg.exec() != QDialog.Accepted:
-            # user cancelled or failed — exit app
+    def import_license_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select License File",
+            str(Path.home()),
+            "License Files (*.dat *.json);;All Files (*)",
+        )
+        if not path:
+            return
+        try:
+            raw_text = Path(path).read_text(encoding="utf-8")
+        except Exception as exc:
+            AppMessageBox.critical(self, "Error", f"Unable to read license file:\n{exc}")
             return
 
-    # show real main window
-    w = MainWindow()
-    w.show()
-    sys.exit(app.exec())
+        self.license_input.setPlainText(raw_text)
+        self.status_label.setText(f"Loaded license file from {path}")
+
+    def activate_license(self):
+        raw_text = self.license_input.toPlainText().strip()
+        if not raw_text:
+            AppMessageBox.warning(self, "No License", "Paste or import a license file first.")
+            return
+
+        try:
+            document = parse_license_text(raw_text)
+        except LicenseError as exc:
+            AppMessageBox.warning(self, "Invalid License", str(exc))
+            return
+
+        result = validate_license_document(document)
+        self.status_label.setText(result.reason)
+        if not result.valid:
+            AppMessageBox.warning(self, "Activation Failed", result.reason)
+            return
+
+        save_license_text(raw_text)
+        AppMessageBox.information(
+            self,
+            "Activation Successful",
+            f"License saved to:\n{LICENSE_PATH}",
+        )
+        self.accept()
 
 
-if __name__ == "__main__":
-    main()
+def ensure_valid_license(parent=None) -> bool:
+    result = load_and_validate_saved_license()
+    if result.valid:
+        return True
+
+    dialog = LicenseDialog(parent=parent)
+    return dialog.exec() == QDialog.Accepted
+
