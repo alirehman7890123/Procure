@@ -1,6 +1,7 @@
 import json
 import platform
 import subprocess
+import sys
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -15,7 +16,18 @@ DEFAULT_KEY_SIZE = 2048
 
 APP_DIR = Path.home() / ".procure_medics"
 LICENSE_PATH = APP_DIR / "license.dat"
-PUBLIC_KEY_PATH = Path(__file__).resolve().parent.parent / "licensing" / "public_key.json"
+PUBLIC_KEY_RELATIVE_PATH = Path("licensing") / "public_key.json"
+
+
+def get_runtime_base_dir() -> Path:
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass)
+    return Path(__file__).resolve().parent.parent
+
+
+def get_public_key_path() -> Path:
+    return get_runtime_base_dir() / PUBLIC_KEY_RELATIVE_PATH
 
 
 class LicenseError(Exception):
@@ -196,13 +208,14 @@ def load_saved_license_text() -> str | None:
 
 
 def load_public_key() -> dict:
-    if not PUBLIC_KEY_PATH.exists():
+    public_key_path = get_public_key_path()
+    if not public_key_path.exists():
         raise LicenseConfigurationError(
             "Public key is not configured. Run the license generator setup first."
         )
 
     try:
-        public_key = json.loads(PUBLIC_KEY_PATH.read_text(encoding="utf-8"))
+        public_key = json.loads(public_key_path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise LicenseConfigurationError("Public key file could not be read.") from exc
 
