@@ -19,15 +19,39 @@ LICENSE_PATH = APP_DIR / "license.dat"
 PUBLIC_KEY_RELATIVE_PATH = Path("licensing") / "public_key.json"
 
 
-def get_runtime_base_dir() -> Path:
+def get_public_key_candidates() -> list[Path]:
+    candidates: list[Path] = []
+
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
-        return Path(meipass)
-    return Path(__file__).resolve().parent.parent
+        meipass_path = Path(meipass)
+        candidates.append(meipass_path / PUBLIC_KEY_RELATIVE_PATH)
+        candidates.append(meipass_path / "_internal" / PUBLIC_KEY_RELATIVE_PATH)
+
+    executable = getattr(sys, "executable", "")
+    if executable:
+        exe_dir = Path(executable).resolve().parent
+        candidates.append(exe_dir / PUBLIC_KEY_RELATIVE_PATH)
+        candidates.append(exe_dir / "_internal" / PUBLIC_KEY_RELATIVE_PATH)
+
+    source_base = Path(__file__).resolve().parent.parent
+    candidates.append(source_base / PUBLIC_KEY_RELATIVE_PATH)
+
+    unique_candidates: list[Path] = []
+    seen: set[Path] = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        unique_candidates.append(path)
+    return unique_candidates
 
 
 def get_public_key_path() -> Path:
-    return get_runtime_base_dir() / PUBLIC_KEY_RELATIVE_PATH
+    for candidate in get_public_key_candidates():
+        if candidate.exists():
+            return candidate
+    return get_public_key_candidates()[0]
 
 
 class LicenseError(Exception):
@@ -210,8 +234,10 @@ def load_saved_license_text() -> str | None:
 def load_public_key() -> dict:
     public_key_path = get_public_key_path()
     if not public_key_path.exists():
+        checked_paths = "\n".join(str(path) for path in get_public_key_candidates())
         raise LicenseConfigurationError(
-            "Public key is not configured. Run the license generator setup first."
+            "Public key is not configured. Checked these locations:\n"
+            f"{checked_paths}"
         )
 
     try:
