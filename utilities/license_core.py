@@ -1,3 +1,4 @@
+import os
 import json
 import platform
 import subprocess
@@ -17,25 +18,41 @@ DEFAULT_KEY_SIZE = 2048
 APP_DIR = Path.home() / ".procure_medics"
 LICENSE_PATH = APP_DIR / "license.dat"
 PUBLIC_KEY_RELATIVE_PATH = Path("licensing") / "public_key.json"
+PUBLIC_KEY_RELATIVE_VARIANTS = (
+    PUBLIC_KEY_RELATIVE_PATH,
+    Path("medic") / PUBLIC_KEY_RELATIVE_PATH,
+)
 
 
 def get_public_key_candidates() -> list[Path]:
     candidates: list[Path] = []
 
+    env_override = os.environ.get("PROCURE_PUBLIC_KEY_PATH")
+    if env_override:
+        candidates.append(Path(env_override).expanduser())
+
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         meipass_path = Path(meipass)
-        candidates.append(meipass_path / PUBLIC_KEY_RELATIVE_PATH)
-        candidates.append(meipass_path / "_internal" / PUBLIC_KEY_RELATIVE_PATH)
+        for relative_path in PUBLIC_KEY_RELATIVE_VARIANTS:
+            candidates.append(meipass_path / relative_path)
+            candidates.append(meipass_path / "_internal" / relative_path)
 
     executable = getattr(sys, "executable", "")
     if executable:
         exe_dir = Path(executable).resolve().parent
-        candidates.append(exe_dir / PUBLIC_KEY_RELATIVE_PATH)
-        candidates.append(exe_dir / "_internal" / PUBLIC_KEY_RELATIVE_PATH)
+        for relative_path in PUBLIC_KEY_RELATIVE_VARIANTS:
+            candidates.append(exe_dir / relative_path)
+            candidates.append(exe_dir / "_internal" / relative_path)
+
+    cwd = Path.cwd()
+    for relative_path in PUBLIC_KEY_RELATIVE_VARIANTS:
+        candidates.append(cwd / relative_path)
 
     source_base = Path(__file__).resolve().parent.parent
-    candidates.append(source_base / PUBLIC_KEY_RELATIVE_PATH)
+    for relative_path in PUBLIC_KEY_RELATIVE_VARIANTS:
+        candidates.append(source_base / relative_path)
+        candidates.append(source_base.parent / relative_path)
 
     unique_candidates: list[Path] = []
     seen: set[Path] = set()

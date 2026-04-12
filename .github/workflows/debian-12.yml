@@ -34,10 +34,32 @@ jobs:
           . venv/bin/activate
           pip install -r requirements.txt PyInstaller
 
+      - name: Ensure public key exists
+        run: |
+          python3.11 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("licensing/public_key.json")
+          if not path.exists():
+              raise SystemExit("public_key.json is missing")
+
+          data = json.loads(path.read_text(encoding="utf-8"))
+          if not isinstance(data, dict) or not data.get("n") or not data.get("e"):
+              raise SystemExit("public_key.json is not configured with a valid public key")
+
+          print("public_key.json is present and configured")
+          PY
+
       - name: Build executable with PyInstaller
         run: |
           . venv/bin/activate
           python -m PyInstaller --noconfirm --onefile --windowed \
+            --name procure-medics \
+            --add-data "licensing/public_key.json:licensing" \
+            --add-data "manufacturers.csv:." \
+            --add-data "master_products.csv:." \
+            --add-data "purchase/med-template.ods:purchase" \
             --add-data "styles/*.css:styles" \
             --add-data "res/*.png:res" \
             starting.py
@@ -45,5 +67,5 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: myapp-executable
+          name: procure-medics-debian12
           path: dist/
