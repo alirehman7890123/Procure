@@ -72,8 +72,15 @@ jobs:
       - name: Build packaged app
         run: |
           . venv/bin/activate
-          chmod +x packaging/build_medic_linux.sh
-          ./packaging/build_medic_linux.sh
+          python -m PyInstaller --clean --noconfirm --onedir --windowed \
+            --name procure-medics \
+            --add-data "medic/licensing/public_key.json:licensing" \
+            --add-data "medic/manufacturers.csv:." \
+            --add-data "medic/master_products.csv:." \
+            --add-data "medic/purchase/med-template.ods:purchase" \
+            --add-data "medic/res:res" \
+            --add-data "medic/styles:styles" \
+            medic/starting.py
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
