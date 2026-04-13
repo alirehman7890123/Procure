@@ -7,6 +7,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        shell: bash
+
     container:
       image: debian:12
 
