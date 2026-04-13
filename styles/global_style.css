@@ -151,10 +151,10 @@ QPushButton#TopRightButton {
     border-radius: 4px;
     font-weight: 700;
     font-family: 'montserrat';
-    font-size: 12px;
-    padding: 4px 10px;
-    min-height: 22px;
-    min-width: 80px;
+    font-size: 11px;
+    padding: 3px 8px;
+    min-height: 20px;
+    min-width: 72px;
 }
 
 QPushButton#TopRightButton:hover {
@@ -180,9 +180,9 @@ QPushButton#HeaderControlButton {
     border-radius: 8px;
     font-weight: 700;
     font-family: 'montserrat';
-    font-size: 12px;
-    padding: 4px 10px;
-    min-height: 24px;
+    font-size: 11px;
+    padding: 3px 8px;
+    min-height: 22px;
 }
 
 QPushButton#HeaderControlButton:hover {
@@ -208,9 +208,9 @@ QPushButton#HeaderPrimaryButton {
     border-radius: 8px;
     font-weight: 700;
     font-family: 'montserrat';
-    font-size: 12px;
-    padding: 4px 12px;
-    min-height: 24px;
+    font-size: 11px;
+    padding: 2px 10px;
+    min-height: 20px;
 }
 
 QPushButton#HeaderPrimaryButton:hover {
@@ -227,22 +227,23 @@ QPushButton#SaveButton {
     color: #fff;
     font-weight: 700;
     font-family: 'montserrat';
-    font-size: 12px;
+    font-size: 11px;
     border: 1px solid #2a506b;
     background-color: #2F5D7C;
     border-radius: 4px;
-    padding: 4px 10px;
-    min-height: 22px;
+    padding: 3px 8px;
+    min-height: 20px;
 }
 
 QPushButton#EntryButton {
     color: #fff;
     font-weight: 600;
     font-family: 'montserrat';
+    font-size: 11px;
     border: 1px solid #ccc;
     background-color: #2F5D7C;
     border-radius: 4px;
-    padding: 4px 8px;
+    padding: 3px 7px;
 }
 QPushButton#EntryButton:hover {
     background-color: #1D3648;
@@ -255,9 +256,9 @@ QPushButton#TablePillButton {
     border-radius: 12px;
     font-weight: 600;
     font-family: 'montserrat';
-    font-size: 11px;
-    padding: 3px 10px;
-    min-height: 20px;
+    font-size: 10px;
+    padding: 2px 8px;
+    min-height: 18px;
 }
 
 QPushButton#TablePillButton:hover {
@@ -277,9 +278,9 @@ QPushButton#TableActionButton {
     border-radius: 5px;
     font-weight: 700;
     font-family: 'montserrat';
-    font-size: 11px;
-    padding: 3px 10px;
-    min-height: 22px;
+    font-size: 10px;
+    padding: 2px 8px;
+    min-height: 20px;
 }
 
 QPushButton#TableActionButton:hover {

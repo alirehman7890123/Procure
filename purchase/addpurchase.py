@@ -2793,56 +2793,194 @@ class ImportDialog(QDialog):
         
         super().__init__(parent)
         self.setWindowTitle("Add New Product")
-        self.resize(600, 400)
+        self.resize(600, 332)
+        self.setMinimumWidth(560)
 
         self.layout = QVBoxLayout()
-        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setContentsMargins(14, 12, 14, 12)
+        self.layout.setSpacing(10)
         self.indicators = {}
         self.insert_subheading("PRODUCT Does Not Exist... Add INFORMATION")
-        
+
+        self.form_card = QFrame()
+        self.form_card.setObjectName("ImportProductCard")
+        self.form_layout = QVBoxLayout(self.form_card)
+        self.form_layout.setContentsMargins(16, 14, 16, 14)
+        self.form_layout.setSpacing(10)
+
         self.populate_product_fields()
-       
+        self.layout.addWidget(self.form_card)
 
         self.setLayout(self.layout)
         
         # Buttons
+        self.footer_card = QFrame()
+        self.footer_card.setObjectName("ImportDialogFooter")
+        self.footer_layout = QHBoxLayout(self.footer_card)
+        self.footer_layout.setContentsMargins(14, 10, 14, 10)
+        self.footer_layout.setSpacing(10)
+
+        self.footer_hint = QLabel("This product will be available immediately in Purchase Invoice.")
+        self.footer_hint.setObjectName("ImportDialogFooterHint")
+        self.footer_hint.setWordWrap(True)
+
         button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        button_box.setCenterButtons(False)
+        save_button = button_box.button(QDialogButtonBox.Save)
+        cancel_button = button_box.button(QDialogButtonBox.Cancel)
+        if save_button is not None:
+            save_button.setText("Save Product")
+            save_button.setObjectName("SaveButton")
+            save_button.setCursor(Qt.PointingHandCursor)
+            save_button.setMinimumHeight(34)
+            save_button.setMinimumWidth(124)
+        if cancel_button is not None:
+            cancel_button.setText("Cancel")
+            cancel_button.setObjectName("TopRightButton")
+            cancel_button.setCursor(Qt.PointingHandCursor)
+            cancel_button.setMinimumHeight(34)
+            cancel_button.setMinimumWidth(92)
         button_box.accepted.connect(self.accept)   # Save → dialog.accept()
         button_box.rejected.connect(self.reject)   # Cancel → dialog.reject()
-        self.layout.addWidget(button_box)
+        self.footer_layout.addWidget(self.footer_hint, 1)
+        self.footer_layout.addWidget(button_box, 0, Qt.AlignRight)
+        self.layout.addWidget(self.footer_card)
+        self.setStyleSheet(load_stylesheets() + """
+            QDialog {
+                background-color: #F5F7FB;
+            }
+            QFrame#ImportDialogHeader {
+                background: qlineargradient(
+                    x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #264B68, stop: 1 #315D7D
+                );
+                border: 1px solid #1D4058;
+                border-radius: 12px;
+            }
+            QLabel#ImportDialogBadge {
+                background-color: rgba(255, 255, 255, 0.14);
+                color: #FFFFFF;
+                border-radius: 13px;
+                font-family: montserrat;
+                font-size: 11px;
+                font-weight: 800;
+                min-width: 26px;
+                min-height: 26px;
+                max-width: 26px;
+                max-height: 26px;
+                qproperty-alignment: AlignCenter;
+            }
+            QWidget#ImportDialogTitleWrap {
+                background: transparent;
+            }
+            QLabel#ImportDialogTitle {
+                color: #FFFFFF;
+                font-family: montserrat;
+                font-size: 16px;
+                font-weight: 800;
+            }
+            QLabel#ImportDialogHint {
+                color: rgba(255, 255, 255, 0.78);
+                font-family: montserrat;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            QFrame#ImportProductCard {
+                background-color: #FFFFFF;
+                border: 1px solid #D6E0E8;
+                border-radius: 12px;
+            }
+            QLabel#ImportFieldLabel {
+                color: #30485C;
+                font-family: montserrat;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.2px;
+            }
+            QLineEdit#importField,
+            QComboBox#importField {
+                min-height: 34px;
+                background-color: #F9FBFD;
+                border: 1px solid #C9D7E3;
+                border-radius: 9px;
+                padding: 0 10px;
+                color: #22313F;
+                font-family: montserrat;
+                font-size: 12px;
+            }
+            QLineEdit#importField:focus,
+            QComboBox#importField:focus {
+                border: 1px solid #7EA4C1;
+                background-color: #FFFFFF;
+            }
+            QComboBox#importField::drop-down {
+                width: 28px;
+                border: none;
+                background: transparent;
+            }
+            QFrame#ImportDialogFooter {
+                background-color: #FFFFFF;
+                border: 1px solid #D6E0E8;
+                border-radius: 12px;
+            }
+            QLabel#ImportDialogFooterHint {
+                color: #5D6E7D;
+                font-family: montserrat;
+                font-size: 10px;
+                font-weight: 600;
+            }
+        """)
     
     
 
     def insert_subheading(self, title):
+        self.header_card = QFrame()
+        self.header_card.setObjectName("ImportDialogHeader")
+        subheader_layout = QHBoxLayout(self.header_card)
+        subheader_layout.setContentsMargins(14, 10, 14, 10)
+        subheader_layout.setSpacing(10)
+
+        badge = QLabel("P")
+        badge.setObjectName("ImportDialogBadge")
+
+        title_wrap = QWidget()
+        title_wrap.setObjectName("ImportDialogTitleWrap")
+        title_layout = QVBoxLayout(title_wrap)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(1)
+        heading = QLabel("Add New Product")
+        heading.setObjectName("ImportDialogTitle")
+
+        subheading = QLabel(title)
+        subheading.setObjectName("ImportDialogHint")
         
-        # === Sub Header Row ===
-        subheader_layout = QHBoxLayout()
-        subheading = QLabel(title, objectName="SubHeading")
-        
-        subheader_layout.addWidget(subheading)
-        self.layout.addLayout(subheader_layout)
+        title_layout.addWidget(heading)
+        title_layout.addWidget(subheading)
+
+        subheader_layout.addWidget(badge, 0, Qt.AlignTop)
+        subheader_layout.addWidget(title_wrap, 1)
+        self.layout.addWidget(self.header_card)
         
         
         
     
     def populate_product_fields(self):
-        
-        item_layout = QHBoxLayout()
-        
-        # Item Label with stretch factor 2
         item_label = QLabel("Item")
-        item_layout.addWidget(item_label, stretch=2)
+        item_label.setObjectName("ImportFieldLabel")
 
-        # Spacer with stretch factor 1
-        spacer = QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-        item_layout.addItem(spacer)
+        brand_label = QLabel("Brand")
+        brand_label.setObjectName("ImportFieldLabel")
 
-        # Name input with stretch factor 3
+        packsize_label = QLabel("Pack Size")
+        packsize_label.setObjectName("ImportFieldLabel")
+
+        price_label = QLabel("Pack Sale Price")
+        price_label.setObjectName("ImportFieldLabel")
+
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText('name')
-        item_layout.addWidget(self.name_input, stretch=3)
+        self.name_input.setObjectName("importField")
+        self.name_input.setPlaceholderText("Product name")
 
-        # Form input with stretch factor 1
         forms = [
             "AEROSOL","BALM","BUBBLE GUM","CAP","CAPLET","CAPS SR","CREAM","DRAGEES","DROPS",
             "DRY SUSP","E AND E DROPS","EAR DROPS","ELIXIR","EMUL","ENEMA","EXPC","EYE DROPS",
@@ -2858,65 +2996,42 @@ class ImportDialog(QDialog):
 
         forms = sorted([f.title() for f in forms])
         self.form_input = QComboBox()
+        self.form_input.setObjectName("importField")
         self.form_input.setEditable(True)
+        self.form_input.lineEdit().setObjectName("importField")
         self.form_input.addItems(forms)
-        item_layout.addWidget(self.form_input, stretch=1)
 
-        # Packing input with stretch factor 1
         self.packing_input = QLineEdit()
-        self.packing_input.setPlaceholderText('dose')
-        item_layout.addWidget(self.packing_input, stretch=1)
-        
-        
-        self.layout.addLayout(item_layout)
-        
-        
-        
-        # brand line
-        
-        brand_layout = QHBoxLayout()
-        
-        brand_label = QLabel("Brand")
-        spacer = QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.packing_input.setObjectName("importField")
+        self.packing_input.setPlaceholderText("Strength / dose")
+
         self.brand_input = QComboBox()
+        self.brand_input.setObjectName("importField")
         self.setup_manufacturer_combobox(self.brand_input)
-        
-        brand_layout.addWidget(brand_label, 2)
-        brand_layout.addItem(spacer)
-        brand_layout.addWidget(self.brand_input, 5)
-        
-        self.layout.addLayout(brand_layout)
-        
-        
-        
-        
-        size_layout = QHBoxLayout()
-        
-        size_label = QLabel("Pack Size")
-        spacer = QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.brand_input.lineEdit().setObjectName("importField")
+
         self.packsize_input = QLineEdit()
-        
-        size_layout.addWidget(size_label, 2)
-        size_layout.addItem(spacer)
-        size_layout.addWidget(self.packsize_input, 5)
-        
-        self.layout.addLayout(size_layout)
-        
-        
-        
-        
-        
-        price_layout = QHBoxLayout()
-        
-        size_label = QLabel("Pack Sale Price")
-        spacer = QSpacerItem(20, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.packsize_input.setObjectName("importField")
+        self.packsize_input.setPlaceholderText("Units per pack")
+
         self.saleprice_input = QLineEdit()
-        
-        price_layout.addWidget(size_label, 2)
-        price_layout.addItem(spacer)
-        price_layout.addWidget(self.saleprice_input, 5)
-        
-        self.layout.addLayout(price_layout)
+        self.saleprice_input.setObjectName("importField")
+        self.saleprice_input.setPlaceholderText("Sale price")
+
+        item_row = QHBoxLayout()
+        item_row.setSpacing(10)
+        item_row.addWidget(self.name_input, 3)
+        item_row.addWidget(self.form_input, 2)
+        item_row.addWidget(self.packing_input, 2)
+
+        self.form_layout.addWidget(item_label)
+        self.form_layout.addLayout(item_row)
+        self.form_layout.addWidget(brand_label)
+        self.form_layout.addWidget(self.brand_input)
+        self.form_layout.addWidget(packsize_label)
+        self.form_layout.addWidget(self.packsize_input)
+        self.form_layout.addWidget(price_label)
+        self.form_layout.addWidget(self.saleprice_input)
         
         
     def populate_manufacturer_combobox(self, combo: QComboBox):

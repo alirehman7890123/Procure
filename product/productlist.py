@@ -4,12 +4,34 @@ from PySide6.QtSql import QSqlQuery, QSqlDatabase
 from functools import partial
 from PySide6.QtGui import QColor
 from utilities.product_search_widget import ProductSearchBox
+import csv
+import os
+import sys
+from pathlib import Path
 
 
 from utilities.stylus import load_stylesheets
 from utilities.activity_logger import log_activity
 from utilities.permissions import Permissions
 from utilities.app_messagebox import AppMessageBox
+
+
+def resource_path(relative_path: str) -> str:
+    relative = Path(relative_path)
+    candidates = []
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / relative)
+
+    module_root = Path(__file__).resolve().parent.parent
+    candidates.append(module_root / relative)
+    candidates.append(Path.cwd() / relative)
+
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return str(candidates[0])
 
 
 
@@ -32,6 +54,9 @@ class ProductListWidget(QWidget):
         # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Product Information", objectName="SectionTitle")
+        self.master_catalog_btn = QPushButton("Master Catalog", objectName="TopRightButton")
+        self.master_catalog_btn.setCursor(Qt.PointingHandCursor)
+        self.master_catalog_btn.clicked.connect(self.open_master_catalog_dialog)
         self.addproduct = QPushButton("Add Product", objectName="TopRightButton")
         self.addproduct.setCursor(Qt.PointingHandCursor)
         
@@ -40,6 +65,7 @@ class ProductListWidget(QWidget):
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
         header_layout.addStretch()
+        header_layout.addWidget(self.master_catalog_btn)
         header_layout.addWidget(self.addproduct)
 
         self.layout.addLayout(header_layout)
@@ -195,6 +221,110 @@ class ProductListWidget(QWidget):
         
         
         self.setStyleSheet(load_stylesheets())
+
+    def _get_manufacturer_lookup(self):
+        lookup = {}
+        query = QSqlQuery()
+        if query.exec("SELECT id, name FROM manufacturer"):
+            while query.next():
+                try:
+                    key = str(int(query.value(0)))
+                except Exception:
+                    continue
+                lookup[key] = str(query.value(1) or "")
+        return lookup
+
+    def open_master_catalog_dialog(self):
+        csv_path = resource_path("master_products.csv")
+        if not os.path.exists(csv_path):
+            AppMessageBox.warning(self, "Master Catalog", f"Catalog file not found:\n{csv_path}")
+            return
+
+        manufacturer_lookup = self._get_manufacturer_lookup()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Master Catalog")
+        dialog.resize(1120, 680)
+
+        dialog_layout = QVBoxLayout(dialog)
+        dialog_layout.setContentsMargins(12, 12, 12, 12)
+        dialog_layout.setSpacing(8)
+
+        top_row = QHBoxLayout()
+        count_label = QLabel("Records:")
+        count_value = QLabel("0")
+        manufacturer_count_label = QLabel("Manufacturers:")
+        manufacturer_count_value = QLabel(str(len(manufacturer_lookup)))
+        top_row.addWidget(count_label)
+        top_row.addWidget(count_value)
+        top_row.addStretch()
+        top_row.addWidget(manufacturer_count_label)
+        top_row.addWidget(manufacturer_count_value)
+        dialog_layout.addLayout(top_row)
+
+        headers = [
+            "Reg.#",
+            "Name",
+            "Generic",
+            "Form",
+            "Strength",
+            "Packing",
+            "Size",
+            "Manufacturer ID",
+            "Manufacturer Name",
+        ]
+
+        table = MyTable(column_ratios=[0.11, 0.17, 0.15, 0.09, 0.1, 0.1, 0.08, 0.1, 0.2])
+        table.setColumnCount(len(headers))
+        table.setHorizontalHeaderLabels(headers)
+        table.verticalHeader().setVisible(False)
+        table.setAlternatingRowColors(True)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.setSelectionMode(QTableWidget.SingleSelection)
+        dialog_layout.addWidget(table, 1)
+
+        rows_loaded = 0
+        try:
+            with open(csv_path, "r", newline="", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                next(reader, None)
+
+                for row in reader:
+                    if not row or len(row) < 8:
+                        continue
+
+                    reg_no = row[0].strip()
+                    name = row[1].strip()
+                    generic = row[2].strip()
+                    form = row[3].strip()
+                    strength = row[4].strip()
+                    packing = row[5].strip()
+                    size = row[6].strip()
+                    manufacturer_id = row[7].strip()
+                    manufacturer_name = manufacturer_lookup.get(manufacturer_id, "")
+
+                    table.insertRow(rows_loaded)
+                    values = [
+                        reg_no,
+                        name,
+                        generic,
+                        form,
+                        strength,
+                        packing,
+                        size,
+                        manufacturer_id,
+                        manufacturer_name,
+                    ]
+                    for col, value in enumerate(values):
+                        table.setItem(rows_loaded, col, QTableWidgetItem(value))
+                    rows_loaded += 1
+        except Exception as exc:
+            AppMessageBox.critical(self, "Master Catalog", f"Failed to load catalog:\n{exc}")
+            return
+
+        count_value.setText(str(rows_loaded))
+        dialog.exec()
 
 
     def open_inventory_adjustment_dialog(self):

@@ -1,15 +1,38 @@
 
 import os
+import re
 import sys
+from pathlib import Path
 
 
 def resource_path(relative_path):
     """Return the absolute path to a resource, works for dev and PyInstaller."""
-    try:
-        base_path = sys._MEIPASS  # PyInstaller extracts files here
-    except AttributeError:
-        base_path = os.path.abspath(".")  # running from source
-    return os.path.join(base_path, relative_path)
+    relative = Path(relative_path)
+    candidates = []
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / relative)
+
+    module_root = Path(__file__).resolve().parent.parent
+    candidates.append(module_root / relative)
+    candidates.append(Path.cwd() / relative)
+
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+
+    return str(candidates[0])
+
+
+def _normalize_stylesheet_urls(css_content):
+    def replace_url(match):
+        raw_path = match.group(1).strip().strip('"\'')
+        if not raw_path or raw_path.startswith((":", "qrc:", "file:", "data:")):
+            return match.group(0)
+        return f"url({resource_path(raw_path).replace(os.sep, '/')})"
+
+    return re.sub(r"url\(([^)]+)\)", replace_url, css_content)
 
 
 
@@ -24,6 +47,6 @@ def load_stylesheets():
                 css_file = os.path.join(styles_dir, file)
                 with open(css_file, "r") as f:
                     css_content += f.read() + "\n"
-                    
-    return css_content
+
+    return _normalize_stylesheet_urls(css_content)
 

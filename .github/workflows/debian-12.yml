@@ -54,14 +54,38 @@ jobs:
       - name: Build executable with PyInstaller
         run: |
           . venv/bin/activate
+          QT_PLUGIN_DIR="$(python - <<'PY'
+          from PySide6.QtCore import QLibraryInfo
+          print(QLibraryInfo.path(QLibraryInfo.PluginsPath))
+          PY
+          )"
+
+          QSVG_PLUGIN="$QT_PLUGIN_DIR/imageformats/libqsvg.so"
+          QSVG_ICON_ENGINE="$QT_PLUGIN_DIR/iconengines/libqsvgicon.so"
+
+          EXTRA_BINARIES=()
+          if [ -f "$QSVG_PLUGIN" ]; then
+            EXTRA_BINARIES+=(--add-binary "$QSVG_PLUGIN:PySide6/Qt/plugins/imageformats")
+          else
+            echo "Warning: Qt SVG image plugin not found at $QSVG_PLUGIN"
+          fi
+
+          if [ -f "$QSVG_ICON_ENGINE" ]; then
+            EXTRA_BINARIES+=(--add-binary "$QSVG_ICON_ENGINE:PySide6/Qt/plugins/iconengines")
+          else
+            echo "Warning: Qt SVG icon engine plugin not found at $QSVG_ICON_ENGINE"
+          fi
+
           python -m PyInstaller --noconfirm --onefile --windowed \
             --name procure-medics \
+            --hidden-import PySide6.QtSvg \
             --add-data "licensing/public_key.json:licensing" \
             --add-data "manufacturers.csv:." \
             --add-data "master_products.csv:." \
             --add-data "purchase/med-template.ods:purchase" \
             --add-data "styles/*.css:styles" \
-            --add-data "res/*.png:res" \
+            --add-data "res:res" \
+            "${EXTRA_BINARIES[@]}" \
             starting.py
 
       - name: Upload build artifact

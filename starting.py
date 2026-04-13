@@ -112,8 +112,9 @@ class AuthWindow(QMainWindow):
         
         authinfo = QWidget()
         auth_layout = QVBoxLayout()
+        self.auth_layout = auth_layout
         authinfo.setLayout(auth_layout)
-        auth_layout.setContentsMargins(56, 44, 56, 44)
+        auth_layout.setContentsMargins(56, max(32, int(height * 0.10)), 56, 44)
         auth_layout.setSpacing(0)
         authinfo.setMinimumWidth(600)
         authinfo.setStyleSheet("background-color: #F5F8FB;")
@@ -141,7 +142,6 @@ class AuthWindow(QMainWindow):
 
         field_style = """
             QLineEdit {
-                min-height: 40px;
                 padding: 5px 10px;
                 border: 1px solid #ccc;
                 border-radius: 5px;
@@ -168,7 +168,6 @@ class AuthWindow(QMainWindow):
 
         login_button = QPushButton('Login')
         login_button.setCursor(Qt.PointingHandCursor)
-        login_button.setMinimumHeight(40)
         login_button.setStyleSheet("""
             QPushButton {
                 background-color: #2F5D7C;
@@ -228,7 +227,6 @@ class AuthWindow(QMainWindow):
         trust_copy.setWordWrap(True)
         trust_copy.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         trust_copy.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        trust_copy.setMinimumHeight(52)
         trust_copy.setStyleSheet(
             "background: transparent; border: none; color: #5E7384; font-size: 12px; font-weight: 500; font-family: 'montserrat'; padding: 0; margin: 0;"
         )
@@ -248,10 +246,8 @@ class AuthWindow(QMainWindow):
         login_card_layout.addSpacing(0)
         login_card_layout.addWidget(trust_block)
 
-        auth_layout.addSpacing(110)
-        auth_layout.addWidget(login_card, 0, Qt.AlignHCenter)
+        auth_layout.addWidget(login_card, 0, Qt.AlignHCenter | Qt.AlignTop)
         auth_layout.addStretch(1)
-        auth_layout.addSpacing(50)
         
         central_layout.addWidget(companyinfo, 1)
         central_layout.addWidget(authinfo, 1)
@@ -273,6 +269,9 @@ class AuthWindow(QMainWindow):
         self.setCentralWidget(central_widget)
 
     def resizeEvent(self, event):
+        top_margin = max(32, int(self.height() * 0.10))
+        left_margin, _, right_margin, bottom_margin = self.auth_layout.getContentsMargins()
+        self.auth_layout.setContentsMargins(left_margin, top_margin, right_margin, bottom_margin)
         super().resizeEvent(event)
 
     def load_username(self):
@@ -494,6 +493,19 @@ class AuthWindow(QMainWindow):
                 
                 self.initialize_database()
 
+                seed_summary = getattr(self, "_startup_seed_summary", None) or {}
+                if seed_summary:
+                    summary_lines = []
+                    if seed_summary.get("manufacturers"):
+                        summary_lines.append(f"Manufacturers imported: {seed_summary['manufacturers']}")
+                    if seed_summary.get("products"):
+                        summary_lines.append(f"Products imported: {seed_summary['products']}")
+                    AppMessageBox.information(
+                        None,
+                        "Catalog Imported",
+                        "Bundled startup catalog was imported successfully.\n\n" + "\n".join(summary_lines),
+                    )
+
                 try:
                     from utilities.activity_logger import log_activity
                     log_activity(
@@ -612,6 +624,7 @@ class AuthWindow(QMainWindow):
            
             
     def initialize_database(self):
+        self._startup_seed_summary = None
         
         if self.required_tables_exist():
             print("Tables already exist. Skipping creation.")
@@ -628,6 +641,7 @@ class AuthWindow(QMainWindow):
             self.seed_tax_group_table()
             self.create_customer_table()
             self.apply_runtime_schema_migrations()
+            self._startup_seed_summary = self.ensure_catalog_seeded()
             return
 
         print("First run detected. Creating tables...")
@@ -636,7 +650,7 @@ class AuthWindow(QMainWindow):
 
         self.seed_discount_group_table()
         self.seed_tax_group_table()
-        self.populate_products_from_csv()
+        self._startup_seed_summary = self.ensure_catalog_seeded()
         
         print("Inserting Business Record - Empty Now")
                 
@@ -665,6 +679,34 @@ class AuthWindow(QMainWindow):
         cur.execute(f"PRAGMA table_info({table_name})")
         return {str(row[1]) for row in cur.fetchall()}
 
+    def _table_row_count(self, table_name):
+        query = QSqlQuery()
+        if not query.exec(f"SELECT COUNT(*) FROM {table_name}"):
+            print(f"Failed to count rows in {table_name}: {query.lastError().text()}")
+            return None
+        if not query.next():
+            return None
+        return int(query.value(0) or 0)
+
+    def ensure_catalog_seeded(self):
+        seeded = {}
+
+        manufacturer_count = self._table_row_count("manufacturer")
+        if manufacturer_count == 0:
+            print("Manufacturer table is empty. Seeding from bundled CSV.")
+            imported = self.populate_manufacturers_from_csv()
+            if imported:
+                seeded["manufacturers"] = imported
+
+        product_count = self._table_row_count("product")
+        if product_count == 0:
+            print("Product table is empty. Seeding from bundled CSV.")
+            imported = self.populate_products_from_csv()
+            if imported:
+                seeded["products"] = imported
+
+        return seeded
+
     def _ensure_sqlite_column(self, conn, table_name, column_name, column_sql):
         columns = self._sqlite_column_names(conn, table_name)
         if column_name in columns:
@@ -690,11 +732,41 @@ class AuthWindow(QMainWindow):
             if self._ensure_sqlite_column(conn, "purchase", "due_date", "DATE"):
                 changed.append("purchase.due_date")
 
+            if self._ensure_sqlite_column(conn, "purchase", "session_id", "INTEGER"):
+                changed.append("purchase.session_id")
+
+            if self._ensure_sqlite_column(conn, "purchase", "cn_adjustment", "DECIMAL(10,2) DEFAULT 0.00"):
+                changed.append("purchase.cn_adjustment")
+
             if self._ensure_sqlite_column(conn, "purchase_order", "session_id", "INTEGER"):
                 changed.append("purchase_order.session_id")
 
             if self._ensure_sqlite_column(conn, "goods_receipt", "session_id", "INTEGER"):
                 changed.append("goods_receipt.session_id")
+
+            if self._ensure_sqlite_column(conn, "supplier_transaction", "session_id", "INTEGER"):
+                changed.append("supplier_transaction.session_id")
+
+            if self._ensure_sqlite_column(conn, "supplier_transaction", "payment_method", "TEXT"):
+                changed.append("supplier_transaction.payment_method")
+
+            if self._ensure_sqlite_column(conn, "supplier_transaction", "bank_name", "TEXT"):
+                changed.append("supplier_transaction.bank_name")
+
+            if self._ensure_sqlite_column(conn, "supplier_transaction", "account_no", "TEXT"):
+                changed.append("supplier_transaction.account_no")
+
+            if self._ensure_sqlite_column(conn, "supplier_transaction", "transaction_mode", "TEXT"):
+                changed.append("supplier_transaction.transaction_mode")
+
+            if self._ensure_sqlite_column(conn, "supplier_transaction", "wallet_provider", "TEXT"):
+                changed.append("supplier_transaction.wallet_provider")
+
+            if self._ensure_sqlite_column(conn, "supplier_transaction", "wallet_no", "TEXT"):
+                changed.append("supplier_transaction.wallet_no")
+
+            if self._ensure_sqlite_column(conn, "supplier_transaction", "payment_reference", "TEXT"):
+                changed.append("supplier_transaction.payment_reference")
 
             if changed:
                 conn.commit()
@@ -1267,19 +1339,21 @@ class AuthWindow(QMainWindow):
         
         if not os.path.exists(file_path):
             print(f"Manufacturer file not found: {file_path}")
-            return
+            return 0
 
         db = QSqlDatabase.database()
 
         if not db.transaction():
             print("Failed to start manufacturer transaction.")
-            return
+            return 0
 
         query = QSqlQuery(db)
         query.prepare("""
             INSERT OR IGNORE INTO manufacturer (name)
             VALUES (?)
         """)
+
+        imported_count = 0
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:
@@ -1294,14 +1368,18 @@ class AuthWindow(QMainWindow):
                     if not query.exec():
                         raise Exception(query.lastError().text())
 
+                    imported_count += max(0, int(query.numRowsAffected() or 0))
+
             if not db.commit():
                 raise Exception("Failed to commit manufacturer transaction.")
 
-            print("Manufacturers imported successfully.")
+            print(f"Manufacturers imported successfully: {imported_count}")
+            return imported_count
 
         except Exception as e:
             db.rollback()
-            print("Manufacturer import failed:", str(e))   
+            print("Manufacturer import failed:", str(e))
+            return 0
         
         
        
@@ -1330,13 +1408,13 @@ class AuthWindow(QMainWindow):
         
         if not os.path.exists(file_path):
             print(f"Product file not found: {file_path}")
-            return
+            return 0
 
         db = QSqlDatabase.database()
 
         if not db.transaction():
             print("Failed to start product transaction.")
-            return
+            return 0
 
         query = QSqlQuery(db)
         query.prepare("""
@@ -1363,6 +1441,8 @@ class AuthWindow(QMainWindow):
             )
             VALUES (?, ?, ?)
         """)
+
+        imported_count = 0
 
         try:
             with open(file_path, "r", newline="", encoding="utf-8") as f:
@@ -1410,14 +1490,18 @@ class AuthWindow(QMainWindow):
                     if not price_query.exec():
                         raise Exception(price_query.lastError().text())
 
+                    imported_count += 1
+
             if not db.commit():
                 raise Exception("Failed to commit product transaction.")
 
-            print("Products imported successfully.")
+            print(f"Products imported successfully: {imported_count}")
+            return imported_count
 
         except Exception as e:
             db.rollback()
             print("Product import failed:", str(e))
+            return 0
         
     
     def create_product_table(self):
