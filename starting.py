@@ -1022,6 +1022,40 @@ class AuthWindow(QMainWindow):
             return False
 
         print("Table 'Accounting Settings' ready.")
+
+        seed_query = QSqlQuery()
+        if not seed_query.exec(
+            """
+            INSERT OR IGNORE INTO accounting_settings (
+                id,
+                sales_discount_policy,
+                global_sales_discount_enabled,
+                global_sales_tax_enabled,
+                theme_primary_color,
+                theme_sidebar_color,
+                sales_tax_policy,
+                updated_at
+            )
+            VALUES (
+                1,
+                'both',
+                0,
+                0,
+                '#2F5D7C',
+                '#151325',
+                'both',
+                CURRENT_TIMESTAMP
+            );
+            """
+        ):
+            AppMessageBox.critical(
+                None,
+                "Error",
+                f"Accounting settings seed failed: {seed_query.lastError().text()}"
+            )
+            return False
+
+        print("Accounting settings default row ensured.")
         return True
             
         

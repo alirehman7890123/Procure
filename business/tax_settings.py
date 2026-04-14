@@ -156,6 +156,17 @@ class TaxSettingsWidget(QWidget):
         promo_grid.setColumnStretch(1, 1)
         promo_layout.addLayout(promo_grid)
 
+        promo_actions = QHBoxLayout()
+        self.settings_status = QLabel("Sales tax policy and global tax are saved separately from the group form.")
+        self.settings_status.setStyleSheet("font-size: 11px; color: #666; padding-left: 0;")
+        promo_actions.addWidget(self.settings_status)
+        promo_actions.addStretch()
+        self.save_settings_btn = QPushButton("Save Sales Tax Settings", objectName="SaveButton")
+        self.save_settings_btn.setCursor(Qt.PointingHandCursor)
+        self.save_settings_btn.clicked.connect(self.save_sales_tax_settings)
+        promo_actions.addWidget(self.save_settings_btn)
+        promo_layout.addLayout(promo_actions)
+
         self.layout.addWidget(promo_card)
 
         table_card = QFrame()
@@ -213,6 +224,7 @@ class TaxSettingsWidget(QWidget):
         self.apply_on_sale_check.setChecked(True)
         self.status_combo.setCurrentIndex(0)
         self.load_sales_tax_policy()
+        self.load_global_sales_tax()
         self.table.clearSelection()
         self.form_status.setText("Create a tax group and assign it to products or customers.")
         self.save_btn.setText("Save Tax Group")
@@ -270,6 +282,48 @@ class TaxSettingsWidget(QWidget):
             enabled = False
         self.populate_global_tax_combo(selected_group_id)
         self.global_tax_enabled_check.setChecked(enabled)
+
+    def save_sales_tax_settings(self, show_feedback=True):
+        sales_tax_policy = self.sales_tax_policy_combo.currentData()
+        global_tax_group_id = self.global_tax_combo.currentData()
+        global_tax_enabled = 1 if self.global_tax_enabled_check.isChecked() else 0
+
+        if global_tax_enabled and global_tax_group_id is None:
+            AppMessageBox.warning(self, "Validation Error", "Select a global sales tax group before enabling global tax.")
+            return False
+
+        policy_query = QSqlQuery()
+        policy_query.prepare(
+            """
+            INSERT INTO accounting_settings (
+                id,
+                sales_tax_policy,
+                global_sales_tax_group_id,
+                global_sales_tax_enabled,
+                updated_at
+            )
+            VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(id)
+            DO UPDATE SET
+                sales_tax_policy = excluded.sales_tax_policy,
+                global_sales_tax_group_id = excluded.global_sales_tax_group_id,
+                global_sales_tax_enabled = excluded.global_sales_tax_enabled,
+                updated_at = CURRENT_TIMESTAMP
+            """
+        )
+        policy_query.addBindValue(sales_tax_policy)
+        policy_query.addBindValue(global_tax_group_id)
+        policy_query.addBindValue(global_tax_enabled)
+        if not policy_query.exec():
+            AppMessageBox.error(self, "Save Failed", policy_query.lastError().text())
+            return False
+
+        self.load_sales_tax_policy()
+        self.load_global_sales_tax()
+        self.settings_status.setText("Sales tax settings saved.")
+        if show_feedback:
+            AppMessageBox.success(self, "Saved", "Sales tax settings saved successfully.")
+        return True
 
     def load_tax_groups(self):
         self.load_sales_tax_policy()
@@ -403,30 +457,7 @@ class TaxSettingsWidget(QWidget):
             AppMessageBox.error(self, "Save Failed", query.lastError().text())
             return
 
-        policy_query = QSqlQuery()
-        policy_query.prepare(
-            """
-            INSERT INTO accounting_settings (
-                id,
-                sales_tax_policy,
-                global_sales_tax_group_id,
-                global_sales_tax_enabled,
-                updated_at
-            )
-            VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(id)
-            DO UPDATE SET
-                sales_tax_policy = excluded.sales_tax_policy,
-                global_sales_tax_group_id = excluded.global_sales_tax_group_id,
-                global_sales_tax_enabled = excluded.global_sales_tax_enabled,
-                updated_at = CURRENT_TIMESTAMP
-            """
-        )
-        policy_query.addBindValue(sales_tax_policy)
-        policy_query.addBindValue(global_tax_group_id)
-        policy_query.addBindValue(global_tax_enabled)
-        if not policy_query.exec():
-            AppMessageBox.error(self, "Save Failed", policy_query.lastError().text())
+        if not self.save_sales_tax_settings(show_feedback=False):
             return
 
         AppMessageBox.success(

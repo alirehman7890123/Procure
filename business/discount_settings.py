@@ -155,6 +155,17 @@ class DiscountSettingsWidget(QWidget):
         promo_grid.setColumnStretch(1, 1)
         promo_layout.addLayout(promo_grid)
 
+        promo_actions = QHBoxLayout()
+        self.settings_status = QLabel("Sales discount policy and global promo are saved separately from the group form.")
+        self.settings_status.setStyleSheet("font-size: 11px; color: #666; padding-left: 0;")
+        promo_actions.addWidget(self.settings_status)
+        promo_actions.addStretch()
+        self.save_settings_btn = QPushButton("Save Sales Discount Settings", objectName="SaveButton")
+        self.save_settings_btn.setCursor(Qt.PointingHandCursor)
+        self.save_settings_btn.clicked.connect(self.save_sales_discount_settings)
+        promo_actions.addWidget(self.save_settings_btn)
+        promo_layout.addLayout(promo_actions)
+
         self.layout.addWidget(promo_card)
 
         table_card = QFrame()
@@ -212,6 +223,7 @@ class DiscountSettingsWidget(QWidget):
         self.apply_on_sale_check.setChecked(True)
         self.status_combo.setCurrentIndex(0)
         self.load_sales_discount_policy()
+        self.load_global_sales_discount()
         self.table.clearSelection()
         self.form_status.setText("Create a discount group and assign it to products or customers.")
         self.save_btn.setText("Save Discount Group")
@@ -269,6 +281,48 @@ class DiscountSettingsWidget(QWidget):
             enabled = False
         self.populate_global_discount_combo(selected_group_id)
         self.global_discount_enabled_check.setChecked(enabled)
+
+    def save_sales_discount_settings(self, show_feedback=True):
+        sales_discount_policy = self.sales_discount_policy_combo.currentData()
+        global_discount_group_id = self.global_discount_combo.currentData()
+        global_discount_enabled = 1 if self.global_discount_enabled_check.isChecked() else 0
+
+        if global_discount_enabled and global_discount_group_id is None:
+            AppMessageBox.warning(self, "Validation Error", "Select a global sales discount group before enabling the global promo.")
+            return False
+
+        policy_query = QSqlQuery()
+        policy_query.prepare(
+            """
+            INSERT INTO accounting_settings (
+                id,
+                sales_discount_policy,
+                global_sales_discount_group_id,
+                global_sales_discount_enabled,
+                updated_at
+            )
+            VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(id)
+            DO UPDATE SET
+                sales_discount_policy = excluded.sales_discount_policy,
+                global_sales_discount_group_id = excluded.global_sales_discount_group_id,
+                global_sales_discount_enabled = excluded.global_sales_discount_enabled,
+                updated_at = CURRENT_TIMESTAMP
+            """
+        )
+        policy_query.addBindValue(sales_discount_policy)
+        policy_query.addBindValue(global_discount_group_id)
+        policy_query.addBindValue(global_discount_enabled)
+        if not policy_query.exec():
+            AppMessageBox.error(self, "Save Failed", policy_query.lastError().text())
+            return False
+
+        self.load_sales_discount_policy()
+        self.load_global_sales_discount()
+        self.settings_status.setText("Sales discount settings saved.")
+        if show_feedback:
+            AppMessageBox.success(self, "Saved", "Sales discount settings saved successfully.")
+        return True
 
     def load_discount_groups(self):
         self.load_sales_discount_policy()
@@ -402,30 +456,7 @@ class DiscountSettingsWidget(QWidget):
             AppMessageBox.error(self, "Save Failed", query.lastError().text())
             return
 
-        policy_query = QSqlQuery()
-        policy_query.prepare(
-            """
-            INSERT INTO accounting_settings (
-                id,
-                sales_discount_policy,
-                global_sales_discount_group_id,
-                global_sales_discount_enabled,
-                updated_at
-            )
-            VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(id)
-            DO UPDATE SET
-                sales_discount_policy = excluded.sales_discount_policy,
-                global_sales_discount_group_id = excluded.global_sales_discount_group_id,
-                global_sales_discount_enabled = excluded.global_sales_discount_enabled,
-                updated_at = CURRENT_TIMESTAMP
-            """
-        )
-        policy_query.addBindValue(sales_discount_policy)
-        policy_query.addBindValue(global_discount_group_id)
-        policy_query.addBindValue(global_discount_enabled)
-        if not policy_query.exec():
-            AppMessageBox.error(self, "Save Failed", policy_query.lastError().text())
+        if not self.save_sales_discount_settings(show_feedback=False):
             return
 
         AppMessageBox.success(
