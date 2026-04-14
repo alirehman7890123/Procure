@@ -7,6 +7,41 @@ QLabel {
     background-color: transparent;
 }
 
+QCheckBox {
+    color: #223746;
+    font-family: 'montserrat';
+    font-size: 12px;
+    font-weight: 600;
+    spacing: 8px;
+    background: transparent;
+}
+
+QCheckBox:disabled {
+    color: #8CA0AE;
+}
+
+QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #9EB1BF;
+    border-radius: 3px;
+    background: #FFFFFF;
+}
+
+QCheckBox::indicator:hover {
+    border: 1px solid #6E8FA8;
+}
+
+QCheckBox::indicator:checked {
+    border: 1px solid #2F5D7C;
+    background: #2F5D7C;
+}
+
+QCheckBox::indicator:checked:disabled {
+    border: 1px solid #9FB3C2;
+    background: #9FB3C2;
+}
+
 QLineEdit {
     color: #333;
     padding: 5px 10px;

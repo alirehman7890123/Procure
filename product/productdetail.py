@@ -178,7 +178,7 @@ class ProductDetailWidget(QWidget):
         self.discount_group_edit.clear()
         self.discount_group_edit.addItem("None", None)
         query = QSqlQuery("""
-            SELECT id, name, discount_percent
+            SELECT id, name, discount_percent, COALESCE(fixed_amount, 0), COALESCE(apply_on_sale, 1)
             FROM discount_group
             WHERE status = 'active'
             ORDER BY name
@@ -187,13 +187,18 @@ class ProductDetailWidget(QWidget):
             group_id = query.value(0)
             name = str(query.value(1) or "").strip()
             percent = float(query.value(2) or 0.0)
-            self.discount_group_edit.addItem(f"{name} ({percent:.2f}%)", group_id)
+            fixed_amount = float(query.value(3) or 0.0)
+            apply_on_sale = bool(int(query.value(4) or 0))
+            self.discount_group_edit.addItem(
+                f"{name} ({percent:.2f}% + {fixed_amount:.2f}, {'Sale On' if apply_on_sale else 'Sale Off'})",
+                group_id,
+            )
 
     def populate_tax_groups(self):
         self.tax_group_edit.clear()
         self.tax_group_edit.addItem("None", None)
         query = QSqlQuery("""
-            SELECT id, name, tax_percent
+            SELECT id, name, tax_percent, COALESCE(fixed_amount, 0), COALESCE(apply_on_sale, 1)
             FROM tax_group
             WHERE status = 'active'
             ORDER BY name
@@ -202,7 +207,12 @@ class ProductDetailWidget(QWidget):
             group_id = query.value(0)
             name = str(query.value(1) or "").strip()
             percent = float(query.value(2) or 0.0)
-            self.tax_group_edit.addItem(f"{name} ({percent:.2f}%)", group_id)
+            fixed_amount = float(query.value(3) or 0.0)
+            apply_on_sale = bool(int(query.value(4) or 0))
+            self.tax_group_edit.addItem(
+                f"{name} ({percent:.2f}% + {fixed_amount:.2f}, {'Sale On' if apply_on_sale else 'Sale Off'})",
+                group_id,
+            )
 
     def get_edit_widget_text(self, widget):
         if isinstance(widget, QComboBox):

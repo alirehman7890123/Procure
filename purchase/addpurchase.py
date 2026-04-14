@@ -1,3 +1,5 @@
+import re
+
 from PySide6.QtWidgets import QWidget, QCompleter,QAbstractItemView, QVBoxLayout, QHBoxLayout, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget, QStyledItemDelegate
 from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, QTimer, Signal, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
@@ -100,6 +102,7 @@ class AddPurchaseWidget(QWidget):
         
         
         self.populate_totals_section()
+        self._install_select_all_focus_behavior()
 
         
         
@@ -404,6 +407,16 @@ class AddPurchaseWidget(QWidget):
     def setup_supplier_rep_signals(self):
         
         self.supplier_edit.currentIndexChanged.connect(self.populate_reps)    
+
+    def force_uppercase_line_edit(self, line_edit, text):
+        cursor_pos = line_edit.cursorPosition()
+        upper_text = str(text or "").upper()
+        if line_edit.text() == upper_text:
+            return
+        line_edit.blockSignals(True)
+        line_edit.setText(upper_text)
+        line_edit.setCursorPosition(min(cursor_pos, len(upper_text)))
+        line_edit.blockSignals(False)
             
         
         
@@ -413,46 +426,18 @@ class AddPurchaseWidget(QWidget):
         rate = self.rate_edit.text()
         
         
-        if qty == '':
-            qty = 0
-            
-        if rate == '':
-            rate = 0.00
-        
-        
-        discount = self.discount_edit.text()
-        
-        if discount == "":
-            discount = 0.00
-        
-        # turn it into flat discount
-        flat_discount = 0.00
-        if discount:
-            try:
-                discount_value = float(discount)
-                subtotal = float(qty) * float(rate)
-                flat_discount = (subtotal * discount_value) / 100
-            except ValueError:
-                pass
-            
-            
-        # calculate tax amount
-        tax = self.tax_edit.text()
-        
-        if tax == "":
-            tax = 0.00
-        
-        tax_amount = 0.00
-        if tax:
-            try:
-                tax_value = float(tax)
-                taxable_amount = (float(qty) * float(rate)) - flat_discount
-                tax_amount = (taxable_amount * tax_value) / 100
-            except ValueError:
-                pass
-        
+        qty_value = max(0.0, self._float_or_default(qty, 0.0))
+        rate_value = max(0.0, self._float_or_default(rate, 0.0))
+        discount_value = max(0.0, self._float_or_default(self.discount_edit.text(), 0.0))
+        tax_value = max(0.0, self._float_or_default(self.tax_edit.text(), 0.0))
+
+        subtotal = qty_value * rate_value
+        flat_discount = min(subtotal, (subtotal * discount_value) / 100.0)
+        taxable_amount = max(0.0, subtotal - flat_discount)
+        tax_amount = (taxable_amount * tax_value) / 100.0
+
         # update the total label
-        total = float(qty) * float(rate) - flat_discount + tax_amount
+        total = taxable_amount + tax_amount
         self.amount_edit.setText(f"{total:.2f}")
 
     def populate_totals_section(self):
@@ -676,7 +661,7 @@ class AddPurchaseWidget(QWidget):
         self.min_visible_rows = 5
     
         self.table = MyTable(column_ratios=[0.03, 0.25, 0.07, 0.10, 0.05, 0.05, 0.07, 0.07, 0.05, 0.10, 0.05])
-        headers = ["#", "Product", "Batch", "Expiry", "Qty", "Bonus", "Rate", "Disc % ", "Tax %", "Total", "X"]
+        headers = ["#", "Product", "Batch", "Expiry (MM-YY)", "Qty", "Bonus", "Rate", "Disc % ", "Tax %", "Total", "X"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         
@@ -790,7 +775,7 @@ class AddPurchaseWidget(QWidget):
         batch_label = QLabel("Batch")
         batch_label.setStyleSheet(field_style)
 
-        expiry_label = QLabel("Expiry")
+        expiry_label = QLabel("Expiry (MM-YY)")
         expiry_label.setStyleSheet(field_style)
 
         qty_label = QLabel("Packs")
@@ -831,37 +816,12 @@ class AddPurchaseWidget(QWidget):
         self.batch_edit = QLineEdit()
         self.batch_edit.setPlaceholderText("batch")
         self.batch_edit.setStyleSheet(field_style)
+        self.batch_edit.textEdited.connect(lambda text: self.force_uppercase_line_edit(self.batch_edit, text))
 
-        self.expiry_edit = QDateEdit()
-        self.expiry_edit.setCalendarPopup(True)
-        self.expiry_edit.setDisplayFormat("dd MMM yyyy")
-        self.expiry_edit.setMinimumDate(QDate.currentDate())
-        self.expiry_edit.setDate(self.expiry_edit.minimumDate())
-        self.expiry_edit.setStyleSheet("""
-            QDateEdit {
-                padding: 4px;
-                border: 1px solid #ccc;
-                border-radius: 4px;
-                background-color: #f9f9f9;
-                font-size: 14px;
-            }
-
-            QCalendarWidget QWidget {
-                background-color: white;
-                color: black;
-            }
-
-            QCalendarWidget QAbstractItemView {
-                selection-background-color: #5A9EC9;
-                selection-color: white;
-                color: black;
-            }
-
-            QCalendarWidget QToolButton {
-                background: none;
-                color: black;
-            }
-        """)
+        self.expiry_edit = SelectAllLineEdit()
+        self.expiry_edit.setPlaceholderText("MM-YY")
+        self.expiry_edit.setInputMask("00-00;_")
+        self.expiry_edit.setStyleSheet(field_style)
 
         self.qty_edit = QLineEdit()
         self.qty_edit.setPlaceholderText("qty")
@@ -954,7 +914,7 @@ class AddPurchaseWidget(QWidget):
 
         self.item.lineEdit().returnPressed.connect(lambda: self.handle_item_return_pressed(self.item))
         self.batch_edit.returnPressed.connect(lambda: self.focus_next_field(self.expiry_edit))
-        self.expiry_edit.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.qty_edit))
+        self.expiry_edit.returnPressed.connect(lambda: self.focus_next_field(self.qty_edit))
         self.qty_edit.returnPressed.connect(lambda: self.focus_next_field(self.bonus_edit))
         self.bonus_edit.returnPressed.connect(lambda: self.focus_next_field(self.rate_edit))
         self.rate_edit.returnPressed.connect(lambda: self.focus_next_field(self.discount_edit))
@@ -995,6 +955,45 @@ class AddPurchaseWidget(QWidget):
 
         if hasattr(widget, "selectAll"):
             widget.selectAll()
+
+    def _install_select_all_focus_behavior(self):
+        widgets = [
+            getattr(self, "supplier_edit", None),
+            getattr(self, "rep_edit", None),
+            getattr(self, "invoice_edit", None),
+            getattr(self, "item", None),
+            getattr(self, "batch_edit", None),
+            getattr(self, "expiry_edit", None),
+            getattr(self, "qty_edit", None),
+            getattr(self, "bonus_edit", None),
+            getattr(self, "rate_edit", None),
+            getattr(self, "discount_edit", None),
+            getattr(self, "tax_edit", None),
+            getattr(self, "discount_entry", None),
+            getattr(self, "tax_236g_entry", None),
+            getattr(self, "tax_236h_entry", None),
+            getattr(self, "sales_tax_entry", None),
+            getattr(self, "cn_adjustment_entry", None),
+            getattr(self, "paid_amount", None),
+            getattr(self, "payment_method", None),
+            getattr(self, "due_date_combo", None),
+        ]
+
+        for widget in widgets:
+            if widget is None:
+                continue
+            widget.installEventFilter(self)
+            line_edit = getattr(widget, "lineEdit", None)
+            if callable(line_edit):
+                child = line_edit()
+                if child is not None:
+                    child.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.FocusIn:
+            if isinstance(obj, QLineEdit) and not obj.isReadOnly():
+                QTimer.singleShot(0, obj.selectAll)
+        return super().eventFilter(obj, event)
         
         
     
@@ -1004,46 +1003,26 @@ class AddPurchaseWidget(QWidget):
         
         subtotal = 0.00
         for row in range(self.table.rowCount()):
-            
-            linetotal = self.table.cellWidget(row, 9).text()
-            
-            if linetotal:
-                try:
-                   
-                    value = float(linetotal)
-                    subtotal = subtotal + value
-                    
-                except ValueError:
-                    pass  # skip empty or invalid cells
-                
-            else:
+            line_total_widget = self.table.cellWidget(row, 9)
+            if line_total_widget is None:
                 continue
-                
+
+            subtotal += max(0.0, self._float_or_default(line_total_widget.text(), 0.0))
+
         self.gross_entry.setText(f"{subtotal:.2f}")
-        discount = self.discount_entry.text()
-        discount = float(discount) if discount else 0.00
-        
+        discount = min(max(0.0, self._float_or_default(self.discount_entry.text(), 0.0)), subtotal)
         taxable = subtotal - discount
         self.taxable_entry.setText(f"{taxable:.2f}")
-        
-        tax_236g = self.tax_236g_entry.text()
-        tax_236g = float(tax_236g) if tax_236g else 0.00
-        
-        tax_236h = self.tax_236h_entry.text()
-        tax_236h = float(tax_236h) if tax_236h else 0.00
-        
-        sales_tax = self.sales_tax_entry.text()
-        sales_tax = float(sales_tax) if sales_tax else 0.00
-        
+
+        tax_236g = max(0.0, self._float_or_default(self.tax_236g_entry.text(), 0.0))
+        tax_236h = max(0.0, self._float_or_default(self.tax_236h_entry.text(), 0.0))
+        sales_tax = max(0.0, self._float_or_default(self.sales_tax_entry.text(), 0.0))
         tax_amount = tax_236g + sales_tax - tax_236h
-        net_amount = taxable + tax_amount
-        
+        net_amount = max(0.0, taxable + tax_amount)
         self.net_amount_entry.setText(f"{net_amount:.2f}")
-        
-        cn_adjust = self.cn_adjustment_entry.text()
-        cn_adjust = float(cn_adjust) if cn_adjust else 0.00
-        
-        final_amount = net_amount - cn_adjust
+
+        cn_adjust = max(0.0, self._float_or_default(self.cn_adjustment_entry.text(), 0.0))
+        final_amount = max(0.0, net_amount - cn_adjust)
         self.final_amount.setText(f"{final_amount:.2f}")
         
         self.final_amount.setStyleSheet("font-weight: bold;")
@@ -1052,20 +1031,14 @@ class AddPurchaseWidget(QWidget):
 
 
     def calculate_payment(self):
-        
-        finalamount = self.final_amount.text()
-        finalamount = float(finalamount) if finalamount else 0.00
-        
-        paid = self.paid_amount.text()
-        paid = float(paid) if paid else 0.00
-        
+        finalamount = self._float_or_default(self.final_amount.text(), 0.0)
+        paid = max(0.0, self._float_or_default(self.paid_amount.text(), 0.0))
         remaining = finalamount - paid
-        self.remainingdata.setText(str(remaining))
+        self.remainingdata.setText(f"{remaining:.2f}")
 
     def update_due_date_availability(self):
         """Enable due date only when there is an unpaid payable balance and not written off."""
-        remaining_text = self.remainingdata.text().strip()
-        remaining = float(remaining_text) if remaining_text else 0.0
+        remaining = self._float_or_default(self.remainingdata.text(), 0.0)
         should_enable = remaining > 0 and not self.writeoff_check.isChecked()
 
         self.due_date_combo.setEnabled(should_enable)
@@ -1090,6 +1063,90 @@ class AddPurchaseWidget(QWidget):
             return None
 
         return QDate.currentDate().addDays(days).toString("yyyy-MM-dd")
+
+    def parse_expiry_month_year(self, text):
+        raw = str(text or "").strip()
+        if not raw:
+            return None
+
+        match = re.fullmatch(r"(\d{2})-(\d{2})", raw)
+        if not match:
+            return None
+
+        month = int(match.group(1))
+        year_two_digits = int(match.group(2))
+        if month < 1 or month > 12:
+            return None
+
+        year = 2000 + year_two_digits
+        normalized = QDate(year, month, 1)
+        if not normalized.isValid():
+            return None
+
+        current_month_start = QDate.currentDate().addDays(1 - QDate.currentDate().day())
+        if normalized < current_month_start:
+            return None
+
+        return normalized
+
+    def expiry_month_year_text(self, date_value):
+        if date_value is None or not date_value.isValid():
+            return ""
+        return date_value.toString("MM-yy")
+
+    def _text_or_none(self, value):
+        text = str(value).strip() if value is not None else ""
+        return text if text else None
+
+    def _text_or_default(self, value, default=""):
+        text = str(value).strip() if value is not None else ""
+        return text if text else default
+
+    def _int_or_default(self, value, default=0):
+        try:
+            if value is None or str(value).strip() == "":
+                return int(default)
+            return int(value)
+        except (TypeError, ValueError):
+            return int(default)
+
+    def _clean_numeric_text(self, value):
+        text = "" if value is None else str(value).strip()
+        if not text:
+            return ""
+
+        text = text.replace(",", "")
+        text = re.sub(r"[^0-9.\-]", "", text)
+
+        if text.count(".") > 1:
+            first_dot = text.find(".")
+            text = text[:first_dot + 1] + text[first_dot + 1:].replace(".", "")
+
+        if text in {"", "-", ".", "-."}:
+            return ""
+
+        return text
+
+    def _float_or_default(self, value, default=0.0):
+        cleaned = self._clean_numeric_text(value)
+        if not cleaned:
+            return float(default)
+        try:
+            return float(cleaned)
+        except (TypeError, ValueError):
+            return float(default)
+
+    def _normalize_payment_data(self, payment):
+        payment = dict(payment or {})
+        return {
+            "payment_method": self._text_or_default(payment.get("payment_method"), "Cash"),
+            "bank_name": self._text_or_none(payment.get("bank_name")),
+            "account_no": self._text_or_none(payment.get("account_no")),
+            "transaction_mode": self._text_or_none(payment.get("transaction_mode")),
+            "wallet_provider": self._text_or_none(payment.get("wallet_provider")),
+            "wallet_no": self._text_or_none(payment.get("wallet_no")),
+            "payment_reference": self._text_or_none(payment.get("payment_reference")),
+        }
         
     
 
@@ -1208,10 +1265,19 @@ class AddPurchaseWidget(QWidget):
         bonus_data = self.bonus_edit.text()
         rate_data = self.rate_edit.text()
         batch_data = self.batch_edit.text()
-        expiry_data = ""
-        qdate = self.expiry_edit.date()
-        if qdate.isValid() and qdate > QDate.currentDate():
-            expiry_data = qdate.toString("yyyy-MM-dd")
+        expiry_data = self.expiry_edit.text().strip()
+        if expiry_data:
+            parsed_expiry = self.parse_expiry_month_year(expiry_data)
+            if parsed_expiry is None:
+                AppMessageBox.information(
+                    self,
+                    'Error',
+                    "Please enter expiry in MM-YY format, for example 04-26."
+                )
+                self.expiry_edit.setFocus()
+                self.expiry_edit.selectAll()
+                return
+            expiry_data = self.expiry_month_year_text(parsed_expiry)
         discount_data = self.discount_edit.text()
         tax_data = self.tax_edit.text()
         total_data = self.amount_edit.text()
@@ -1303,7 +1369,7 @@ class AddPurchaseWidget(QWidget):
         self.bonus_edit.clear()
         self.rate_edit.clear()
         self.batch_edit.clear()
-        self.expiry_edit.setDate(QDate.currentDate())
+        self.expiry_edit.clear()
         self.discount_edit.clear()
         self.tax_edit.clear()
         
@@ -1621,22 +1687,18 @@ class AddPurchaseWidget(QWidget):
         # ------------------------------------------------------------
         # 3) Convert numbers using your same style
         # ------------------------------------------------------------
-        try:
-            subtotal = float(subtotal) if subtotal else 0
-            discount = float(discount) if discount else 0
-            taxable = float(taxable) if taxable else 0
-            tax_236g = float(tax_236g) if tax_236g else 0
-            tax_236h = float(tax_236h) if tax_236h else 0
-            sales_tax = float(sales_tax) if sales_tax else 0
+        subtotal = max(0.0, self._float_or_default(subtotal, 0.0))
+        discount = min(max(0.0, self._float_or_default(discount, 0.0)), subtotal)
+        taxable = max(0.0, self._float_or_default(taxable, subtotal - discount))
+        tax_236g = max(0.0, self._float_or_default(tax_236g, 0.0))
+        tax_236h = max(0.0, self._float_or_default(tax_236h, 0.0))
+        sales_tax = max(0.0, self._float_or_default(sales_tax, 0.0))
 
-            netamount = float(netamount) if netamount else 0
-            cn_adjustment = float(cn_adjustment) if cn_adjustment else 0
-            total = float(final_amount) if final_amount else 0
-            paid = float(paid) if paid else 0
-            remaining = float(remaining) if remaining else 0
-
-        except ValueError:
-            raise Exception("One or more numeric fields contain invalid values.")
+        netamount = max(0.0, self._float_or_default(netamount, taxable + tax_236g + sales_tax - tax_236h))
+        cn_adjustment = max(0.0, self._float_or_default(cn_adjustment, 0.0))
+        total = max(0.0, self._float_or_default(final_amount, netamount - cn_adjustment))
+        paid = max(0.0, self._float_or_default(paid, 0.0))
+        remaining = self._float_or_default(remaining, total - paid)
 
         # ------------------------------------------------------------
         # 4) Calculate header net amount exactly in your style
@@ -1738,6 +1800,26 @@ class AddPurchaseWidget(QWidget):
         
     
     def _save_purchase_header(self, data):
+        normalized = {
+            "supplier": self._int_or_default(data.get("supplier"), 0),
+            "rep": self._int_or_default(data.get("rep"), 0) if data.get("rep") not in (None, "") else None,
+            "sellerinvoice": self._text_or_default(data.get("sellerinvoice"), ""),
+            "subtotal": self._float_or_default(data.get("subtotal"), 0.0),
+            "discount": self._float_or_default(data.get("discount"), 0.0),
+            "tax_236g": self._float_or_default(data.get("tax_236g"), 0.0),
+            "tax_236h": self._float_or_default(data.get("tax_236h"), 0.0),
+            "sales_tax": self._float_or_default(data.get("sales_tax"), 0.0),
+            "netamount": self._float_or_default(data.get("netamount"), 0.0),
+            "cn_adjustment": self._float_or_default(data.get("cn_adjustment"), 0.0),
+            "total": self._float_or_default(data.get("total"), 0.0),
+            "paid": self._float_or_default(data.get("paid"), 0.0),
+            "remaining": self._float_or_default(data.get("remaining"), 0.0),
+            "writeoff": self._float_or_default(data.get("writeoff"), 0.0),
+            "payable": self._float_or_default(data.get("payable"), 0.0),
+            "receivable": self._float_or_default(data.get("receivable"), 0.0),
+            "due_date": self._text_or_none(data.get("due_date")),
+            "session_id": self._int_or_default(data.get("session_id"), 0),
+        }
 
         query = QSqlQuery()
         query.prepare("""
@@ -1767,24 +1849,24 @@ class AddPurchaseWidget(QWidget):
         # ------------------------------------------------------------
         # 3) Bind values in the same sequence as query columns
         # ------------------------------------------------------------
-        query.addBindValue(data["supplier"])
-        query.addBindValue(data["rep"])
-        query.addBindValue(data["sellerinvoice"])
-        query.addBindValue(data["subtotal"])
-        query.addBindValue(data["discount"])
-        query.addBindValue(data["tax_236g"])
-        query.addBindValue(data["tax_236h"])
-        query.addBindValue(data["sales_tax"])
-        query.addBindValue(data["netamount"])
-        query.addBindValue(data["cn_adjustment"])
-        query.addBindValue(data["total"])
-        query.addBindValue(data["paid"])
-        query.addBindValue(data["remaining"])
-        query.addBindValue(data["writeoff"])
-        query.addBindValue(data["payable"])
-        query.addBindValue(data["receivable"])
-        query.addBindValue(data["due_date"])
-        query.addBindValue(data["session_id"])
+        query.addBindValue(normalized["supplier"])
+        query.addBindValue(normalized["rep"])
+        query.addBindValue(normalized["sellerinvoice"])
+        query.addBindValue(normalized["subtotal"])
+        query.addBindValue(normalized["discount"])
+        query.addBindValue(normalized["tax_236g"])
+        query.addBindValue(normalized["tax_236h"])
+        query.addBindValue(normalized["sales_tax"])
+        query.addBindValue(normalized["netamount"])
+        query.addBindValue(normalized["cn_adjustment"])
+        query.addBindValue(normalized["total"])
+        query.addBindValue(normalized["paid"])
+        query.addBindValue(normalized["remaining"])
+        query.addBindValue(normalized["writeoff"])
+        query.addBindValue(normalized["payable"])
+        query.addBindValue(normalized["receivable"])
+        query.addBindValue(normalized["due_date"])
+        query.addBindValue(normalized["session_id"])
 
         # ------------------------------------------------------------
         # 4) Execute insert
@@ -1880,7 +1962,9 @@ class AddPurchaseWidget(QWidget):
             batch = batch_edit.text().strip()
             expiry = expiry_edit.text().strip()
             if expiry:
-                parsed = QDate.fromString(expiry, "yyyy-MM-dd")
+                parsed = self.parse_expiry_month_year(expiry)
+                if parsed is None:
+                    parsed = QDate.fromString(expiry, "yyyy-MM-dd")
                 if not parsed.isValid():
                     parsed = QDate.fromString(expiry, "dd-MM-yyyy")
                 if not parsed.isValid():
@@ -1940,15 +2024,12 @@ class AddPurchaseWidget(QWidget):
             # --------------------------------------------------------
             # 8) Convert numeric values
             # --------------------------------------------------------
-            try:
-                qty = float(qty) if qty else 0
-                bonus = float(bonus) if bonus else 0
-                rate = float(rate) if rate else 0
-                item_discount = float(item_discount) if item_discount else 0
-                item_tax = float(item_tax) if item_tax else 0
-                item_total = float(item_total) if item_total else 0
-            except ValueError:
-                raise Exception(f"Invalid numeric value in row {row + 1}.")
+            qty = self._float_or_default(qty, 0.0)
+            bonus = self._float_or_default(bonus, 0.0)
+            rate = self._float_or_default(rate, 0.0)
+            item_discount = self._float_or_default(item_discount, 0.0)
+            item_tax = self._float_or_default(item_tax, 0.0)
+            item_total = self._float_or_default(item_total, 0.0)
 
             # --------------------------------------------------------
             # 9) Business validation
@@ -1985,36 +2066,18 @@ class AddPurchaseWidget(QWidget):
                 if check_product_combo is not None and check_product_combo.currentData() is not None:
                     check_total_edit = self.table.cellWidget(check_row, 9)
                     if check_total_edit is not None:
-                        try:
-                            line_subtotal += float(check_total_edit.text() or 0)
-                        except ValueError:
-                            pass
+                        line_subtotal += max(0.0, self._float_or_default(check_total_edit.text(), 0.0))
             
             # Get header adjustments for landing cost distribution
-            try:
-                header_discount = float(self.discount_entry.text() or 0)
-            except ValueError:
-                header_discount = 0.0
-            try:
-                header_tax_236g = float(self.tax_236g_entry.text() or 0)
-            except (ValueError, AttributeError):
-                header_tax_236g = 0.0
-            try:
-                header_tax_236h = float(self.tax_236h_entry.text() or 0)
-            except (ValueError, AttributeError):
-                header_tax_236h = 0.0
-            try:
-                header_sales_tax = float(self.sales_tax_entry.text() or 0)
-            except (ValueError, AttributeError):
-                header_sales_tax = 0.0
-            try:
-                cn_adjust = float(self.cn_adjustment_entry.text() or 0)
-            except (ValueError, AttributeError):
-                cn_adjust = 0.0
+            header_discount = min(max(0.0, self._float_or_default(self.discount_entry.text(), 0.0)), line_subtotal)
+            header_tax_236g = max(0.0, self._float_or_default(self.tax_236g_entry.text(), 0.0))
+            header_tax_236h = max(0.0, self._float_or_default(self.tax_236h_entry.text(), 0.0))
+            header_sales_tax = max(0.0, self._float_or_default(self.sales_tax_entry.text(), 0.0))
+            cn_adjust = max(0.0, self._float_or_default(self.cn_adjustment_entry.text(), 0.0))
             
             # Calculate total with all header adjustments
             header_adjustments = (-header_discount + header_tax_236g - header_tax_236h + header_sales_tax - cn_adjust)
-            total_with_fees = line_subtotal + header_adjustments
+            total_with_fees = max(0.0, line_subtotal + header_adjustments)
             
             # Distribution factor for this line
             if line_subtotal > 0:
@@ -2022,7 +2085,16 @@ class AddPurchaseWidget(QWidget):
             else:
                 distribution_factor = 1.0
             
-            landing_cost = item_total * distribution_factor
+            product = self._int_or_default(product, 0)
+            batch = self._text_or_none(batch)
+            expiry = self._text_or_none(expiry)
+            qty = self._float_or_default(qty, 0.0)
+            bonus = self._float_or_default(bonus, 0.0)
+            rate = self._float_or_default(rate, 0.0)
+            item_discount = self._float_or_default(item_discount, 0.0)
+            item_tax = self._float_or_default(item_tax, 0.0)
+            item_total = self._float_or_default(item_total, 0.0)
+            landing_cost = self._float_or_default(item_total * distribution_factor, 0.0)
             
             item_query = QSqlQuery()
             item_query.prepare("""
@@ -2106,8 +2178,8 @@ class AddPurchaseWidget(QWidget):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
 
-            batch_query.addBindValue(batch if batch else None)
-            batch_query.addBindValue(expiry if expiry else None)
+            batch_query.addBindValue(batch)
+            batch_query.addBindValue(expiry)
             
             batch_query.addBindValue(product)
             batch_query.addBindValue(purchase_item_id if purchase_item_id else None)
@@ -2118,10 +2190,10 @@ class AddPurchaseWidget(QWidget):
                 else landing_cost
             )
 
-            batch_query.addBindValue(received_qty)
-            batch_query.addBindValue(paid_qty)
-            batch_query.addBindValue(received_qty)
-            batch_query.addBindValue(unit_cost_per_unit)
+            batch_query.addBindValue(self._float_or_default(received_qty, 0.0))
+            batch_query.addBindValue(self._float_or_default(paid_qty, 0.0))
+            batch_query.addBindValue(self._float_or_default(received_qty, 0.0))
+            batch_query.addBindValue(self._float_or_default(unit_cost_per_unit, 0.0))
             batch_query.addBindValue('PURCHASE')
             
             print("Batch query lastError before exec:", batch_query.lastError().text())
@@ -2170,15 +2242,15 @@ class AddPurchaseWidget(QWidget):
         if purchase_id is None:
             raise Exception("Invalid purchase_id received in _save_purchase_transaction().")
 
-        supplier = data["supplier"]
-        rep = data["rep"]
-        session_id = data["session_id"]
+        supplier = self._int_or_default(data.get("supplier"), 0)
+        rep = self._int_or_default(data.get("rep"), 0) if data.get("rep") not in (None, "") else None
+        session_id = self._int_or_default(data.get("session_id"), 0)
 
-        paid = data["paid"]
-        writeoff = data["writeoff"]
-        payable = data["payable"]
-        receivable = data["receivable"]
-        total = data["total"]
+        paid = self._float_or_default(data.get("paid"), 0.0)
+        writeoff = self._float_or_default(data.get("writeoff"), 0.0)
+        payable = self._float_or_default(data.get("payable"), 0.0)
+        receivable = self._float_or_default(data.get("receivable"), 0.0)
+        total = self._float_or_default(data.get("total"), 0.0)
 
         # ------------------------------------------------------------
         # 1) Get supplier balances BEFORE transaction
@@ -2247,7 +2319,7 @@ class AddPurchaseWidget(QWidget):
         query.addBindValue(rep)
         query.addBindValue(session_id)
         
-        payment = self.payment_handler.payment_data.copy()
+        payment = self._normalize_payment_data(self.payment_handler.payment_data.copy())
         
         print(payment)
         
@@ -2355,7 +2427,7 @@ class AddPurchaseWidget(QWidget):
         self.bonus_edit.clear()
         self.rate_edit.clear()
         self.batch_edit.clear()
-        self.expiry_edit.setDate(QDate.currentDate())
+        self.expiry_edit.clear()
         self.discount_edit.clear()
         self.tax_edit.clear()
         self.item.setCurrentIndex(-1)
@@ -2394,20 +2466,26 @@ class AddPurchaseWidget(QWidget):
             print("New Product is: ", new_product)
             
             
-            item_name = dialog.name_input.text()
-            item_form = dialog.form_input.currentText()
-            item_packing = dialog.packing_input.text()
+            item_name = self._text_or_default(dialog.name_input.text(), "")
+            item_form = self._text_or_none(dialog.form_input.currentText())
+            item_packing = self._text_or_none(dialog.packing_input.text())
             
-            display_name = f"{item_name} {item_form} {item_packing}"
+            display_name_parts = [item_name]
+            if item_form:
+                display_name_parts.append(item_form)
+            if item_packing:
+                display_name_parts.append(item_packing)
+            display_name = " ".join(display_name_parts).strip()
             print("The display name is: ", display_name)
             
             manufacturer = dialog.brand_input.currentData()
-            packsize = dialog.packsize_input.text()
-            saleprice = dialog.saleprice_input.text()
+            manufacturer = self._int_or_default(manufacturer, 0) if manufacturer not in (None, "") else None
+            packsize = self._int_or_default(dialog.packsize_input.text(), 1)
+            saleprice = self._float_or_default(dialog.saleprice_input.text(), 0.0)
             
             # Insert Data into Database
             
-            brand_name = item_name.strip() if item_name.strip() else None
+            brand_name = self._text_or_none(item_name)
             if brand_name is None:
                 raise Exception("Brand is required for a new product.")
 
@@ -2422,18 +2500,18 @@ class AddPurchaseWidget(QWidget):
                     form,
                     strength,
                     packing,
+                    rack,
                     manufacturer_id,
                     status
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
             
-            code = ''
-            reg_no = ''
-            generic_name = ''
-            packing = ''
-            
-            packsize = int(packsize)
+            code = None
+            reg_no = None
+            generic_name = None
+            packing = None
+
             product_query.addBindValue(display_name)
             product_query.addBindValue(code)
             product_query.addBindValue(reg_no)
@@ -2442,6 +2520,7 @@ class AddPurchaseWidget(QWidget):
             product_query.addBindValue(item_form)
             product_query.addBindValue(item_packing)
             product_query.addBindValue(packing)
+            product_query.addBindValue("")
             product_query.addBindValue(manufacturer)
             product_query.addBindValue("used")
 

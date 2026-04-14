@@ -37,6 +37,7 @@ from PySide6.QtWidgets import QMessageBox, QApplication
 from utilities.permissions import Permissions
 from utilities.license_core import get_current_license_payload, get_license_days_remaining, is_demo_license
 from utilities.stylus import load_stylesheets
+from utilities.app_theme import get_theme_palette
 
 
 
@@ -127,11 +128,14 @@ class MainWindow(QMainWindow):
         self.sidebar_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
         self.sidebar_scroll.setStyleSheet(""" 
-                                    background-color: transparent;
+                                    background-color: #151325;
 
                                     QScrollArea {
-                                        background-color: transparent;
+                                        background-color: #151325;
                                         border: none;
+                                    }
+                                    QScrollArea > QWidget > QWidget {
+                                        background-color: #151325;
                                     }
                                     QScrollBar:vertical,
                                     QScrollBar:horizontal {
@@ -157,10 +161,10 @@ class MainWindow(QMainWindow):
         self.sidebar_rail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.sidebar_rail_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.sidebar_rail_scroll.setStyleSheet("""
-                                    background-color: #2F5D7C;
+                                    background-color: #151325;
 
                                     QScrollArea {
-                                        background-color: #2F5D7C;
+                                        background-color: #151325;
                                         border: none;
                                     }
                                     QScrollBar:vertical,
@@ -174,6 +178,7 @@ class MainWindow(QMainWindow):
         self.sidebar_rail_scroll.hide()
         self.sidebar_rail_scroll.setMinimumWidth(0)
         self.sidebar_rail_scroll.setMaximumWidth(0)
+        self.sidebar_rail_scroll.setFixedWidth(0)
     
         # SIDE-BAR WIDGET
         sidebar_widget = QWidget()
@@ -252,9 +257,6 @@ class MainWindow(QMainWindow):
         self.ham_menu_icon = self._load_icon("res/rail_icons/ham.svg", "res/ham.png")
         self.ham_close_icon = self._load_icon("res/rail_icons/ham_close.svg")
         self.ham_button.setIcon(self.ham_close_icon if not self.ham_close_icon.isNull() else self.ham_menu_icon)
-        self.ham_button.clicked.connect(self.collapse_sidebar_from_header)
-
-        header_layout.addWidget(self.ham_button, 0, Qt.AlignVCenter)
         
         business_title = QLabel("Muzammil Traders")
         business_name = self.set_business_name()
@@ -586,31 +588,30 @@ class MainWindow(QMainWindow):
                 color: #FFFFFF;
             }
         """)
-        self.sidebar_footer_action.clicked.connect(self.logout)
-
         self.sidebar_footer_layout.addWidget(self.sidebar_avatar)
         self.sidebar_footer_layout.addWidget(self.sidebar_profile_text_wrap, 1)
-        self.sidebar_footer_layout.addWidget(self.sidebar_footer_action)
+        self.sidebar_footer_action.hide()
         self.sidebar_panel_layout.addWidget(self.sidebar_footer)
 
-        # Compact sidebar rail buttons with custom SVG icons
-        self.rail_dashboard_button = self.create_rail_button("res/rail_icons/dashboard.svg", "Dashboard", "DB")
-        self.rail_business_button = self.create_rail_button("res/rail_icons/business.svg", "Business", "BS")
-        self.rail_profile_button = self.create_rail_button("res/rail_icons/profile.svg", "Profile", "PF")
-        self.rail_supplier_button = self.create_rail_button("res/rail_icons/supplier.svg", "Suppliers", "SP")
-        self.rail_salesrep_button = self.create_rail_button("res/rail_icons/salesrep.svg", "Sales Rep", "SR")
-        self.rail_purchase_button = self.create_rail_button("res/rail_icons/purchase.svg", "Purchase Invoice", "PI")
-        self.rail_po_button = self.create_rail_button("res/rail_icons/po.svg", "Purchase Orders", "PO")
-        self.rail_grn_button = self.create_rail_button("res/rail_icons/grn.svg", "Goods Receipt", "GR")
-        self.rail_sales_button = self.create_rail_button("res/rail_icons/sales.svg", "Sales", "SL")
-        self.rail_customer_button = self.create_rail_button("res/rail_icons/customer.svg", "Customers", "CU")
-        self.rail_product_button = self.create_rail_button("res/rail_icons/product.svg", "Product", "PR")
-        self.rail_employee_button = self.create_rail_button("res/rail_icons/employee.svg", "Employees", "EM")
-        self.rail_transaction_button = self.create_rail_button("res/rail_icons/transaction.svg", "Transactions", "TR")
-        self.rail_purchase_return = self.create_rail_button("res/rail_icons/purchase_return.svg", "Purchase Return", "PN")
-        self.rail_sales_return = self.create_rail_button("res/rail_icons/sales_return.svg", "Sales Return", "SN")
-        self.rail_expense_button = self.create_rail_button("res/rail_icons/expense.svg", "Expenses", "EX")
-        self.rail_reports_button = self.create_rail_button("res/rail_icons/reports.svg", "Reports", "RP")
+        # Mini sidebar (rail) removed.
+        self.rail_dashboard_button = None
+        self.rail_business_button = None
+        self.rail_profile_button = None
+        self.rail_supplier_button = None
+        self.rail_salesrep_button = None
+        self.rail_purchase_button = None
+        self.rail_po_button = None
+        self.rail_grn_button = None
+        self.rail_sales_button = None
+        self.rail_customer_button = None
+        self.rail_product_button = None
+        self.rail_employee_button = None
+        self.rail_transaction_button = None
+        self.rail_purchase_return = None
+        self.rail_sales_return = None
+        self.rail_expense_button = None
+        self.rail_reports_button = None
+        self.rail_toggle_button = None
 
         self.main_sidebar_buttons = [
             self.dashboard_button,
@@ -655,53 +656,9 @@ class MainWindow(QMainWindow):
         self._configure_main_sidebar_icons()
         self._refresh_sidebar_profile()
         self.sidebar_search_edit.textChanged.connect(self._filter_sidebar_buttons)
+        self.refresh_theme()
 
-        self.rail_nav_buttons = [
-            self.rail_dashboard_button,
-            self.rail_business_button,
-            self.rail_profile_button,
-            self.rail_supplier_button,
-            self.rail_salesrep_button,
-            self.rail_purchase_button,
-            self.rail_po_button,
-            self.rail_grn_button,
-            self.rail_sales_button,
-            self.rail_customer_button,
-            self.rail_product_button,
-            self.rail_employee_button,
-            self.rail_transaction_button,
-            self.rail_purchase_return,
-            self.rail_sales_return,
-            self.rail_expense_button,
-            self.rail_reports_button,
-        ]
-
-        self.rail_toggle_button = self.create_rail_button("res/rail_icons/ham.svg", "Expand Sidebar", "", variant="toggle")
-        self.rail_toggle_button.clicked.connect(self.reopen_sidebar_from_rail)
-        rail_toggle_wrap = QWidget()
-        rail_toggle_layout = QVBoxLayout(rail_toggle_wrap)
-        rail_toggle_layout.setContentsMargins(8, 18, 8, 20)
-        rail_toggle_layout.setSpacing(0)
-        rail_toggle_layout.addWidget(self.rail_toggle_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(rail_toggle_wrap, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_dashboard_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_business_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_profile_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_supplier_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_salesrep_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_purchase_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_po_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_grn_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_sales_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_customer_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_product_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_employee_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_transaction_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_purchase_return, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_sales_return, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_expense_button, 0, Qt.AlignHCenter)
-        rail_layout.addWidget(self.rail_reports_button, 0, Qt.AlignHCenter)
-        rail_layout.addStretch()
+        self.rail_nav_buttons = []
 
     
         self.apply_role_permissions()
@@ -771,26 +728,6 @@ class MainWindow(QMainWindow):
         self.reports_button.clicked.connect(lambda: self.set_reports(self.reports, self.main_content_layout))
         # self.holdsales_button.clicked.connect(lambda: self.set_holdsales(self.holdsales, self.main_content_layout))
 
-        self.rail_dashboard_button.clicked.connect(lambda: self.set_dashboard(self.dashboard, self.main_content_layout))
-        self.rail_business_button.clicked.connect(lambda: self.set_business(self.business, self.main_content_layout))
-        self.rail_profile_button.clicked.connect(lambda: self.set_profile(self.profile, self.main_content_layout))
-        self.rail_supplier_button.clicked.connect(lambda: self.set_supplier(self.supplier, self.main_content_layout))
-        self.rail_salesrep_button.clicked.connect(lambda: self.set_salesrep(self.salesrep, self.main_content_layout))
-        self.rail_purchase_button.clicked.connect(lambda: self.set_purchase(self.purchase, self.main_content_layout))
-        self.rail_po_button.clicked.connect(lambda: self.set_po(self.po, self.main_content_layout))
-        self.rail_grn_button.clicked.connect(lambda: self.set_grn(self.grn, self.main_content_layout))
-        self.rail_sales_button.clicked.connect(lambda: self.set_sales(self.base_sales, self.main_content_layout))
-        self.rail_customer_button.clicked.connect(lambda: self.set_customer(self.base_customer, self.main_content_layout))
-        self.rail_product_button.clicked.connect(lambda: self.set_product(self.product, self.main_content_layout))
-        self.rail_employee_button.clicked.connect(lambda: self.set_employee(self.employee, self.main_content_layout))
-        self.rail_transaction_button.clicked.connect(lambda: self.set_transaction(self.transaction, self.main_content_layout))
-        self.rail_purchase_return.clicked.connect(lambda: self.set_purchasereturn(self.purchasereturn, self.main_content_layout))
-        self.rail_sales_return.clicked.connect(lambda: self.set_salesreturn(self.salesreturn, self.main_content_layout))
-        self.rail_expense_button.clicked.connect(lambda: self.set_expense(self.expense, self.main_content_layout))
-        self.rail_reports_button.clicked.connect(lambda: self.set_reports(self.reports, self.main_content_layout))
-        
-        
-        
         from PySide6.QtGui import QKeySequence, QShortcut
 
         
@@ -838,23 +775,23 @@ class MainWindow(QMainWindow):
         # self.main_content_layout.addWidget(self.holdsales)
 
         self.widget_sidebar_map = {
-            self.dashboard: (self.dashboard_button, self.rail_dashboard_button),
-            self.business: (self.business_button, self.rail_business_button),
-            self.profile: (self.profile_button, self.rail_profile_button),
-            self.supplier: (self.supplier_button, self.rail_supplier_button),
-            self.salesrep: (self.salesrep_button, self.rail_salesrep_button),
-            self.purchase: (self.purchase_button, self.rail_purchase_button),
-            self.po: (self.po_button, self.rail_po_button),
-            self.grn: (self.grn_button, self.rail_grn_button),
-            self.base_sales: (self.sales_button, self.rail_sales_button),
-            self.base_customer: (self.customer_button, self.rail_customer_button),
-            self.product: (self.product_button, self.rail_product_button),
-            self.employee: (self.employee_button, self.rail_employee_button),
-            self.transaction: (self.transaction_button, self.rail_transaction_button),
-            self.purchasereturn: (self.purchase_return, self.rail_purchase_return),
-            self.salesreturn: (self.sales_return, self.rail_sales_return),
-            self.expense: (self.expense_button, self.rail_expense_button),
-            self.reports: (self.reports_button, self.rail_reports_button),
+            self.dashboard: (self.dashboard_button, None),
+            self.business: (self.business_button, None),
+            self.profile: (self.profile_button, None),
+            self.supplier: (self.supplier_button, None),
+            self.salesrep: (self.salesrep_button, None),
+            self.purchase: (self.purchase_button, None),
+            self.po: (self.po_button, None),
+            self.grn: (self.grn_button, None),
+            self.base_sales: (self.sales_button, None),
+            self.base_customer: (self.customer_button, None),
+            self.product: (self.product_button, None),
+            self.employee: (self.employee_button, None),
+            self.transaction: (self.transaction_button, None),
+            self.purchasereturn: (self.purchase_return, None),
+            self.salesreturn: (self.sales_return, None),
+            self.expense: (self.expense_button, None),
+            self.reports: (self.reports_button, None),
         }
 
         self._set_sidebar_collapsed(False)
@@ -887,15 +824,92 @@ class MainWindow(QMainWindow):
         day_label = "day" if self.demo_days_remaining == 1 else "days"
         return f'ProCure Medical - Demo ({self.demo_days_remaining} {day_label} left)'
 
+    def refresh_theme(self):
+        palette = get_theme_palette()
+        sidebar_bg = palette["sidebar_bg"]
+        sidebar_border = palette["sidebar_border"]
+        primary = palette["primary_main"]
+        primary_hover = palette["primary_hover"]
+        active_text = palette["sidebar_active_text"]
+
+        self.setStyleSheet(load_stylesheets())
+
+        self.sidebar_scroll.setStyleSheet(f""" 
+                                    background-color: {sidebar_bg};
+
+                                    QScrollArea {{
+                                        background-color: {sidebar_bg};
+                                        border: none;
+                                    }}
+                                    QScrollArea > QWidget > QWidget {{
+                                        background-color: {sidebar_bg};
+                                    }}
+                                    QScrollBar:vertical,
+                                    QScrollBar:horizontal {{
+                                        width: 0px;
+                                        height: 0px;
+                                        background: transparent;
+                                        border: none;
+                                    }}
+                                """)
+        self.sidebar_panel.setStyleSheet(f"""
+            QWidget#SidebarPanel {{
+                background-color: {sidebar_bg};
+                border: 1px solid {sidebar_border};
+                border-radius: 0px;
+            }}
+        """)
+        self.sidebar_brand_mark.setStyleSheet(f"""
+            background-color: {primary};
+            color: #FFFFFF;
+            border-radius: 14px;
+            font-weight: 800;
+            font-size: 13px;
+        """)
+        self.sidebar_search_wrap.setStyleSheet(f"""
+            QWidget#SidebarSearchWrap {{
+                background-color: {primary_hover};
+                border: 1px solid {sidebar_border};
+                border-radius: 12px;
+            }}
+        """)
+        self.sidebar_avatar.setStyleSheet(f"""
+            background-color: {primary};
+            color: #FFFFFF;
+            border-radius: 17px;
+            font-weight: 800;
+            font-size: 12px;
+        """)
+        self.sidebar_footer_action.setStyleSheet(f"""
+            QPushButton {{
+                color: {active_text};
+                background-color: transparent;
+                border: none;
+                border-radius: 13px;
+                font-size: 15px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{
+                background-color: {primary_hover};
+            }}
+        """)
+
+        for btn in getattr(self, "main_sidebar_buttons", []):
+            refresh = getattr(btn, "refresh_theme", None)
+            if callable(refresh):
+                refresh()
+
+        current = self.main_content_layout.currentWidget() if hasattr(self, "main_content_layout") else None
+        if current is not None:
+            self._set_active_sidebar_by_widget(current)
+
     def apply_demo_restrictions(self):
         if not self.demo_mode:
             return
 
         demo_tooltip = "Reports are unavailable in the 15-day demo."
         self.reports_button.setEnabled(False)
-        self.rail_reports_button.setEnabled(False)
         self.reports_button.setToolTip(demo_tooltip)
-        self.rail_reports_button.setToolTip(demo_tooltip)
 
         
         
@@ -1284,23 +1298,23 @@ class MainWindow(QMainWindow):
     
     def apply_role_permissions(self):
         permission_to_buttons = {
-            "dashboard": (self.dashboard_button, self.rail_dashboard_button),
-            "business.view": (self.business_button, self.rail_business_button),
-            "profile.view": (self.profile_button, self.rail_profile_button),
-            "supplier.view": (self.supplier_button, self.rail_supplier_button),
-            "rep.view": (self.salesrep_button, self.rail_salesrep_button),
-            "purchase.view": (self.purchase_button, self.rail_purchase_button),
-            "po.view": (self.po_button, self.rail_po_button),
-            "grn.view": (self.grn_button, self.rail_grn_button),
-            "sales.view": (self.sales_button, self.rail_sales_button),
-            "customer.view": (self.customer_button, self.rail_customer_button),
-            "product.view": (self.product_button, self.rail_product_button),
-            "employee.view": (self.employee_button, self.rail_employee_button),
-            "transactions.view": (self.transaction_button, self.rail_transaction_button),
-            "purchasereturn.view": (self.purchase_return, self.rail_purchase_return),
-            "salesreturn.view": (self.sales_return, self.rail_sales_return),
-            "expense.view": (self.expense_button, self.rail_expense_button),
-            "reports.view": (self.reports_button, self.rail_reports_button),
+            "dashboard": (self.dashboard_button, None),
+            "business.view": (self.business_button, None),
+            "profile.view": (self.profile_button, None),
+            "supplier.view": (self.supplier_button, None),
+            "rep.view": (self.salesrep_button, None),
+            "purchase.view": (self.purchase_button, None),
+            "po.view": (self.po_button, None),
+            "grn.view": (self.grn_button, None),
+            "sales.view": (self.sales_button, None),
+            "customer.view": (self.customer_button, None),
+            "product.view": (self.product_button, None),
+            "employee.view": (self.employee_button, None),
+            "transactions.view": (self.transaction_button, None),
+            "purchasereturn.view": (self.purchase_return, None),
+            "salesreturn.view": (self.sales_return, None),
+            "expense.view": (self.expense_button, None),
+            "reports.view": (self.reports_button, None),
         }
 
         for permission_name, buttons in permission_to_buttons.items():
@@ -1308,7 +1322,8 @@ class MainWindow(QMainWindow):
                 continue
 
             for btn in buttons:
-                btn.hide()
+                if btn is not None:
+                    btn.hide()
             
             
 
@@ -1356,11 +1371,32 @@ class MainWindow(QMainWindow):
 
     def _configure_main_sidebar_icons(self):
         for btn, icon_path in self.main_sidebar_icon_map.items():
-            btn.setProperty("sidebar_icon_path", resource_path(icon_path))
+            btn.setProperty("sidebar_icon_path", icon_path)
             icon = self._load_icon(icon_path)
             if not icon.isNull():
                 btn.setIcon(icon)
-                btn.setIconSize(QSize(16, 16))
+                btn.setIconSize(QSize(18, 18))
+            self._set_main_button_icon_tone(btn, "#DDD9EB")
+
+    def _set_main_button_icon_tone(self, btn, color_hex):
+        icon_relative_path = btn.property("sidebar_icon_path")
+        if not icon_relative_path:
+            return
+        base_icon = self._load_icon(str(icon_relative_path))
+        if base_icon.isNull():
+            return
+        pixmap = base_icon.pixmap(QSize(18, 18))
+        if pixmap.isNull():
+            return
+        tinted = QPixmap(pixmap.size())
+        tinted.fill(Qt.transparent)
+        painter = QPainter(tinted)
+        painter.drawPixmap(0, 0, pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+        painter.fillRect(tinted.rect(), QColor(color_hex))
+        painter.end()
+        btn.setIcon(QIcon(tinted))
+        btn.setIconSize(QSize(18, 18))
 
     def _set_sidebar_collapsed(self, collapsed):
         for btn in getattr(self, "main_sidebar_buttons", []):
@@ -1368,11 +1404,20 @@ class MainWindow(QMainWindow):
 
         for widget in (
             getattr(self, "sidebar_search_wrap", None),
+            getattr(self, "sidebar_brand_mark", None),
             getattr(self, "sidebar_brand_text_wrap", None),
             getattr(self, "sidebar_profile_text_wrap", None),
         ):
             if widget is not None:
                 widget.setVisible(not collapsed)
+
+        if hasattr(self, "sidebar_brand_mark"):
+            self.sidebar_brand_mark.setMinimumWidth(0 if collapsed else 28)
+            self.sidebar_brand_mark.setMaximumWidth(0 if collapsed else 28)
+
+        if hasattr(self, "sidebar_brand_text_wrap"):
+            self.sidebar_brand_text_wrap.setMinimumWidth(0)
+            self.sidebar_brand_text_wrap.setMaximumWidth(0 if collapsed else 16777215)
 
         if hasattr(self, "sidebar_panel_layout"):
             margins = (10, 10, 10, 10) if collapsed else (14, 14, 14, 14)
@@ -1380,6 +1425,12 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, "sidebar_header_layout"):
             self.sidebar_header_layout.setSpacing(0 if collapsed else 8)
+            self.sidebar_header_layout.setContentsMargins(0, 2, 0, 2) if collapsed else self.sidebar_header_layout.setContentsMargins(4, 2, 4, 2)
+            if hasattr(self, "sidebar_toggle_button"):
+                self.sidebar_header_layout.setAlignment(
+                    self.sidebar_toggle_button,
+                    (Qt.AlignHCenter | Qt.AlignVCenter) if collapsed else (Qt.AlignRight | Qt.AlignVCenter),
+                )
 
         if hasattr(self, "sidebar_footer_layout"):
             self.sidebar_footer_layout.setSpacing(0 if collapsed else 10)
@@ -1411,6 +1462,8 @@ class MainWindow(QMainWindow):
         if btn.property("rail_variant") == "toggle":
             return
 
+        btn.setProperty("rail_active", bool(active))
+
         if active:
             btn.setStyleSheet("""
                 QPushButton {
@@ -1420,6 +1473,8 @@ class MainWindow(QMainWindow):
                     border-radius: 12px;
                     font-size: 10px;
                     font-weight: 700;
+                    text-align: center;
+                    padding: 0px;
                 }
                 QPushButton:hover {
                     background-color: #FFFFFF;
@@ -1432,6 +1487,7 @@ class MainWindow(QMainWindow):
                     color: #17152A;
                 }
             """)
+            self._set_rail_button_icon_tone(btn, "#17152A")
         else:
             btn.setStyleSheet("""
                 QPushButton {
@@ -1441,22 +1497,46 @@ class MainWindow(QMainWindow):
                     border-radius: 12px;
                     font-size: 10px;
                     font-weight: 600;
+                    text-align: center;
+                    padding: 0px;
                 }
                 QPushButton:hover {
-                    background-color: #242039;
-                    border: 1px solid #2F2A48;
-                    color: #ffffff;
+                    background-color: #F8F6F1;
+                    border: 1px solid #F3EBDD;
+                    color: #17152A;
                 }
                 QPushButton:pressed {
-                    background-color: #201C32;
-                    border: 1px solid #2A2540;
-                    color: #ffffff;
+                    background-color: #EFE8D9;
+                    border: 1px solid #E9DFC9;
+                    color: #17152A;
                 }
             """)
+            self._set_rail_button_icon_tone(btn, "#DDD9EB")
+
+    def _set_rail_button_icon_tone(self, btn, color_hex):
+        icon_relative_path = btn.property("rail_icon_path")
+        if not icon_relative_path:
+            return
+        base_icon = self._load_icon(str(icon_relative_path))
+        if base_icon.isNull():
+            return
+        pixmap = base_icon.pixmap(QSize(18, 18))
+        if pixmap.isNull():
+            return
+        tinted = QPixmap(pixmap.size())
+        tinted.fill(Qt.transparent)
+        painter = QPainter(tinted)
+        painter.drawPixmap(0, 0, pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+        painter.fillRect(tinted.rect(), QColor(color_hex))
+        painter.end()
+        btn.setIcon(QIcon(tinted))
+        btn.setIconSize(QSize(18, 18))
 
     def _set_active_sidebar_by_widget(self, widget):
         for btn in getattr(self, "main_sidebar_buttons", []):
             btn.set_active(False)
+            self._set_main_button_icon_tone(btn, "#DDD9EB")
 
         for btn in getattr(self, "rail_nav_buttons", []):
             self._set_rail_button_active(btn, False)
@@ -1466,14 +1546,16 @@ class MainWindow(QMainWindow):
             full_btn, rail_btn = pair
             if full_btn.isVisible():
                 full_btn.set_active(True)
-            if rail_btn.isVisible():
+                self._set_main_button_icon_tone(full_btn, "#17152A")
+            if rail_btn is not None and rail_btn.isVisible():
                 self._set_rail_button_active(rail_btn, True)
             return
 
         for _owner, (full_btn, rail_btn) in getattr(self, "widget_sidebar_map", {}).items():
             if full_btn.isVisible():
                 full_btn.set_active(True)
-                if rail_btn.isVisible():
+                self._set_main_button_icon_tone(full_btn, "#17152A")
+                if rail_btn is not None and rail_btn.isVisible():
                     self._set_rail_button_active(rail_btn, True)
                 break
 
@@ -1515,12 +1597,14 @@ class MainWindow(QMainWindow):
         btn = QPushButton("")
         btn.setToolTip(tooltip)
         btn.setProperty("rail_variant", variant)
+        btn.setProperty("rail_icon_path", icon_relative_path)
         btn.setCursor(Qt.PointingHandCursor)
         btn.setFixedSize(42, 42)
+        btn.setContentsMargins(0, 0, 0, 0)
         icon = self._load_icon(icon_relative_path)
-        if self._icon_can_render(icon, QSize(16, 16)):
+        if self._icon_can_render(icon, QSize(18, 18)):
             btn.setIcon(icon)
-            btn.setIconSize(QSize(16, 16))
+            btn.setIconSize(QSize(18, 18))
         else:
             btn.setText(fallback_text)
         if variant == "toggle":
@@ -1532,6 +1616,8 @@ class MainWindow(QMainWindow):
                     border-radius: 12px;
                     font-size: 10px;
                     font-weight: 700;
+                    text-align: center;
+                    padding: 0px;
                 }
                 QPushButton:hover {
                     background-color: #2A2442;
@@ -1547,6 +1633,14 @@ class MainWindow(QMainWindow):
         else:
             self._set_rail_button_active(btn, False)
         return btn
+
+    def eventFilter(self, obj, event):
+        if obj in getattr(self, "rail_nav_buttons", []):
+            if event.type() == QEvent.Enter and not bool(obj.property("rail_active")):
+                self._set_rail_button_icon_tone(obj, "#17152A")
+            elif event.type() == QEvent.Leave and not bool(obj.property("rail_active")):
+                self._set_rail_button_icon_tone(obj, "#DDD9EB")
+        return super().eventFilter(obj, event)
 
     def _refresh_sidebar_profile(self):
         app = QApplication.instance()

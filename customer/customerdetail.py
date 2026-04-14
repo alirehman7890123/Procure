@@ -210,12 +210,17 @@ class CustomerDetailWidget(QWidget):
         self.discount_group_combo.clear()
         self.discount_group_combo.addItem("None", None)
         query = QSqlQuery()
-        if query.exec("SELECT id, name, discount_percent FROM discount_group WHERE status = 'active' ORDER BY name ASC"):
+        if query.exec("SELECT id, name, discount_percent, COALESCE(fixed_amount, 0), COALESCE(apply_on_sale, 1) FROM discount_group WHERE status = 'active' ORDER BY name ASC"):
             while query.next():
                 group_id = query.value(0)
                 name = str(query.value(1) or "")
                 percent = float(query.value(2) or 0.0)
-                self.discount_group_combo.addItem(f"{name} ({percent:.2f}%)", group_id)
+                fixed_amount = float(query.value(3) or 0.0)
+                apply_on_sale = bool(int(query.value(4) or 0))
+                self.discount_group_combo.addItem(
+                    f"{name} ({percent:.2f}% + {fixed_amount:.2f}, {'Sale On' if apply_on_sale else 'Sale Off'})",
+                    group_id,
+                )
         self.sync_group_selection(self.discount_group_combo, selected_id)
         self.discount_group_combo.blockSignals(False)
 
@@ -224,12 +229,17 @@ class CustomerDetailWidget(QWidget):
         self.tax_group_combo.clear()
         self.tax_group_combo.addItem("None", None)
         query = QSqlQuery()
-        if query.exec("SELECT id, name, tax_percent FROM tax_group WHERE status = 'active' ORDER BY name ASC"):
+        if query.exec("SELECT id, name, tax_percent, COALESCE(fixed_amount, 0), COALESCE(apply_on_sale, 1) FROM tax_group WHERE status = 'active' ORDER BY name ASC"):
             while query.next():
                 group_id = query.value(0)
                 name = str(query.value(1) or "")
                 percent = float(query.value(2) or 0.0)
-                self.tax_group_combo.addItem(f"{name} ({percent:.2f}%)", group_id)
+                fixed_amount = float(query.value(3) or 0.0)
+                apply_on_sale = bool(int(query.value(4) or 0))
+                self.tax_group_combo.addItem(
+                    f"{name} ({percent:.2f}% + {fixed_amount:.2f}, {'Sale On' if apply_on_sale else 'Sale Off'})",
+                    group_id,
+                )
         self.sync_group_selection(self.tax_group_combo, selected_id)
         self.tax_group_combo.blockSignals(False)
 

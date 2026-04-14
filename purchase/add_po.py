@@ -1,11 +1,11 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QDateEdit,
     QComboBox, QTableWidget, QTableWidgetItem, QFrame, QMessageBox, QHeaderView,
-    QCompleter, QSizePolicy, QGridLayout, QCheckBox
+    QCompleter, QSizePolicy, QGridLayout, QCheckBox, QDialog
 )
 from PySide6.QtCore import Qt, Signal, QDate, QTimer, QStringListModel
 from PySide6.QtSql import QSqlQuery, QSqlDatabase
-from PySide6.QtGui import QKeySequence, QShortcut, QIntValidator, QDoubleValidator
+from PySide6.QtGui import QColor, QKeySequence, QShortcut, QIntValidator, QDoubleValidator
 from utilities.stylus import load_stylesheets
 from utilities.activity_logger import log_activity
 from utilities.session_gate import require_open_session
@@ -51,6 +51,160 @@ class MyTable(QTableWidget):
         width = self.viewport().width()
         for i, ratio in enumerate(self.column_ratios):
             self.setColumnWidth(i, int(width * (ratio / total)))
+
+
+class LowStockProductsDialog(QDialog):
+    def __init__(self, rows, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Low Stock Products")
+        self.resize(980, 620)
+        self.selected_rows = set()
+        self._data_rows = rows or []
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        title = QLabel("Low Stock Products", objectName="SectionTitle")
+        hint = QLabel(
+            "Used products only. Click any product row to toggle it, then add the selected lines to the purchase order."
+        )
+        hint.setStyleSheet("font-size: 11px; color: #666; padding-left: 0;")
+        layout.addWidget(title)
+        layout.addWidget(hint)
+
+        self.table = QTableWidget(0, 7, self)
+        self.table.setHorizontalHeaderLabels([
+            "Pick", "Product", "Stock", "Reorder", "Suggested Qty", "Last Cost", "Reason"
+        ])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionMode(QTableWidget.NoSelection)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setAlternatingRowColors(False)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        self.table.cellClicked.connect(self._handle_cell_clicked)
+        self.table.setStyleSheet("QTableWidget::item { padding: 6px; }")
+        layout.addWidget(self.table, 1)
+
+        footer = QHBoxLayout()
+        self.summary = QLabel("0 products selected")
+        self.summary.setStyleSheet("font-size: 11px; color: #555; padding-left: 0;")
+        footer.addWidget(self.summary)
+        footer.addStretch()
+        cancel_btn = QPushButton("Cancel", objectName="TopRightButton")
+        add_btn = QPushButton("Add to Purchase Order", objectName="SaveButton")
+        cancel_btn.clicked.connect(self.reject)
+        add_btn.clicked.connect(self.accept)
+        footer.addWidget(cancel_btn)
+        footer.addWidget(add_btn)
+        layout.addLayout(footer)
+
+        self._populate_table()
+
+    def _populate_table(self):
+        current_manufacturer = None
+        visual_row = 0
+        for data in self._data_rows:
+            manufacturer_name = data.get("manufacturer_name") or "Unassigned Manufacturer"
+            if manufacturer_name != current_manufacturer:
+                self.table.insertRow(visual_row)
+                group_item = QTableWidgetItem(f"Manufacturer: {manufacturer_name}")
+                group_item.setFlags(Qt.ItemIsEnabled)
+                group_item.setData(Qt.UserRole, "group")
+                group_item.setData(Qt.UserRole + 1, None)
+                group_item.setForeground(QColor("#21435D"))
+                group_item.setBackground(QColor("#E8EFF5"))
+                for col in range(self.table.columnCount()):
+                    item = group_item if col == 1 else QTableWidgetItem("")
+                    item.setFlags(Qt.ItemIsEnabled)
+                    item.setData(Qt.UserRole, "group")
+                    item.setData(Qt.UserRole + 1, None)
+                    item.setBackground(QColor("#E8EFF5"))
+                    item.setForeground(QColor("#21435D"))
+                    self.table.setItem(visual_row, col, item)
+                self.table.setSpan(visual_row, 1, 1, self.table.columnCount() - 1)
+                self.table.setRowHeight(visual_row, 28)
+                current_manufacturer = manufacturer_name
+                visual_row += 1
+
+            self.table.insertRow(visual_row)
+            pick_item = QTableWidgetItem("○")
+            pick_item.setTextAlignment(Qt.AlignCenter)
+            pick_item.setData(Qt.UserRole, "data")
+            pick_item.setData(Qt.UserRole + 1, data)
+
+            values = [
+                pick_item,
+                QTableWidgetItem(str(data.get("product_name") or "")),
+                QTableWidgetItem(str(data.get("stock_qty") or 0)),
+                QTableWidgetItem(str(data.get("reorder_level") or 0)),
+                QTableWidgetItem(str(data.get("suggested_qty") or 1)),
+                QTableWidgetItem(f"{float(data.get('last_cost') or 0.0):.2f}"),
+                QTableWidgetItem(str(data.get("status_reason") or "Low Stock")),
+            ]
+            for col, item in enumerate(values):
+                item.setData(Qt.UserRole, "data")
+                item.setData(Qt.UserRole + 1, data)
+                if col in (2, 3, 4, 5):
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.table.setItem(visual_row, col, item)
+            self.table.setRowHeight(visual_row, 34)
+            visual_row += 1
+
+        self._refresh_selection_ui()
+
+    def _handle_cell_clicked(self, row, _column):
+        item = self.table.item(row, 0)
+        if item is None:
+            return
+        if item.data(Qt.UserRole) != "data":
+            return
+        if row in self.selected_rows:
+            self.selected_rows.remove(row)
+        else:
+            self.selected_rows.add(row)
+        self._refresh_selection_ui()
+
+    def _refresh_selection_ui(self):
+        count = 0
+        normal_bg = QColor("#FFFFFF")
+        selected_bg = QColor("#EAF4FF")
+        selected_fg = QColor("#173F5F")
+        for row in range(self.table.rowCount()):
+            row_type = self.table.item(row, 0).data(Qt.UserRole) if self.table.item(row, 0) else None
+            if row_type != "data":
+                continue
+            selected = row in self.selected_rows
+            pick = self.table.item(row, 0)
+            if pick:
+                pick.setText("●" if selected else "○")
+            for col in range(self.table.columnCount()):
+                item = self.table.item(row, col)
+                if item is None:
+                    continue
+                item.setBackground(selected_bg if selected else normal_bg)
+                item.setForeground(selected_fg if selected else QColor("#222222"))
+            if selected:
+                count += 1
+        self.summary.setText(f"{count} product{'s' if count != 1 else ''} selected")
+
+    def selected_products(self):
+        rows = []
+        for row in sorted(self.selected_rows):
+            item = self.table.item(row, 0)
+            if item is None:
+                continue
+            data = item.data(Qt.UserRole + 1)
+            if data:
+                rows.append(data)
+        return rows
 
 
 class AddPOWidget(QWidget):
@@ -200,6 +354,11 @@ class AddPOWidget(QWidget):
         self._suggest_reorder_checkbox.setChecked(False)
         self._suggest_reorder_checkbox.toggled.connect(self._on_reorder_toggle_changed)
         reorder_row.addWidget(self._suggest_reorder_checkbox)
+
+        self._low_stock_btn = QPushButton("Low Stock Picker", objectName="TopRightButton")
+        self._low_stock_btn.setCursor(Qt.PointingHandCursor)
+        self._low_stock_btn.clicked.connect(self._open_low_stock_dialog)
+        reorder_row.addWidget(self._low_stock_btn)
 
         self._reorder_hint = QLabel("When enabled, qty is suggested from product sales in the last 30 days.")
         self._reorder_hint.setStyleSheet("font-size: 11px; color: #666; padding-left: 0;")
@@ -397,7 +556,20 @@ class AddPOWidget(QWidget):
             self._last_cost_hint.setText("Last cost: -")
             return
 
-        # 1) Prefer latest actual purchase invoice rate (direct purchases)
+        cost, source = self._get_last_cost(product_id)
+        if cost is not None:
+            self._entry_price.setText(f"{cost:.2f}")
+            self._last_cost_hint.setText(f"Last cost: {cost:.2f} ({source})")
+            self._update_entry_total()
+            return
+
+        self._entry_price.clear()
+        self._last_cost_hint.setText("Last cost: no history")
+
+    def _get_last_cost(self, product_id):
+        if product_id is None:
+            return None, None
+
         query = QSqlQuery()
         query.prepare("""
             SELECT rate
@@ -407,34 +579,44 @@ class AddPOWidget(QWidget):
             LIMIT 1
         """)
         query.addBindValue(product_id)
-
         if query.exec() and query.next():
-            cost = float(query.value(0) or 0.0)
-            self._entry_price.setText(f"{cost:.2f}")
-            self._last_cost_hint.setText(f"Last cost: {cost:.2f} (invoice)")
-            self._update_entry_total()
-            return
+            try:
+                return float(query.value(0) or 0.0), "invoice"
+            except (TypeError, ValueError):
+                pass
 
-        # 2) Fallback to latest purchase-order line cost
-        query2 = QSqlQuery()
-        query2.prepare("""
+        query.prepare("""
             SELECT unit_price
             FROM purchase_order_line
             WHERE product = ?
             ORDER BY id DESC
             LIMIT 1
         """)
-        query2.addBindValue(product_id)
+        query.addBindValue(product_id)
+        if query.exec() and query.next():
+            try:
+                return float(query.value(0) or 0.0), "po"
+            except (TypeError, ValueError):
+                pass
 
-        if query2.exec() and query2.next():
-            cost = float(query2.value(0) or 0.0)
-            self._entry_price.setText(f"{cost:.2f}")
-            self._last_cost_hint.setText(f"Last cost: {cost:.2f} (po)")
-            self._update_entry_total()
-            return
+        return None, None
 
-        self._entry_price.clear()
-        self._last_cost_hint.setText("Last cost: no history")
+    def _get_reorder_level(self, product_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT COALESCE(MAX(COALESCE(reorder_level, 0)), 0)
+            FROM price_pack
+            WHERE product_id = ?
+            """
+        )
+        query.addBindValue(product_id)
+        if query.exec() and query.next():
+            try:
+                return int(float(query.value(0) or 0))
+            except (TypeError, ValueError):
+                return 0
+        return 0
 
     def _suggest_reorder_qty(self, product_id):
         if not self._suggest_reorder_checkbox.isChecked():
@@ -502,21 +684,7 @@ class AddPOWidget(QWidget):
             return
 
         reorder_query = QSqlQuery()
-        reorder_query.prepare(
-            """
-            SELECT COALESCE(MAX(COALESCE(reorder_level, 0)), 0)
-            FROM price_pack
-            WHERE product_id = ?
-            """
-        )
-        reorder_query.addBindValue(product_id)
-
-        reorder_level = 0
-        if reorder_query.exec() and reorder_query.next():
-            try:
-                reorder_level = int(float(reorder_query.value(0) or 0))
-            except (TypeError, ValueError):
-                reorder_level = 0
+        reorder_level = self._get_reorder_level(product_id)
 
         if reorder_level > 0:
             self._entry_qty.setText(str(reorder_level))
@@ -583,52 +751,7 @@ class AddPOWidget(QWidget):
             AppMessageBox.information(self, "Error", "Packs must be whole numbers and cost must be numeric.")
             return
 
-        row = self.items_table.rowCount()
-        self.items_table.insertRow(row)
-        self.items_table.setRowHeight(row, self.row_height)
-
-        # col 0 — row counter
-        counter = QLabel(str(row + 1))
-        counter.setAlignment(Qt.AlignCenter)
-        self.items_table.setCellWidget(row, 0, counter)
-
-        # col 1 — product (read-only display combo)
-        product_combo = QComboBox()
-        product_combo.addItem(product_name, product_id)
-        product_combo.setStyleSheet("""
-            QComboBox::drop-down { border: 0px; }
-            QComboBox::down-arrow { image: none; }
-        """)
-        product_combo.setEditable(True)
-        product_combo.lineEdit().setReadOnly(True)
-        product_combo.setInsertPolicy(QComboBox.NoInsert)
-        self.items_table.setCellWidget(row, 1, product_combo)
-
-        # col 2 — qty (editable, recalculates total)
-        qty_edit = QLineEdit(str(qty))
-        qty_edit.setValidator(QIntValidator(0, 999999, self.items_table))
-        qty_edit.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        qty_edit.textChanged.connect(lambda _, r=row: self._recalc_row(r))
-        self.items_table.setCellWidget(row, 2, qty_edit)
-
-        # col 3 — unit price (read-only)
-        price_edit = QLineEdit(f"{price:.2f}")
-        price_edit.setReadOnly(True)
-        price_edit.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.items_table.setCellWidget(row, 3, price_edit)
-
-        # col 4 — total (read-only, computed)
-        total_edit = QLineEdit(f"{qty * price:.2f}")
-        total_edit.setReadOnly(True)
-        total_edit.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.items_table.setCellWidget(row, 4, total_edit)
-
-        # col 5 — delete
-        del_btn = QPushButton("X")
-        del_btn.setCursor(Qt.PointingHandCursor)
-        del_btn.setStyleSheet("color: #c0392b; font-weight: bold;")
-        del_btn.clicked.connect(lambda _, r=row: self._remove_row(r))
-        self.items_table.setCellWidget(row, 5, del_btn)
+        self._upsert_po_item_row(product_id, product_name, qty, price)
 
         # reset entry line
         self._entry_product.setCurrentIndex(-1)
@@ -641,7 +764,179 @@ class AddPOWidget(QWidget):
         )
         self._entry_product.setFocus()
 
+    def _find_existing_po_row(self, product_id):
+        for row in range(self.items_table.rowCount()):
+            product_combo = self.items_table.cellWidget(row, 1)
+            if product_combo and product_combo.currentData() == product_id:
+                return row
+        return -1
+
+    def _append_po_item_row(self, product_id, product_name, qty, price):
+        row = self.items_table.rowCount()
+        self.items_table.insertRow(row)
+        self.items_table.setRowHeight(row, self.row_height)
+
+        counter = QLabel(str(row + 1))
+        counter.setAlignment(Qt.AlignCenter)
+        self.items_table.setCellWidget(row, 0, counter)
+
+        product_combo = QComboBox()
+        product_combo.addItem(product_name, product_id)
+        product_combo.setStyleSheet("""
+            QComboBox::drop-down { border: 0px; }
+            QComboBox::down-arrow { image: none; }
+        """)
+        product_combo.setEditable(True)
+        product_combo.lineEdit().setReadOnly(True)
+        product_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.items_table.setCellWidget(row, 1, product_combo)
+
+        qty_edit = QLineEdit(str(qty))
+        qty_edit.setValidator(QIntValidator(0, 999999, self.items_table))
+        qty_edit.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        qty_edit.textChanged.connect(lambda _, r=row: self._recalc_row(r))
+        self.items_table.setCellWidget(row, 2, qty_edit)
+
+        price_edit = QLineEdit(f"{price:.2f}")
+        price_edit.setReadOnly(True)
+        price_edit.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.items_table.setCellWidget(row, 3, price_edit)
+
+        total_edit = QLineEdit(f"{qty * price:.2f}")
+        total_edit.setReadOnly(True)
+        total_edit.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.items_table.setCellWidget(row, 4, total_edit)
+
+        del_btn = QPushButton("X")
+        del_btn.setCursor(Qt.PointingHandCursor)
+        del_btn.setStyleSheet("color: #c0392b; font-weight: bold;")
+        del_btn.clicked.connect(lambda _, r=row: self._remove_row(r))
+        self.items_table.setCellWidget(row, 5, del_btn)
+
+    def _upsert_po_item_row(self, product_id, product_name, qty, price):
+        existing_row = self._find_existing_po_row(product_id)
+        if existing_row >= 0:
+            qty_edit = self.items_table.cellWidget(existing_row, 2)
+            if isinstance(qty_edit, QLineEdit):
+                try:
+                    current_qty = int(qty_edit.text() or 0)
+                except ValueError:
+                    current_qty = 0
+                qty_edit.setText(str(current_qty + qty))
+            price_edit = self.items_table.cellWidget(existing_row, 3)
+            if isinstance(price_edit, QLineEdit):
+                price_edit.setText(f"{price:.2f}")
+            self._recalc_row(existing_row)
+        else:
+            self._append_po_item_row(product_id, product_name, qty, price)
+
         self._update_grand_total()
+
+    def _fetch_low_stock_products(self):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                p.id,
+                COALESCE(p.display_name, '') AS product_name,
+                COALESCE(m.name, '') AS manufacturer_name,
+                COALESCE(bs.total_stock, 0) AS stock_qty,
+                COALESCE(pp.reorder_level, 0) AS reorder_level
+            FROM product p
+            LEFT JOIN manufacturer m ON p.manufacturer_id = m.id
+            LEFT JOIN (
+                SELECT product_id, COALESCE(SUM(quantity_remaining), 0) AS total_stock
+                FROM batch
+                GROUP BY product_id
+            ) bs ON bs.product_id = p.id
+            LEFT JOIN (
+                SELECT product_id, MAX(COALESCE(reorder_level, 0)) AS reorder_level
+                FROM price_pack
+                GROUP BY product_id
+            ) pp ON pp.product_id = p.id
+            WHERE p.status = 'used'
+              AND (
+                    COALESCE(bs.total_stock, 0) <= COALESCE(pp.reorder_level, 0)
+                    OR COALESCE(bs.total_stock, 0) <= 0
+                  )
+            ORDER BY COALESCE(m.name, 'Unassigned Manufacturer') ASC, COALESCE(p.display_name, '') ASC
+            """
+        )
+        if not query.exec():
+            raise Exception(query.lastError().text())
+
+        rows = []
+        while query.next():
+            product_id = query.value(0)
+            product_name = str(query.value(1) or "").strip()
+            manufacturer_name = str(query.value(2) or "").strip() or "Unassigned Manufacturer"
+            try:
+                stock_qty = int(float(query.value(3) or 0))
+            except (TypeError, ValueError):
+                stock_qty = 0
+            try:
+                reorder_level = int(float(query.value(4) or 0))
+            except (TypeError, ValueError):
+                reorder_level = 0
+            suggested_qty = max(reorder_level - stock_qty, 1) if reorder_level > stock_qty else 1
+            last_cost, _ = self._get_last_cost(product_id)
+            if stock_qty <= 0:
+                status_reason = "Out of stock"
+            elif reorder_level > 0:
+                status_reason = "Below reorder level"
+            else:
+                status_reason = "Low stock"
+            rows.append({
+                "product_id": product_id,
+                "product_name": product_name,
+                "manufacturer_name": manufacturer_name,
+                "stock_qty": stock_qty,
+                "reorder_level": reorder_level,
+                "suggested_qty": suggested_qty,
+                "last_cost": last_cost or 0.0,
+                "status_reason": status_reason,
+            })
+        return rows
+
+    def _open_low_stock_dialog(self):
+        try:
+            rows = self._fetch_low_stock_products()
+        except Exception as exc:
+            AppMessageBox.error(self, "Load Failed", f"Could not load low stock products: {exc}")
+            return
+
+        if not rows:
+            AppMessageBox.information(
+                self,
+                "Nothing To Add",
+                "No used products are currently at zero stock or below their reorder level.",
+            )
+            return
+
+        dialog = LowStockProductsDialog(rows, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        selected_rows = dialog.selected_products()
+        if not selected_rows:
+            AppMessageBox.information(self, "No Selection", "Select at least one product to add.")
+            return
+
+        added_count = 0
+        for data in selected_rows:
+            product_id = data.get("product_id")
+            product_name = str(data.get("product_name") or "").strip()
+            qty = max(1, int(data.get("suggested_qty") or 1))
+            price = float(data.get("last_cost") or 0.0)
+            self._upsert_po_item_row(product_id, product_name, qty, price)
+            added_count += 1
+
+        self._entry_product.setFocus()
+        AppMessageBox.success(
+            self,
+            "Products Added",
+            f"Added {added_count} low stock product{'s' if added_count != 1 else ''} to the purchase order.",
+        )
 
     def _recalc_row(self, row):
         qty_w  = self.items_table.cellWidget(row, 2)

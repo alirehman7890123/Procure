@@ -70,6 +70,10 @@ class ChangePasswordWidget(QWidget):
         previousinput = QLineEdit()
         passwordinput = QLineEdit()
         confirminput = QLineEdit()
+
+        previousinput.setEchoMode(QLineEdit.Password)
+        passwordinput.setEchoMode(QLineEdit.Password)
+        confirminput.setEchoMode(QLineEdit.Password)
         
         fields = [previousinput, passwordinput, confirminput]
         

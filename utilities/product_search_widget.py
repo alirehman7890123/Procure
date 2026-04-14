@@ -5,7 +5,7 @@ ProductSearchBox
 ----------------
 A QComboBox subclass with a pre-wired QCompleter that runs the standard
 product name search (SELECT id, display_name FROM product WHERE display_name
-LIKE ? LIMIT 10) on every keystroke and emits product_selected(int, str)
+LIKE ? LIMIT 15) on every keystroke and emits product_selected(int, str)
 when the user picks an item.
 
 Usage
@@ -83,7 +83,7 @@ class ProductSearchBox(QComboBox):
 
         self.setEditable(True)
         self.setInsertPolicy(QComboBox.NoInsert)
-        self.setMaxVisibleItems(12)
+        self.setMaxVisibleItems(15)
         self.setPlaceholderText(placeholder)
         self.wheelEvent = lambda event: event.ignore()
 
@@ -267,7 +267,7 @@ class ProductSearchBox(QComboBox):
         query = QSqlQuery()
         query.prepare(
             "SELECT id, display_name FROM product "
-            "WHERE display_name LIKE ? LIMIT 10"
+            "WHERE display_name LIKE ? LIMIT 15"
         )
         query.addBindValue(f"%{search_text}%")
         results = []

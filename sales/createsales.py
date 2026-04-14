@@ -18,6 +18,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from utilities.payment_handler import PaymentMethodHandler
 from utilities.permissions import Permissions
 from utilities.app_messagebox import AppMessageBox
+from sales.pricing_logic import compute_header_totals, compute_line_pricing
 
 
 
@@ -57,6 +58,7 @@ from PySide6.QtWidgets import (
     QComboBox, QLineEdit, QCheckBox, QSizePolicy, QFrame
 )
 from PySide6.QtCore import Qt
+import re
 
 
 class CreateSalesWidget(QWidget):
@@ -125,6 +127,7 @@ class CreateSalesWidget(QWidget):
         
 
         self.add_totals_section()
+        self._install_select_all_focus_behavior()
         self.layout.addStretch()
         
 
@@ -245,9 +248,20 @@ class CreateSalesWidget(QWidget):
         self.active_discount_group_id = None
         self.active_discount_group_name = ""
         self.active_discount_percent = 0.0
+        self.active_discount_fixed_amount = 0.0
+        self.active_discount_apply_on_sale = False
+        self.active_discount_source = "none"
         self.active_tax_group_id = None
         self.active_tax_group_name = ""
         self.active_tax_percent = 0.0
+        self.active_tax_fixed_amount = 0.0
+        self.active_tax_apply_on_sale = False
+        self.active_tax_source = "none"
+        self.active_tax_fixed_amount = 0.0
+        self.active_tax_apply_on_sale = False
+        self.active_tax_source = "none"
+        self.sales_discount_policy = "both"
+        self.sales_tax_policy = "both"
         self.discount_group_manual_override = False
         self.tax_group_manual_override = False
         
@@ -412,7 +426,7 @@ class CreateSalesWidget(QWidget):
         field_style = """
             QLabel {
                 margin: 0;
-                font-size: 11px;
+                font-size: 12px;
                 letter-spacing: 0.2px;
                 margin-right: 5px;
             }
@@ -422,7 +436,7 @@ class CreateSalesWidget(QWidget):
                 padding: 5px 10px;
                 border: 1px solid #ccc;
                 border-radius: 5px;
-                font-size: 11px;
+                font-size: 12px;
                 letter-spacing: 0.2px;
                 background-color: #fbfcfd;
             }
@@ -433,7 +447,7 @@ class CreateSalesWidget(QWidget):
                 padding-right: 30px;
                 border: 1px solid #ccc;
                 border-radius: 5px;
-                font-size: 11px;
+                font-size: 12px;
                 letter-spacing: 0.2px;
                 background-color: #fbfcfd;
             }
@@ -467,7 +481,7 @@ class CreateSalesWidget(QWidget):
                 padding: 5px 10px;
                 border: 1px solid #ccc;
                 border-radius: 5px;
-                font-size: 11px;
+                font-size: 12px;
                 letter-spacing: 0.2px;
                 background-color: #fbfcfd;
             }
@@ -924,6 +938,96 @@ class CreateSalesWidget(QWidget):
         if hasattr(widget, "selectAll"):
             widget.selectAll()
 
+    def _install_select_all_focus_behavior(self):
+        widgets = [
+            getattr(self, "customer", None),
+            getattr(self, "item", None),
+            getattr(self, "qty_edit", None),
+            getattr(self, "rate_edit", None),
+            getattr(self, "discount", None),
+            getattr(self, "tax", None),
+            getattr(self, "discount_mode_combo", None),
+            getattr(self, "discount_entry", None),
+            getattr(self, "tax_entry", None),
+            getattr(self, "additional_entry", None),
+            getattr(self, "received_entry", None),
+            getattr(self, "payment_method", None),
+            getattr(self, "due_date_combo", None),
+        ]
+
+        for widget in widgets:
+            if widget is None:
+                continue
+            widget.installEventFilter(self)
+            line_edit = getattr(widget, "lineEdit", None)
+            if callable(line_edit):
+                child = line_edit()
+                if child is not None:
+                    child.installEventFilter(self)
+
+    def _clean_numeric_text(self, value):
+        text = "" if value is None else str(value).strip()
+        if not text:
+            return ""
+
+        text = text.replace(",", "")
+        text = re.sub(r"[^0-9.\-]", "", text)
+
+        if text.count(".") > 1:
+            first_dot = text.find(".")
+            text = text[:first_dot + 1] + text[first_dot + 1:].replace(".", "")
+
+        if text in {"", "-", ".", "-."}:
+            return ""
+
+        return text
+
+    def _float_or_default(self, value, default=0.0):
+        cleaned = self._clean_numeric_text(value)
+        if not cleaned:
+            return float(default)
+        try:
+            return float(cleaned)
+        except (TypeError, ValueError):
+            return float(default)
+
+    def _int_or_default(self, value, default=0):
+        return int(self._float_or_default(value, default))
+
+    def _parse_float_field(self, value, field_name, default=0.0, allow_blank=True):
+        raw = "" if value is None else str(value).strip()
+        cleaned = self._clean_numeric_text(raw)
+
+        if cleaned == "":
+            if allow_blank:
+                return float(default)
+            raise Exception(f"Invalid {field_name}: value is empty.")
+
+        try:
+            return float(cleaned)
+        except (TypeError, ValueError):
+            raise Exception(f"Invalid {field_name}: {raw}")
+
+    def _parse_int_field(self, value, field_name, default=0, allow_blank=True):
+        parsed = self._parse_float_field(value, field_name, default=default, allow_blank=allow_blank)
+        return int(parsed)
+
+    def _text_or_none(self, value):
+        text = str(value).strip() if value is not None else ""
+        return text if text else None
+
+    def _normalize_payment_data(self, payment):
+        payment = dict(payment or {})
+        return {
+            "payment_method": self._text_or_none(payment.get("payment_method")) or "Cash",
+            "bank_name": self._text_or_none(payment.get("bank_name")),
+            "account_no": self._text_or_none(payment.get("account_no")),
+            "transaction_mode": self._text_or_none(payment.get("transaction_mode")),
+            "wallet_provider": self._text_or_none(payment.get("wallet_provider")),
+            "wallet_no": self._text_or_none(payment.get("wallet_no")),
+            "payment_reference": self._text_or_none(payment.get("payment_reference")),
+        }
+
     def has_auto_price_for_current_row(self):
         product_data = self.item.currentData()
         if not isinstance(product_data, dict):
@@ -957,10 +1061,9 @@ class CreateSalesWidget(QWidget):
     
     
     def eventFilter(self, obj, event):
-        
-        if obj == self.customer.lineEdit():
-            if event.type() == QEvent.FocusIn:
-                obj.selectAll()
+        if event.type() == QEvent.FocusIn:
+            if isinstance(obj, QLineEdit) and not obj.isReadOnly():
+                QTimer.singleShot(0, obj.selectAll)
         return super().eventFilter(obj, event)
     
     
@@ -997,7 +1100,17 @@ class CreateSalesWidget(QWidget):
         except ValueError:
             rate = 0.0
 
-        resolved = self.resolve_line_pricing(qty, rate, discount_text, discount_mode, tax_text)
+        resolved = self.resolve_line_pricing(
+            qty,
+            rate,
+            discount_text,
+            discount_mode,
+            tax_text,
+            self.current_line_product_defaults.get("discount_fixed_amount", 0.0),
+            self.current_line_product_defaults.get("discount_apply_on_sale", True),
+            self.current_line_product_defaults.get("tax_fixed_amount", 0.0),
+            self.current_line_product_defaults.get("tax_apply_on_sale", True),
+        )
         self.amount_edit.setText(f"{resolved['line_total']:.2f}")
         self.update_line_pricing_hint()
         
@@ -1018,43 +1131,31 @@ class CreateSalesWidget(QWidget):
         else:
             super().keyPressEvent(event)  # Propagate if not handled
 
-    def resolve_line_pricing(self, qty, rate, discount_text, discount_mode, tax_text):
-        qty = float(qty or 0.0)
-        rate = float(rate or 0.0)
-        subtotal = qty * rate
-
-        try:
-            entered_discount_value = float(discount_text or 0.0)
-        except ValueError:
-            entered_discount_value = 0.0
-
-        entered_discount_value = max(entered_discount_value, 0.0)
-        if discount_mode == "amount":
-            discount_amount = min(entered_discount_value, subtotal)
-            discount_percent = (discount_amount / subtotal * 100.0) if subtotal > 0 else 0.0
-        else:
-            discount_percent = entered_discount_value
-            discount_amount = subtotal * discount_percent / 100.0
-
-        taxable_amount = max(subtotal - discount_amount, 0.0)
-
-        try:
-            tax_percent = float(tax_text or 0.0)
-        except ValueError:
-            tax_percent = 0.0
-        tax_percent = max(tax_percent, 0.0)
-        tax_amount = taxable_amount * tax_percent / 100.0
-        line_total = taxable_amount + tax_amount
-
-        return {
-            "subtotal": subtotal,
-            "discount_percent": discount_percent,
-            "discount_amount": discount_amount,
-            "taxable_amount": taxable_amount,
-            "tax_percent": tax_percent,
-            "tax_amount": tax_amount,
-            "line_total": line_total,
-        }
+    def resolve_line_pricing(
+        self,
+        qty,
+        rate,
+        discount_text,
+        discount_mode,
+        tax_text,
+        discount_fixed_amount=0.0,
+        discount_apply_on_sale=True,
+        tax_fixed_amount=0.0,
+        tax_apply_on_sale=True,
+    ):
+        return compute_line_pricing(
+            qty=qty,
+            rate=rate,
+            discount_text=discount_text,
+            discount_mode=discount_mode,
+            tax_text=tax_text,
+            discount_fixed_amount=discount_fixed_amount,
+            discount_apply_on_sale=discount_apply_on_sale,
+            line_discount_enabled=self._line_discount_enabled_by_policy(),
+            tax_fixed_amount=tax_fixed_amount,
+            tax_apply_on_sale=tax_apply_on_sale,
+            line_tax_enabled=self._line_tax_enabled_by_policy(),
+        )
 
     def on_line_discount_edited(self):
         self.line_discount_manual_override = True
@@ -1064,12 +1165,70 @@ class CreateSalesWidget(QWidget):
         self.line_tax_manual_override = True
         self.update_line_pricing_hint()
 
+    def load_sales_discount_policy(self):
+        query = QSqlQuery()
+        if query.exec("SELECT sales_discount_policy FROM accounting_settings WHERE id = 1") and query.next():
+            self.sales_discount_policy = str(query.value(0) or "both").strip() or "both"
+        else:
+            self.sales_discount_policy = "both"
+        return self.sales_discount_policy
+
+    def _line_discount_enabled_by_policy(self):
+        return self.sales_discount_policy in ("both", "line_only")
+
+    def _header_discount_enabled_by_policy(self):
+        return self.sales_discount_policy in ("both", "header_only")
+
+    def _sales_discount_policy_label(self):
+        mapping = {
+            "both": "Both",
+            "line_only": "Line Only",
+            "header_only": "Header Only",
+        }
+        return mapping.get(self.sales_discount_policy, "Both")
+
+    def load_sales_tax_policy(self):
+        query = QSqlQuery()
+        if query.exec("SELECT sales_tax_policy FROM accounting_settings WHERE id = 1") and query.next():
+            self.sales_tax_policy = str(query.value(0) or "both").strip() or "both"
+        else:
+            self.sales_tax_policy = "both"
+        return self.sales_tax_policy
+
+    def _line_tax_enabled_by_policy(self):
+        return self.sales_tax_policy in ("both", "line_only")
+
+    def _header_tax_enabled_by_policy(self):
+        return self.sales_tax_policy in ("both", "header_only")
+
+    def _sales_tax_policy_label(self):
+        mapping = {
+            "both": "Both",
+            "line_only": "Line Only",
+            "header_only": "Header Only",
+        }
+        return mapping.get(self.sales_tax_policy, "Both")
+
+    def get_current_line_tax_total(self):
+        total = 0.0
+        for row in range(self.table.rowCount()):
+            tax_widget = self.table.cellWidget(row, 5)
+            if tax_widget is None:
+                continue
+            try:
+                total += float(tax_widget.property("tax_amount_applied") or 0.0)
+            except (TypeError, ValueError):
+                pass
+        return total
+
     def on_discount_mode_changed(self):
         if self.current_line_product_defaults:
             self.line_discount_manual_override = True
         self.update_line_total()
 
     def apply_current_line_product_defaults(self, product_data):
+        self.load_sales_discount_policy()
+        self.load_sales_tax_policy()
         self.current_line_product_defaults = dict(product_data or {})
         self.line_discount_manual_override = False
         self.line_tax_manual_override = False
@@ -1263,7 +1422,17 @@ class CreateSalesWidget(QWidget):
         tax_data = self.tax.text()
         total_data = self.amount_edit.text()
         discount_mode = self.discount_mode_combo.currentData() if hasattr(self, "discount_mode_combo") else "percent"
-        resolved = self.resolve_line_pricing(qty_data or 0, rate_data or 0, discount_data or 0, discount_mode, tax_data or 0)
+        resolved = self.resolve_line_pricing(
+            qty_data or 0,
+            rate_data or 0,
+            discount_data or 0,
+            discount_mode,
+            tax_data or 0,
+            self.current_line_product_defaults.get("discount_fixed_amount", 0.0),
+            self.current_line_product_defaults.get("discount_apply_on_sale", True),
+            self.current_line_product_defaults.get("tax_fixed_amount", 0.0),
+            self.current_line_product_defaults.get("tax_apply_on_sale", True),
+        )
         discount_source = "manual_override" if self.line_discount_manual_override else "product_default"
         tax_source = "manual_override" if self.line_tax_manual_override else "product_default"
         
@@ -1310,6 +1479,7 @@ class CreateSalesWidget(QWidget):
         tax.setReadOnly(True)
         tax.setText(tax_data)
         tax.setProperty("tax_percent_applied", resolved["tax_percent"])
+        tax.setProperty("tax_fixed_amount_applied", resolved["tax_fixed_amount"])
         tax.setProperty("tax_amount_applied", resolved["tax_amount"])
         tax.setProperty(
             "default_tax_group_id",
@@ -1578,6 +1748,8 @@ class CreateSalesWidget(QWidget):
         )
 
     def apply_customer_pricing_groups(self):
+        self.load_sales_discount_policy()
+        self.load_sales_tax_policy()
         customer_id = self.get_customer_id()
         has_pricing_fields = hasattr(self, "discount_entry") and hasattr(self, "tax_entry")
 
@@ -1586,15 +1758,38 @@ class CreateSalesWidget(QWidget):
         self.active_discount_group_id = None
         self.active_discount_group_name = ""
         self.active_discount_percent = 0.0
+        self.active_discount_fixed_amount = 0.0
+        self.active_discount_apply_on_sale = False
+        self.active_discount_source = "none"
         self.active_tax_group_id = None
         self.active_tax_group_name = ""
         self.active_tax_percent = 0.0
+        self.active_tax_fixed_amount = 0.0
+        self.active_tax_apply_on_sale = False
+        self.active_tax_source = "none"
+
+        global_discount = self.load_global_sales_discount()
+        if global_discount:
+            self.active_discount_group_id = global_discount["group_id"]
+            self.active_discount_group_name = global_discount["name"]
+            self.active_discount_percent = global_discount["percent"]
+            self.active_discount_fixed_amount = global_discount["fixed_amount"]
+            self.active_discount_apply_on_sale = global_discount["apply_on_sale"]
+            self.active_discount_source = "global_promo"
+
+        global_tax = self.load_global_sales_tax()
+        if global_tax:
+            self.active_tax_group_id = global_tax["group_id"]
+            self.active_tax_group_name = global_tax["name"]
+            self.active_tax_percent = global_tax["percent"]
+            self.active_tax_fixed_amount = global_tax["fixed_amount"]
+            self.active_tax_apply_on_sale = global_tax["apply_on_sale"]
+            self.active_tax_source = "global_tax"
 
         if customer_id is None:
             if has_pricing_fields:
                 self.discount_entry.blockSignals(True)
                 self.tax_entry.blockSignals(True)
-                self.discount_entry.setText("0.00")
                 self.tax_entry.setText("0.00")
                 self.discount_entry.blockSignals(False)
                 self.tax_entry.blockSignals(False)
@@ -1609,9 +1804,13 @@ class CreateSalesWidget(QWidget):
                 dg.id,
                 COALESCE(dg.name, ''),
                 COALESCE(dg.discount_percent, 0),
+                COALESCE(dg.fixed_amount, 0),
+                COALESCE(dg.apply_on_sale, 1),
                 tg.id,
                 COALESCE(tg.name, ''),
-                COALESCE(tg.tax_percent, 0)
+                CASE WHEN COALESCE(tg.apply_on_sale, 1) = 1 THEN COALESCE(tg.tax_percent, 0) ELSE 0 END,
+                COALESCE(tg.fixed_amount, 0),
+                COALESCE(tg.apply_on_sale, 1)
             FROM customer c
             LEFT JOIN discount_group dg ON dg.id = c.discount_group_id
             LEFT JOIN tax_group tg ON tg.id = c.tax_group_id
@@ -1620,19 +1819,39 @@ class CreateSalesWidget(QWidget):
         query.addBindValue(customer_id)
 
         if query.exec() and query.next():
-            self.active_discount_group_id = query.value(0)
-            self.active_discount_group_name = str(query.value(1) or "")
-            self.active_discount_percent = float(query.value(2) or 0.0)
-            self.active_tax_group_id = query.value(3)
-            self.active_tax_group_name = str(query.value(4) or "")
-            self.active_tax_percent = float(query.value(5) or 0.0)
+            customer_discount_group_id = query.value(0)
+            customer_discount_group_name = str(query.value(1) or "")
+            customer_discount_percent = float(query.value(2) or 0.0)
+            customer_discount_fixed_amount = float(query.value(3) or 0.0)
+            customer_discount_apply_on_sale = bool(int(query.value(4) or 0))
+            customer_tax_group_id = query.value(5)
+            customer_tax_group_name = str(query.value(6) or "")
+            customer_tax_percent = float(query.value(7) or 0.0)
+            customer_tax_fixed_amount = float(query.value(8) or 0.0)
+            customer_tax_apply_on_sale = bool(int(query.value(9) or 0))
 
-        if has_pricing_fields and self.active_discount_group_id is None:
+            if self.active_discount_source != "global_promo":
+                self.active_discount_group_id = customer_discount_group_id
+                self.active_discount_group_name = customer_discount_group_name
+                self.active_discount_percent = customer_discount_percent
+                self.active_discount_fixed_amount = customer_discount_fixed_amount
+                self.active_discount_apply_on_sale = customer_discount_apply_on_sale
+                self.active_discount_source = "customer_default" if customer_discount_group_id is not None else "none"
+
+            if self.active_tax_source != "global_tax":
+                self.active_tax_group_id = customer_tax_group_id
+                self.active_tax_group_name = customer_tax_group_name
+                self.active_tax_percent = customer_tax_percent
+                self.active_tax_fixed_amount = customer_tax_fixed_amount
+                self.active_tax_apply_on_sale = customer_tax_apply_on_sale
+                self.active_tax_source = "customer_default" if customer_tax_group_id is not None else "none"
+
+        if has_pricing_fields and (self.active_discount_group_id is None or not self._header_discount_enabled_by_policy()):
             self.discount_entry.blockSignals(True)
             self.discount_entry.setText("0.00")
             self.discount_entry.blockSignals(False)
 
-        if has_pricing_fields and self.active_tax_group_id is None:
+        if has_pricing_fields and (self.active_tax_group_id is None or not self._header_tax_enabled_by_policy()):
             self.tax_entry.blockSignals(True)
             self.tax_entry.setText("0.00")
             self.tax_entry.blockSignals(False)
@@ -1646,22 +1865,96 @@ class CreateSalesWidget(QWidget):
             return
 
         discount_label = (
-            f"{self.active_discount_group_name} ({self.active_discount_percent:.2f}%)"
+            f"{self.active_discount_group_name} ({self.active_discount_percent:.2f}% + {self.active_discount_fixed_amount:.2f}, {'Auto' if self.active_discount_apply_on_sale else 'Off'})"
             if self.active_discount_group_id is not None and self.active_discount_group_name
             else "None"
         )
         tax_label = (
-            f"{self.active_tax_group_name} ({self.active_tax_percent:.2f}%)"
+            f"{self.active_tax_group_name} ({self.active_tax_percent:.2f}% + {self.active_tax_fixed_amount:.2f}, {'Auto' if self.active_tax_apply_on_sale else 'Off'})"
             if self.active_tax_group_id is not None and self.active_tax_group_name
             else "None"
         )
 
         discount_mode = "Manual Override" if self.discount_group_manual_override else "Auto"
         tax_mode = "Manual Override" if self.tax_group_manual_override else "Auto"
+        discount_source_label = (
+            "Global Promo"
+            if self.active_discount_source == "global_promo"
+            else ("Customer Default" if self.active_discount_source == "customer_default" else "None")
+        )
+        tax_source_label = (
+            "Global Tax"
+            if self.active_tax_source == "global_tax"
+            else ("Customer Default" if self.active_tax_source == "customer_default" else "None")
+        )
 
         self.customer_pricing_summary.setText(
-            f"Pricing Defaults: Discount {discount_label} [{discount_mode}] | Tax {tax_label} [{tax_mode}]"
+            f"Pricing Defaults: Discount {discount_label} [{discount_mode}, Source {discount_source_label}, Policy {self._sales_discount_policy_label()}] | Tax {tax_label} [{tax_mode}, Source {tax_source_label}, Policy {self._sales_tax_policy_label()}]"
         )
+
+    def load_global_sales_discount(self):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                dg.id,
+                COALESCE(dg.name, ''),
+                COALESCE(dg.discount_percent, 0),
+                COALESCE(dg.fixed_amount, 0),
+                COALESCE(dg.apply_on_sale, 1)
+            FROM accounting_settings a
+            LEFT JOIN discount_group dg ON dg.id = a.global_sales_discount_group_id
+            WHERE a.id = 1
+              AND COALESCE(a.global_sales_discount_enabled, 0) = 1
+            LIMIT 1
+            """
+        )
+        if not query.exec() or not query.next():
+            return None
+
+        group_id = query.value(0)
+        if group_id in (None, ""):
+            return None
+
+        return {
+            "group_id": group_id,
+            "name": str(query.value(1) or ""),
+            "percent": float(query.value(2) or 0.0),
+            "fixed_amount": float(query.value(3) or 0.0),
+            "apply_on_sale": bool(int(query.value(4) or 0)),
+        }
+
+    def load_global_sales_tax(self):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                tg.id,
+                COALESCE(tg.name, ''),
+                COALESCE(tg.tax_percent, 0),
+                COALESCE(tg.fixed_amount, 0),
+                COALESCE(tg.apply_on_sale, 1)
+            FROM accounting_settings a
+            LEFT JOIN tax_group tg ON tg.id = a.global_sales_tax_group_id
+            WHERE a.id = 1
+              AND COALESCE(a.global_sales_tax_enabled, 0) = 1
+            LIMIT 1
+            """
+        )
+        if not query.exec() or not query.next():
+            return None
+
+        group_id = query.value(0)
+        if group_id in (None, ""):
+            return None
+
+        return {
+            "group_id": group_id,
+            "name": str(query.value(1) or ""),
+            "percent": float(query.value(2) or 0.0),
+            "fixed_amount": float(query.value(3) or 0.0),
+            "apply_on_sale": bool(int(query.value(4) or 0)),
+        }
         
         
         
@@ -1690,23 +1983,16 @@ class CreateSalesWidget(QWidget):
             # --- Collect Data ---
             customer_id = self.get_customer_id()
             salesman = self.get_salesman_id()
-                
 
-            def to_float(value):
-                
-                value = str(value).strip()
-                return float(value) if value else 0.0
-            
-
-            subtotal = to_float(self.gross_entry.text())
-            discount = to_float(self.discount_entry.text())
-            taxable = to_float(self.taxable_entry.text())
-            tax = to_float(self.tax_entry.text())
-            net_amount = to_float(self.net_amount_entry.text())
-            additional_charges = to_float(self.additional_entry.text())
-            total = to_float(self.final_amount_entry.text())
-            received = to_float(self.received_entry.text())
-            remaining = to_float(self.remainingdata.text())
+            subtotal = self._parse_float_field(self.gross_entry.text(), "Sub Total", 0.0)
+            discount = self._parse_float_field(self.discount_entry.text(), "Discount", 0.0)
+            taxable = self._parse_float_field(self.taxable_entry.text(), "Taxable", 0.0)
+            tax = self._parse_float_field(self.tax_entry.text(), "Sales Tax", 0.0)
+            net_amount = self._parse_float_field(self.net_amount_entry.text(), "Net Amount", 0.0)
+            additional_charges = self._parse_float_field(self.additional_entry.text(), "Additional Charges", 0.0)
+            total = self._parse_float_field(self.final_amount_entry.text(), "Final Amount", 0.0)
+            received = self._parse_float_field(self.received_entry.text(), "Received", 0.0)
+            remaining = self._parse_float_field(self.remainingdata.text(), "Remaining Amount", 0.0)
             
             due_date = None  # Will be set if receiveable amount exists
 
@@ -1907,7 +2193,7 @@ class CreateSalesWidget(QWidget):
             AppMessageBox.warning(self, "Validation Error", "No active session found.")
             return None
 
-        payment = self.payment_handler.payment_data.copy()
+        payment = self._normalize_payment_data(self.payment_handler.payment_data.copy())
         print(payment)
         print("Payment data is as above")
 
@@ -1936,14 +2222,14 @@ class CreateSalesWidget(QWidget):
         insert_txn.addBindValue(None)
 
         insert_txn.addBindValue(payable_before)
-        insert_txn.addBindValue(float(total_amount or 0.0))
+        insert_txn.addBindValue(self._float_or_default(total_amount, 0.0))
         insert_txn.addBindValue(paid)
         insert_txn.addBindValue(remaining_due)
         insert_txn.addBindValue(payable_after)
 
         insert_txn.addBindValue(receiveable_before)
         insert_txn.addBindValue(receiveable_now)
-        insert_txn.addBindValue(float(received or 0.0))
+        insert_txn.addBindValue(self._float_or_default(received, 0.0))
         insert_txn.addBindValue(remaining_now)
         insert_txn.addBindValue(receiveable_after)
 
@@ -1988,6 +2274,33 @@ class CreateSalesWidget(QWidget):
     def thermal_receipt_printer(self, sales_id):
         filename = "salesinvoice_thermal.pdf"
         return self.export_thermal_pdf(filename=filename, sales_id=sales_id)
+
+    def get_saved_sale_tax_breakdown(self, sales_id):
+        header_tax = 0.0
+        line_tax = 0.0
+        policy = "both"
+
+        header_query = QSqlQuery()
+        header_query.prepare("SELECT COALESCE(tax, 0) FROM sales WHERE id = ? LIMIT 1")
+        header_query.addBindValue(sales_id)
+        if header_query.exec() and header_query.next():
+            header_tax = float(header_query.value(0) or 0.0)
+
+        line_query = QSqlQuery()
+        line_query.prepare("SELECT COALESCE(SUM(COALESCE(taxamount, 0)), 0) FROM salesitem WHERE sales_id = ?")
+        line_query.addBindValue(sales_id)
+        if line_query.exec() and line_query.next():
+            line_tax = float(line_query.value(0) or 0.0)
+
+        policy_query = QSqlQuery()
+        if policy_query.exec("SELECT sales_tax_policy FROM accounting_settings WHERE id = 1") and policy_query.next():
+            policy = str(policy_query.value(0) or "both").strip() or "both"
+
+        return {
+            "line_tax": line_tax,
+            "header_tax": header_tax,
+            "policy": policy,
+        }
     
     
     def export_thermal_pdf(self, filename=None, sales_id=None, paper_width_mm=80.0):
@@ -2057,6 +2370,7 @@ class CreateSalesWidget(QWidget):
         sales_tax = float(header_query.value(4) or 0.0)
         sales_total = float(header_query.value(5) or 0.0)
         customer_name = str(header_query.value(6) or "Walk-In Customer")
+        tax_breakdown = self.get_saved_sale_tax_breakdown(sales_id)
 
         # ---------------------------
         # Fetch sale items
@@ -2163,8 +2477,18 @@ class CreateSalesWidget(QWidget):
         painter.drawText(margin, y, "Discount")
         painter.drawText(right - 95, y, f"{sales_discount:.2f}")
         y += line_h - 6
-        painter.drawText(margin, y, "Sales Tax")
-        painter.drawText(right - 95, y, f"{sales_tax:.2f}")
+        painter.drawText(margin, y, "Line Tax")
+        painter.drawText(right - 95, y, f"{tax_breakdown['line_tax']:.2f}")
+        y += line_h - 6
+        painter.drawText(margin, y, "Header Tax")
+        painter.drawText(right - 95, y, f"{tax_breakdown['header_tax']:.2f}")
+        y += line_h - 6
+        painter.drawText(margin, y, "Tax Policy")
+        painter.drawText(
+            right - 95,
+            y,
+            "Both" if tax_breakdown["policy"] == "both" else ("Line Only" if tax_breakdown["policy"] == "line_only" else "Header Only"),
+        )
         y += line_h - 4
         painter.drawLine(margin, y, right, y)
         y += line_h
@@ -2196,15 +2520,19 @@ class CreateSalesWidget(QWidget):
 
         def to_int(text, field_name, row):
             try:
-                return int(text)
+                cleaned = self._clean_numeric_text(text)
+                if cleaned == "":
+                    raise ValueError
+                return int(float(cleaned))
             except (TypeError, ValueError):
                 raise Exception(f"Row {row + 1}: Invalid {field_name}.")
 
         def to_float(text, field_name, row, default=0.0):
-            if text == "":
+            cleaned = self._clean_numeric_text(text)
+            if cleaned == "":
                 return default
             try:
-                return float(text)
+                return float(cleaned)
             except (TypeError, ValueError):
                 raise Exception(f"Row {row + 1}: Invalid {field_name}.")
 
@@ -2514,15 +2842,15 @@ class CreateSalesWidget(QWidget):
             customer = self.customer.currentData()
             salesman = self.get_salesman_id()
             status = 'On Hold'
-            subtotal = float(self.gross_entry.text() or 0.0)
-            discount_amount = float(self.discount_entry.text() or 0.0)
-            taxable_amount = float(self.taxable_entry.text() or 0.0)
-            tax_amount = float(self.tax_entry.text() or 0.0)
-            additional_charges = float(self.additional_entry.text() or 0.0)
-            final_amount = float(self.final_amount_entry.text() or 0.0)
-            received_amount = float(self.received_entry.text() or 0.0)
-            remaining_amount = float(self.remainingdata.text() or 0.0)
-            payment_method = self.payment_method.currentText() if hasattr(self, "payment_method") else "Cash"
+            subtotal = self._parse_float_field(self.gross_entry.text(), "Sub Total", 0.0)
+            discount_amount = self._parse_float_field(self.discount_entry.text(), "Discount", 0.0)
+            taxable_amount = self._parse_float_field(self.taxable_entry.text(), "Taxable", 0.0)
+            tax_amount = self._parse_float_field(self.tax_entry.text(), "Sales Tax", 0.0)
+            additional_charges = self._parse_float_field(self.additional_entry.text(), "Additional Charges", 0.0)
+            final_amount = self._parse_float_field(self.final_amount_entry.text(), "Final Amount", 0.0)
+            received_amount = self._parse_float_field(self.received_entry.text(), "Received", 0.0)
+            remaining_amount = self._parse_float_field(self.remainingdata.text(), "Remaining Amount", 0.0)
+            payment_method = self._text_or_none(self.payment_method.currentText()) if hasattr(self, "payment_method") else "Cash"
             due_date = self.compute_due_date()
             
             print("Customer is: ", customer)
@@ -2638,17 +2966,33 @@ class CreateSalesWidget(QWidget):
             
             print("Current Data is: ", product_id)
             
-            qty = int(float(self.table.cellWidget(row, 2).text() or 0))
-            rate = float(self.table.cellWidget(row, 3).text() or 0.0)
+            qty = self._parse_int_field(self.table.cellWidget(row, 2).text(), f"Row {row + 1} Qty", 0)
+            rate = self._parse_float_field(self.table.cellWidget(row, 3).text(), f"Row {row + 1} Rate", 0.0)
             discount_widget = self.table.cellWidget(row, 4)
             tax_widget = self.table.cellWidget(row, 5)
             total_widget = self.table.cellWidget(row, 6)
-            discount = float(discount_widget.property("discount_percent_applied") or discount_widget.text() or 0.0)
-            discountamount = float(discount_widget.property("discount_amount_applied") or 0.0)
-            tax = float(tax_widget.property("tax_percent_applied") or tax_widget.text() or 0.0)
-            taxamount = float(tax_widget.property("tax_amount_applied") or 0.0)
+            discount = self._parse_float_field(
+                discount_widget.property("discount_percent_applied") or discount_widget.text(),
+                f"Row {row + 1} Discount",
+                0.0,
+            )
+            discountamount = self._parse_float_field(
+                discount_widget.property("discount_amount_applied"),
+                f"Row {row + 1} Discount Amount",
+                0.0,
+            )
+            tax = self._parse_float_field(
+                tax_widget.property("tax_percent_applied") or tax_widget.text(),
+                f"Row {row + 1} Tax",
+                0.0,
+            )
+            taxamount = self._parse_float_field(
+                tax_widget.property("tax_amount_applied"),
+                f"Row {row + 1} Tax Amount",
+                0.0,
+            )
             discount_input_mode = str(discount_widget.property("discount_input_mode") or "percent")
-            total = float(total_widget.text() or 0.0)
+            total = self._parse_float_field(total_widget.text(), f"Row {row + 1} Total", 0.0)
             
             
             print("we have reached here...")
@@ -2794,8 +3138,12 @@ class CreateSalesWidget(QWidget):
                 COALESCE(dg.id, 0),
                 COALESCE(dg.discount_percent, 0),
                 COALESCE(dg.name, ''),
+                COALESCE(dg.fixed_amount, 0),
+                COALESCE(dg.apply_on_sale, 1),
                 COALESCE(tg.id, 0),
-                COALESCE(tg.tax_percent, 0),
+                CASE WHEN COALESCE(tg.apply_on_sale, 1) = 1 THEN COALESCE(tg.tax_percent, 0) ELSE 0 END,
+                COALESCE(tg.fixed_amount, 0),
+                COALESCE(tg.apply_on_sale, 1),
                 COALESCE(tg.name, ''),
                 COALESCE((
                     SELECT SUM(quantity_remaining)
@@ -2843,10 +3191,14 @@ class CreateSalesWidget(QWidget):
         discount_group_id = int(query.value(3) or 0) or None
         discount_percent = float(query.value(4) or 0.0)
         discount_group_name = str(query.value(5) or "").strip()
-        tax_group_id = int(query.value(6) or 0) or None
-        tax_percent = float(query.value(7) or 0.0)
-        tax_group_name = str(query.value(8) or "").strip()
-        available_stock = int(query.value(9) or 0)
+        discount_fixed_amount = float(query.value(6) or 0.0)
+        discount_apply_on_sale = bool(int(query.value(7) or 0))
+        tax_group_id = int(query.value(8) or 0) or None
+        tax_percent = float(query.value(9) or 0.0)
+        tax_fixed_amount = float(query.value(10) or 0.0)
+        tax_apply_on_sale = bool(int(query.value(11) or 0))
+        tax_group_name = str(query.value(12) or "").strip()
+        available_stock = int(query.value(13) or 0)
 
         return {
             "product_id": product_id,
@@ -2855,8 +3207,12 @@ class CreateSalesWidget(QWidget):
             "discount_group_id": discount_group_id,
             "discount_percent": discount_percent,
             "discount_group_name": discount_group_name,
+            "discount_fixed_amount": discount_fixed_amount,
+            "discount_apply_on_sale": discount_apply_on_sale,
             "tax_group_id": tax_group_id,
             "tax_percent": tax_percent,
+            "tax_fixed_amount": tax_fixed_amount,
+            "tax_apply_on_sale": tax_apply_on_sale,
             "tax_group_name": tax_group_name,
             "available_stock": available_stock,
             "code": code_text,
@@ -2940,13 +3296,25 @@ class CreateSalesWidget(QWidget):
         discount_value = discount_widget.text() or 0.0
         discount_mode = str(discount_widget.property("discount_input_mode") or "percent")
         tax_pct = float(tax_widget.property("tax_percent_applied") or tax_widget.text() or 0.0)
-        resolved = self.resolve_line_pricing(qty, rate, discount_value, discount_mode, tax_pct)
+        resolved = self.resolve_line_pricing(
+            qty,
+            rate,
+            discount_value,
+            discount_mode,
+            tax_pct,
+            product.get("discount_fixed_amount", discount_widget.property("discount_fixed_amount_applied") or 0.0),
+            product.get("discount_apply_on_sale", True),
+            product.get("tax_fixed_amount", tax_widget.property("tax_fixed_amount_applied") or 0.0),
+            product.get("tax_apply_on_sale", True),
+        )
 
         qty_widget.setText(str(qty))
         total_widget.setText(f"{resolved['line_total']:.2f}")
         discount_widget.setProperty("discount_percent_applied", resolved["discount_percent"])
+        discount_widget.setProperty("discount_fixed_amount_applied", resolved["discount_fixed_amount"])
         discount_widget.setProperty("discount_amount_applied", resolved["discount_amount"])
         tax_widget.setProperty("tax_percent_applied", resolved["tax_percent"])
+        tax_widget.setProperty("tax_fixed_amount_applied", product.get("tax_fixed_amount", 0.0))
         tax_widget.setProperty("tax_amount_applied", resolved["tax_amount"])
         self.update_total_amount()
 
@@ -2998,9 +3366,13 @@ class CreateSalesWidget(QWidget):
             "discount_group_id": product.get("discount_group_id"),
             "discount_percent": product.get("discount_percent", 0.0),
             "discount_group_name": product.get("discount_group_name", ""),
+            "discount_fixed_amount": product.get("discount_fixed_amount", 0.0),
+            "discount_apply_on_sale": product.get("discount_apply_on_sale", True),
             "code": product["code"],
             "tax_group_id": product.get("tax_group_id"),
             "tax_percent": product.get("tax_percent", 0.0),
+            "tax_fixed_amount": product.get("tax_fixed_amount", 0.0),
+            "tax_apply_on_sale": product.get("tax_apply_on_sale", True),
             "tax_group_name": product.get("tax_group_name", ""),
         }
 
@@ -3069,8 +3441,12 @@ class CreateSalesWidget(QWidget):
                  , COALESCE(dg.id, 0)
                  , COALESCE(dg.discount_percent, 0)
                  , COALESCE(dg.name, '')
+                 , COALESCE(dg.fixed_amount, 0)
+                 , COALESCE(dg.apply_on_sale, 1)
                  , COALESCE(tg.id, 0)
-                 , COALESCE(tg.tax_percent, 0)
+                 , CASE WHEN COALESCE(tg.apply_on_sale, 1) = 1 THEN COALESCE(tg.tax_percent, 0) ELSE 0 END
+                 , COALESCE(tg.fixed_amount, 0)
+                 , COALESCE(tg.apply_on_sale, 1)
                  , COALESCE(tg.name, '')
             FROM product p
             LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
@@ -3098,17 +3474,25 @@ class CreateSalesWidget(QWidget):
             discount_group_id = int(query.value(3) or 0) or None
             discount_percent = query.value(4) or 0.0
             discount_group_name = str(query.value(5) or "").strip()
-            tax_group_id = int(query.value(6) or 0) or None
-            tax_percent = query.value(7) or 0.0
-            tax_group_name = str(query.value(8) or "").strip()
+            discount_fixed_amount = query.value(6) or 0.0
+            discount_apply_on_sale = bool(int(query.value(7) or 0))
+            tax_group_id = int(query.value(8) or 0) or None
+            tax_percent = query.value(9) or 0.0
+            tax_fixed_amount = query.value(10) or 0.0
+            tax_apply_on_sale = bool(int(query.value(11) or 0))
+            tax_group_name = str(query.value(12) or "").strip()
             results.append((name, {
                 "product_id": product_id,
                 "unit_price": unit_price,
                 "discount_group_id": discount_group_id,
                 "discount_percent": discount_percent,
                 "discount_group_name": discount_group_name,
+                "discount_fixed_amount": discount_fixed_amount,
+                "discount_apply_on_sale": discount_apply_on_sale,
                 "tax_group_id": tax_group_id,
                 "tax_percent": tax_percent,
+                "tax_fixed_amount": tax_fixed_amount,
+                "tax_apply_on_sale": tax_apply_on_sale,
                 "tax_group_name": tax_group_name,
             }))
         return results
@@ -3158,19 +3542,23 @@ class CreateSalesWidget(QWidget):
         discount_name = str(product_data.get("discount_group_name") or "").strip()
         tax_name = str(product_data.get("tax_group_name") or "").strip()
         discount_percent = float(product_data.get("discount_percent") or 0.0)
+        discount_fixed_amount = float(product_data.get("discount_fixed_amount") or 0.0)
+        discount_apply_on_sale = bool(product_data.get("discount_apply_on_sale", True))
         tax_percent = float(product_data.get("tax_percent") or 0.0)
+        tax_fixed_amount = float(product_data.get("tax_fixed_amount") or 0.0)
+        tax_apply_on_sale = bool(product_data.get("tax_apply_on_sale", True))
         discount_mode = self.discount_mode_combo.currentData() if hasattr(self, "discount_mode_combo") else "percent"
         discount_source = "Manual Override" if self.line_discount_manual_override else "Product Default"
         tax_source = "Manual Override" if self.line_tax_manual_override else "Product Default"
         has_manual_override = self.line_discount_manual_override or self.line_tax_manual_override
 
         discount_text = (
-            f"{discount_name} ({discount_percent:.2f}%)"
-            if discount_name else f"None ({discount_percent:.2f}%)"
+            f"{discount_name} ({discount_percent:.2f}% + {discount_fixed_amount:.2f}, {'Auto' if discount_apply_on_sale else 'Off'})"
+            if discount_name else f"None ({discount_percent:.2f}% + {discount_fixed_amount:.2f})"
         )
         tax_text = (
-            f"{tax_name} ({tax_percent:.2f}%)"
-            if tax_name else f"None ({tax_percent:.2f}%)"
+            f"{tax_name} ({tax_percent:.2f}% + {tax_fixed_amount:.2f}, {'Auto' if tax_apply_on_sale else 'Off'})"
+            if tax_name else f"None ({tax_percent:.2f}% + {tax_fixed_amount:.2f})"
         )
 
         badge = "Manual Override Active" if has_manual_override else "Defaults Active"
@@ -3179,8 +3567,8 @@ class CreateSalesWidget(QWidget):
             f"color: {badge_color}; font-size: 11px; font-weight: 700; padding-left: 0;"
         )
         self.line_pricing_hint.setText(
-            f"Line Pricing [{badge}]: Discount {discount_text} [{discount_source}, Mode: {'Amt' if discount_mode == 'amount' else '%'}] | "
-            f"Tax {tax_text} [{tax_source}] | Product defaults drive the row, header defaults stay at invoice level"
+            f"Line Pricing [{badge}]: Discount {discount_text} [{discount_source}, Mode: {'Amt' if discount_mode == 'amount' else '%'}, Policy {self._sales_discount_policy_label()}] | "
+            f"Tax {tax_text} [{tax_source}, Policy {self._sales_tax_policy_label()}] | Product defaults drive the row, header defaults stay at invoice level"
         )
             
             
@@ -3189,56 +3577,64 @@ class CreateSalesWidget(QWidget):
 
 
     def update_total_amount(self):
-        
+        self.load_sales_discount_policy()
+        self.load_sales_tax_policy()
         
         subtotal = 0.00
         for row in range(self.table.rowCount()):
-            
-            linetotal = self.table.cellWidget(row, 6).text()
-            
-            if linetotal:
-                try:
-                   
-                    value = float(linetotal)
-                    subtotal = subtotal + value
-                    
-                except ValueError:
-                    pass  
-                
-            else:
+            line_total_widget = self.table.cellWidget(row, 6)
+            if line_total_widget is None:
                 continue
+
+            subtotal += max(0.0, self._float_or_default(line_total_widget.text(), 0.0))
                 
         self.gross_entry.setText(f"{subtotal:.2f}")
 
-        if self.active_discount_group_id is not None and not self.discount_group_manual_override:
-            discount_amount = subtotal * self.active_discount_percent / 100.0
+        totals = compute_header_totals(
+            subtotal=subtotal,
+            manual_discount=self._float_or_default(self.discount_entry.text(), 0.0),
+            manual_tax=self._float_or_default(self.tax_entry.text(), 0.0),
+            additional_charges=self._float_or_default(self.additional_entry.text(), 0.0),
+            discount_group_id=self.active_discount_group_id,
+            discount_percent=self.active_discount_percent,
+            discount_fixed_amount=self.active_discount_fixed_amount,
+            discount_apply_on_sale=self.active_discount_apply_on_sale,
+            discount_manual_override=self.discount_group_manual_override,
+            header_discount_enabled=self._header_discount_enabled_by_policy(),
+            tax_group_id=self.active_tax_group_id,
+            tax_percent=self.active_tax_percent,
+            tax_fixed_amount=self.active_tax_fixed_amount,
+            tax_apply_on_sale=self.active_tax_apply_on_sale,
+            tax_manual_override=self.tax_group_manual_override,
+            header_tax_enabled=self._header_tax_enabled_by_policy(),
+        )
+
+        discount = totals["discount"]
+        taxable = totals["taxable"]
+        tax = totals["tax"]
+        net_amount = totals["net_amount"]
+        additional_charges = totals["additional_charges"]
+        final_amount = totals["final_amount"]
+
+        if self.discount_entry.text().strip() != f"{discount:.2f}":
             self.discount_entry.blockSignals(True)
-            self.discount_entry.setText(f"{discount_amount:.2f}")
+            self.discount_entry.setText(f"{discount:.2f}")
             self.discount_entry.blockSignals(False)
 
-        discount = self.discount_entry.text()
-        discount = float(discount) if discount else 0.00
-        
-        taxable = subtotal - discount
         self.taxable_entry.setText(f"{taxable:.2f}")
 
-        if self.active_tax_group_id is not None and not self.tax_group_manual_override:
-            tax_amount = taxable * self.active_tax_percent / 100.0
+        if self.tax_entry.text().strip() != f"{tax:.2f}":
             self.tax_entry.blockSignals(True)
-            self.tax_entry.setText(f"{tax_amount:.2f}")
+            self.tax_entry.setText(f"{tax:.2f}")
             self.tax_entry.blockSignals(False)
 
-        tax = self.tax_entry.text()
-        tax = float(tax) if tax else 0.00
-        
-        net_amount = taxable + tax
-        
         self.net_amount_entry.setText(f"{net_amount:.2f}")
+
+        if self.additional_entry.text().strip() != f"{additional_charges:.2f}":
+            self.additional_entry.blockSignals(True)
+            self.additional_entry.setText(f"{additional_charges:.2f}")
+            self.additional_entry.blockSignals(False)
         
-        additional_charges = self.additional_entry.text()
-        additional_charges = float(additional_charges) if additional_charges else 0.00
-        
-        final_amount = net_amount + additional_charges
         self.final_amount_entry.setText(f"{final_amount:.2f}")
         
         self.final_amount_entry.setStyleSheet("font-weight: bold;")
@@ -3255,8 +3651,12 @@ class CreateSalesWidget(QWidget):
                 COALESCE(dg.id, 0),
                 COALESCE(dg.discount_percent, 0),
                 COALESCE(dg.name, ''),
+                COALESCE(dg.fixed_amount, 0),
+                COALESCE(dg.apply_on_sale, 1),
                 COALESCE(tg.id, 0),
-                COALESCE(tg.tax_percent, 0),
+                CASE WHEN COALESCE(tg.apply_on_sale, 1) = 1 THEN COALESCE(tg.tax_percent, 0) ELSE 0 END,
+                COALESCE(tg.fixed_amount, 0),
+                COALESCE(tg.apply_on_sale, 1),
                 COALESCE(tg.name, '')
             FROM product p
             LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
@@ -3283,9 +3683,13 @@ class CreateSalesWidget(QWidget):
             "discount_group_id": int(query.value(2) or 0) or None,
             "discount_percent": float(query.value(3) or 0.0),
             "discount_group_name": str(query.value(4) or "").strip(),
-            "tax_group_id": int(query.value(5) or 0) or None,
-            "tax_percent": float(query.value(6) or 0.0),
-            "tax_group_name": str(query.value(7) or "").strip(),
+            "discount_fixed_amount": float(query.value(5) or 0.0),
+            "discount_apply_on_sale": bool(int(query.value(6) or 0)),
+            "tax_group_id": int(query.value(7) or 0) or None,
+            "tax_percent": float(query.value(8) or 0.0),
+            "tax_fixed_amount": float(query.value(9) or 0.0),
+            "tax_apply_on_sale": bool(int(query.value(10) or 0)),
+            "tax_group_name": str(query.value(11) or "").strip(),
         }
 
     def insert_sale_row_widget(
@@ -3335,6 +3739,10 @@ class CreateSalesWidget(QWidget):
             discount_data or 0,
             discount_mode,
             tax_data or 0,
+            product_data.get("discount_fixed_amount", 0.0),
+            product_data.get("discount_apply_on_sale", True),
+            product_data.get("tax_fixed_amount", 0.0),
+            product_data.get("tax_apply_on_sale", True),
         )
 
         qty_edit = QLineEdit()
@@ -3352,6 +3760,7 @@ class CreateSalesWidget(QWidget):
         discount.setText(str(discount_data))
         discount.setProperty("discount_input_mode", discount_mode)
         discount.setProperty("discount_percent_applied", resolved["discount_percent"])
+        discount.setProperty("discount_fixed_amount_applied", resolved["discount_fixed_amount"])
         discount.setProperty("discount_amount_applied", resolved["discount_amount"])
         discount.setProperty("default_discount_group_id", product_data.get("discount_group_id"))
         discount.setProperty(
@@ -3367,6 +3776,7 @@ class CreateSalesWidget(QWidget):
         tax.setReadOnly(True)
         tax.setText(str(tax_data))
         tax.setProperty("tax_percent_applied", resolved["tax_percent"])
+        tax.setProperty("tax_fixed_amount_applied", resolved["tax_fixed_amount"])
         tax.setProperty("tax_amount_applied", resolved["tax_amount"])
         tax.setProperty("default_tax_group_id", product_data.get("tax_group_id"))
         tax.setProperty(
@@ -3441,8 +3851,8 @@ class CreateSalesWidget(QWidget):
         method_index = self.payment_method.findText(payment_method)
         self.payment_method.setCurrentIndex(method_index if method_index >= 0 else 0)
 
-        current_discount = float(self.discount_entry.text() or 0.0)
-        current_tax = float(self.tax_entry.text() or 0.0)
+        current_discount = self._float_or_default(self.discount_entry.text(), 0.0)
+        current_tax = self._float_or_default(self.tax_entry.text(), 0.0)
         if abs(current_discount - stored_discount) > 0.009:
             self.discount_group_manual_override = True
             self.discount_entry.blockSignals(True)
@@ -3696,6 +4106,9 @@ class CreateSalesWidget(QWidget):
         self.active_discount_group_id = None
         self.active_discount_group_name = ""
         self.active_discount_percent = 0.0
+        self.active_discount_fixed_amount = 0.0
+        self.active_discount_apply_on_sale = False
+        self.active_discount_source = "none"
         self.active_tax_group_id = None
         self.active_tax_group_name = ""
         self.active_tax_percent = 0.0
@@ -3783,6 +4196,7 @@ class CreateSalesWidget(QWidget):
         sales_discount = float(header_query.value(3) or 0.0)
         sales_tax = float(header_query.value(4) or 0.0)
         sales_total = float(header_query.value(5) or 0.0)
+        tax_breakdown = self.get_saved_sale_tax_breakdown(sales_id)
         customer_name = str(header_query.value(6) or "Walk-In Customer")
         
         
@@ -3992,8 +4406,20 @@ class CreateSalesWidget(QWidget):
         
         y += 80
 
-        painter.drawText(x + 1600, y, f"Sales Tax: ")
-        painter.drawText(x + 1900, y, f"{sales_tax:.2f}")
+        painter.drawText(x + 1600, y, f"Line Tax: ")
+        painter.drawText(x + 1900, y, f"{tax_breakdown['line_tax']:.2f}")
+        
+        y += 80
+        painter.drawText(x + 1600, y, f"Header Tax: ")
+        painter.drawText(x + 1900, y, f"{tax_breakdown['header_tax']:.2f}")
+        
+        y += 80
+        painter.drawText(x + 1600, y, f"Tax Policy: ")
+        painter.drawText(
+            x + 1900,
+            y,
+            "Both" if tax_breakdown["policy"] == "both" else ("Line Only" if tax_breakdown["policy"] == "line_only" else "Header Only"),
+        )
         
         y += 80
         pen = QPen(QColor("black"))

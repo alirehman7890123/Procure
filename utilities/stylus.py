@@ -3,6 +3,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from utilities.app_theme import get_theme_palette
 
 
 def resource_path(relative_path):
@@ -48,5 +49,20 @@ def load_stylesheets():
                 with open(css_file, "r") as f:
                     css_content += f.read() + "\n"
 
-    return _normalize_stylesheet_urls(css_content)
+    palette = get_theme_palette()
+    replacements = {
+        "#2F5D7C": palette["primary_main"],
+        "#244A62": palette["primary_hover"],
+        "#163B5C": palette["primary_pressed"],
+        "#2a506b": palette["primary_border"],
+        "#5B8FB8": palette["focus_border"],
+        "#EEF5FA": palette["focus_fill"],
+        "#234B69": palette["primary_hover"],
+        "#193A52": palette["primary_border"],
+        "#1D415B": palette["primary_pressed"],
+        "#153347": palette["primary_pressed"],
+    }
+    for old, new in replacements.items():
+        css_content = css_content.replace(old, new)
 
+    return _normalize_stylesheet_urls(css_content)

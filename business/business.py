@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget,QApplication, QFrame, QPushButton, QVBoxLayout, QLineEdit, QLabel,QMessageBox, QHBoxLayout, QSizePolicy, QFrame
 from PySide6.QtGui import QColor
-from PySide6.QtCore import QSize, Qt, QFile, QEvent
+from PySide6.QtCore import QSize, Qt, QFile, QEvent, Signal
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from utilities.permissions import Permissions
 from utilities.stylus import load_stylesheets
@@ -9,6 +9,9 @@ from utilities.stylus import load_stylesheets
 
 
 class BusinessWidget(QWidget):
+    tax_settings_requested = Signal()
+    discount_settings_requested = Signal()
+    theme_settings_requested = Signal()
 
     def __init__(self, parent=None):
 
@@ -24,15 +27,30 @@ class BusinessWidget(QWidget):
          # === Header Row ===
         header_layout = QHBoxLayout()
         heading = QLabel("Business Information", objectName="SectionTitle")
+
+        self.tax_settings_btn = QPushButton("Tax Settings", objectName="TopRightButton")
+        self.tax_settings_btn.setCursor(Qt.PointingHandCursor)
+        self.tax_settings_btn.clicked.connect(self.tax_settings_requested.emit)
+
+        self.discount_settings_btn = QPushButton("Discount Settings", objectName="TopRightButton")
+        self.discount_settings_btn.setCursor(Qt.PointingHandCursor)
+        self.discount_settings_btn.clicked.connect(self.discount_settings_requested.emit)
+
+        self.theme_settings_btn = QPushButton("Theme Settings", objectName="TopRightButton")
+        self.theme_settings_btn.setCursor(Qt.PointingHandCursor)
+        self.theme_settings_btn.clicked.connect(self.theme_settings_requested.emit)
         
         self.edit_btn = QPushButton("Edit", objectName="TopRightButton")
         self.edit_btn.setCursor(Qt.PointingHandCursor)
         self.edit_btn.clicked.connect(self.toggle_edit_mode)
-        header_layout.addWidget(self.edit_btn)
         self.edit_mode = False  # Track whether we are in edit mode or not
         header_layout.setContentsMargins(0, 0, 0, 10)
         header_layout.addWidget(heading)
         header_layout.addStretch()
+        header_layout.addWidget(self.theme_settings_btn)
+        header_layout.addWidget(self.discount_settings_btn)
+        header_layout.addWidget(self.tax_settings_btn)
+        header_layout.addWidget(self.edit_btn)
 
         self.layout.addLayout(header_layout)
         
@@ -236,4 +254,3 @@ class BusinessWidget(QWidget):
         
 
    
-

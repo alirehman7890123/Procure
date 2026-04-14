@@ -3,6 +3,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtCore import QSize, Qt, QFile, QDate, QEvent, QStringListModel, Signal, QTimer
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from datetime import date, datetime
+import re
 from utilities.product_search_widget import ProductSearchBox
 import sys
 import pandas as pd  # <-- for reading CSV/Excel easily
@@ -135,6 +136,16 @@ class AddProductWidget(QWidget):
         label.setStyleSheet("font-size: 12px; font-weight: 600; padding-left: 0;")
         return label
 
+    def force_uppercase_line_edit(self, line_edit, text):
+        cursor_pos = line_edit.cursorPosition()
+        upper_text = str(text or "").upper()
+        if line_edit.text() == upper_text:
+            return
+        line_edit.blockSignals(True)
+        line_edit.setText(upper_text)
+        line_edit.setCursorPosition(min(cursor_pos, len(upper_text)))
+        line_edit.blockSignals(False)
+
     def section_divider(self):
         line = QFrame()
         line.setObjectName("lineSeparator")
@@ -185,6 +196,9 @@ class AddProductWidget(QWidget):
         self.section_widgets[frame] = tracked
 
     def eventFilter(self, watched, event):
+        if event.type() == QEvent.FocusIn:
+            if isinstance(watched, QLineEdit) and not watched.isReadOnly():
+                QTimer.singleShot(0, watched.selectAll)
         if event.type() in (QEvent.FocusIn, QEvent.FocusOut):
             QTimer.singleShot(0, self.update_section_highlight_from_focus)
         return super().eventFilter(watched, event)
@@ -203,7 +217,7 @@ class AddProductWidget(QWidget):
         self.recent_products_table = QTableWidget(0, 8)
         self.recent_products_table.setObjectName("StandardTable")
         self.recent_products_table.setHorizontalHeaderLabels([
-            "Type", "Product", "Manufacturer", "Batch", "Expiry", "Qty", "Pack Size", "Price"
+            "Type", "Product", "Manufacturer", "Batch", "Expiry (MM-YY)", "Qty", "Pack Size", "Price"
         ])
         self.recent_products_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.recent_products_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -223,6 +237,36 @@ class AddProductWidget(QWidget):
 
     def default_expiry_date(self):
         return QDate.currentDate()
+
+    def parse_expiry_month_year(self, text):
+        raw = str(text or "").strip()
+        if not raw:
+            return None
+
+        match = re.fullmatch(r"(\d{2})-(\d{2})", raw)
+        if not match:
+            return None
+
+        month = int(match.group(1))
+        year_two_digits = int(match.group(2))
+        if month < 1 or month > 12:
+            return None
+
+        year = 2000 + year_two_digits
+        normalized = QDate(year, month, 1)
+        if not normalized.isValid():
+            return None
+
+        current_month_start = QDate.currentDate().addDays(1 - QDate.currentDate().day())
+        if normalized < current_month_start:
+            return None
+
+        return normalized
+
+    def expiry_month_year_text(self, date_value):
+        if date_value is None or not date_value.isValid():
+            return ""
+        return date_value.toString("MM-yy")
 
     def refresh_recent_products_table(self, highlight_batch_id=None):
         if not hasattr(self, "recent_products_table"):
@@ -268,7 +312,7 @@ class AddProductWidget(QWidget):
                 expiry_text = "-"
                 if expiry_value:
                     try:
-                        expiry_text = datetime.fromisoformat(str(expiry_value)).strftime("%d %b %Y")
+                        expiry_text = datetime.fromisoformat(str(expiry_value)).strftime("%m-%y")
                     except Exception:
                         expiry_text = str(expiry_value)
 
@@ -560,6 +604,8 @@ class AddProductWidget(QWidget):
         
         self.formula_input = QLineEdit()
         self.code_input = QLineEdit()
+        self.pack_size_input = QLineEdit()
+        self.rack_input = QLineEdit()
         
         
         self.name_input.setPlaceholderText("Product name")
@@ -568,6 +614,8 @@ class AddProductWidget(QWidget):
         self.brand_input.setPlaceholderText("Manufacturer")
         self.formula_input.setPlaceholderText("Formula")
         self.code_input.setPlaceholderText("Code")
+        self.pack_size_input.setPlaceholderText("Pack Size")
+        self.rack_input.setPlaceholderText("Rack")
 
         section_frame, section_layout = self.create_entry_section()
 
@@ -589,9 +637,9 @@ class AddProductWidget(QWidget):
         main_grid.addWidget(formula_label, 1, 0)
         main_grid.addWidget(self.formula_input, 1, 1, 1, 3)
 
-        code_label = self.field_label("Code", align_right=True)
-        main_grid.addWidget(code_label, 1, 4)
-        main_grid.addWidget(self.code_input, 1, 5)
+        pack_size_label = self.field_label("Pack Size", align_right=True)
+        main_grid.addWidget(pack_size_label, 1, 4)
+        main_grid.addWidget(self.pack_size_input, 1, 5)
 
         main_grid.setColumnStretch(1, 5)
         main_grid.setColumnStretch(2, 2)
@@ -602,7 +650,7 @@ class AddProductWidget(QWidget):
         section_layout.addLayout(main_grid)
         self.register_section_focus(section_frame, [
             self.name_input, self.dosage, self.form, self.brand_input,
-            self.formula_input, self.code_input
+            self.formula_input, self.pack_size_input
         ])
         
 
@@ -627,43 +675,22 @@ class AddProductWidget(QWidget):
 
 
         self.batch_input = QLineEdit()
-        self.expiry_input = QDateEdit()
-        self.expiry_input.setCalendarPopup(True)
-        self.expiry_input.setDisplayFormat("dd-MM-yy")
-        self.expiry_input.setMinimumDate(self.default_expiry_date())
-        self.expiry_input.setDate(self.default_expiry_date())
-
-        self.expiry_input.setStyleSheet("""
-            QDateEdit {
-                padding: 4px;
-            }
-
-            QCalendarWidget QWidget {
-                background-color: white;
-                color: black;
-            }
-
-            QCalendarWidget QAbstractItemView {
-                selection-background-color: #5A9EC9;
-                selection-color: white;
-                color: black;
-            }
-
-            QCalendarWidget QToolButton {
-                background: none;
-                color: black;
-            }
-        """)
-        
-        self.expiry_input.setKeyboardTracking(False)
+        self.batch_input.textEdited.connect(lambda text: self.force_uppercase_line_edit(self.batch_input, text))
+        self.expiry_input = QLineEdit()
+        self.expiry_input.setPlaceholderText("MM-YY")
+        self.expiry_input.setInputMask("00-00;_")
 
         batch_label = self.field_label("Batch", align_right=True)
         batch_grid.addWidget(batch_label, 0, 4)
         batch_grid.addWidget(self.batch_input, 0, 5)
 
-        expiry_label = self.field_label("Expiry", align_right=True)
+        expiry_label = self.field_label("Expiry (MM-YY)", align_right=True)
         batch_grid.addWidget(expiry_label, 0, 6)
         batch_grid.addWidget(self.expiry_input, 0, 7)
+
+        rack_label = self.field_label("Rack")
+        batch_grid.addWidget(rack_label, 1, 0)
+        batch_grid.addWidget(self.rack_input, 1, 1)
 
         batch_grid.setColumnStretch(1, 3)
         batch_grid.setColumnStretch(3, 3)
@@ -672,7 +699,8 @@ class AddProductWidget(QWidget):
 
         section_layout.addLayout(batch_grid)
         self.register_section_focus(section_frame, [
-            self.quantity_input, self.unit_cost_input, self.batch_input, self.expiry_input
+            self.quantity_input, self.unit_cost_input, self.batch_input, self.expiry_input,
+            self.rack_input
         ])
         
         
@@ -743,22 +771,20 @@ class AddProductWidget(QWidget):
         pricing_grid.setHorizontalSpacing(10)
         pricing_grid.setVerticalSpacing(8)
 
-        pack_size_label = self.field_label("Pack Size")
-        self.pack_size_input = QLineEdit()
-        self.pack_size_input.setPlaceholderText("Pack Size")
-        pricing_grid.addWidget(pack_size_label, 0, 0)
-        pricing_grid.addWidget(self.pack_size_input, 0, 1)
-
-        pack_price_label = self.field_label("Price", align_right=True)
+        pack_price_label = self.field_label("Price")
         self.pack_price_input = QLineEdit()
-        pricing_grid.addWidget(pack_price_label, 0, 2)
-        pricing_grid.addWidget(self.pack_price_input, 0, 3)
+        pricing_grid.addWidget(pack_price_label, 0, 0)
+        pricing_grid.addWidget(self.pack_price_input, 0, 1)
 
         unit_price_label = self.field_label("Unit Price", align_right=True)
         self.unit_price_input = QLabel()
         self.unit_price_input.setStyleSheet("font-size: 12px; font-weight: 700; color: #2F5D7C; padding-left: 0;")
-        pricing_grid.addWidget(unit_price_label, 0, 4)
-        pricing_grid.addWidget(self.unit_price_input, 0, 5)
+        pricing_grid.addWidget(unit_price_label, 0, 2)
+        pricing_grid.addWidget(self.unit_price_input, 0, 3)
+
+        code_label = self.field_label("Code", align_right=True)
+        pricing_grid.addWidget(code_label, 0, 4)
+        pricing_grid.addWidget(self.code_input, 0, 5)
 
         discount_group_label = self.field_label("Discount")
         self.discount_group_combo = QComboBox()
@@ -816,7 +842,7 @@ class AddProductWidget(QWidget):
         combo.clear()
         combo.addItem("None", None)
         query = QSqlQuery("""
-            SELECT id, name, tax_percent
+            SELECT id, name, tax_percent, COALESCE(fixed_amount, 0), COALESCE(apply_on_sale, 1)
             FROM tax_group
             WHERE status = 'active'
             ORDER BY name
@@ -825,13 +851,18 @@ class AddProductWidget(QWidget):
             group_id = query.value(0)
             group_name = str(query.value(1) or "").strip()
             tax_percent = float(query.value(2) or 0.0)
-            combo.addItem(f"{group_name} ({tax_percent:.2f}%)", group_id)
+            fixed_amount = float(query.value(3) or 0.0)
+            apply_on_sale = bool(int(query.value(4) or 0))
+            combo.addItem(
+                f"{group_name} ({tax_percent:.2f}% + {fixed_amount:.2f}, {'Sale On' if apply_on_sale else 'Sale Off'})",
+                group_id,
+            )
 
     def populate_discount_group_combobox(self, combo: QComboBox):
         combo.clear()
         combo.addItem("None", None)
         query = QSqlQuery("""
-            SELECT id, name, discount_percent
+            SELECT id, name, discount_percent, COALESCE(fixed_amount, 0), COALESCE(apply_on_sale, 1)
             FROM discount_group
             WHERE status = 'active'
             ORDER BY name
@@ -840,7 +871,12 @@ class AddProductWidget(QWidget):
             group_id = query.value(0)
             group_name = str(query.value(1) or "").strip()
             discount_percent = float(query.value(2) or 0.0)
-            combo.addItem(f"{group_name} ({discount_percent:.2f}%)", group_id)
+            fixed_amount = float(query.value(3) or 0.0)
+            apply_on_sale = bool(int(query.value(4) or 0))
+            combo.addItem(
+                f"{group_name} ({discount_percent:.2f}% + {fixed_amount:.2f}, {'Sale On' if apply_on_sale else 'Sale Off'})",
+                group_id,
+            )
         
         
     
@@ -861,14 +897,15 @@ class AddProductWidget(QWidget):
         self.dosage.returnPressed.connect(lambda: self.focus_next_field(self.form))
         self.form.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.brand_input))
         self.brand_input.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.formula_input))
-        self.formula_input.returnPressed.connect(lambda: self.focus_next_field(self.code_input))
-        self.code_input.returnPressed.connect(lambda: self.focus_next_field(self.quantity_input))
+        self.formula_input.returnPressed.connect(lambda: self.focus_next_field(self.pack_size_input))
+        self.pack_size_input.returnPressed.connect(lambda: self.focus_next_field(self.quantity_input))
         self.quantity_input.returnPressed.connect(lambda: self.focus_next_field(self.unit_cost_input))
         self.unit_cost_input.returnPressed.connect(lambda: self.focus_next_field(self.batch_input))
         self.batch_input.returnPressed.connect(lambda: self.focus_next_field(self.expiry_input))
-        self.expiry_input.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.pack_size_input))
-        self.pack_size_input.returnPressed.connect(lambda: self.focus_next_field(self.pack_price_input))
-        self.pack_price_input.returnPressed.connect(lambda: self.focus_next_field(self.reorder_level))
+        self.expiry_input.returnPressed.connect(lambda: self.focus_next_field(self.rack_input))
+        self.rack_input.returnPressed.connect(lambda: self.focus_next_field(self.pack_price_input))
+        self.pack_price_input.returnPressed.connect(lambda: self.focus_next_field(self.code_input))
+        self.code_input.returnPressed.connect(lambda: self.focus_next_field(self.reorder_level))
         self.reorder_level.returnPressed.connect(self.save_button.click)
     
 
@@ -927,6 +964,7 @@ class AddProductWidget(QWidget):
                 strength,
                 discount_group_id,
                 tax_group_id,
+                COALESCE(rack, ''),
                 (
                     SELECT pack_size
                     FROM price_pack
@@ -956,12 +994,14 @@ class AddProductWidget(QWidget):
         strength = str(query.value(2) or "").strip()
         discount_group_id = query.value(3)
         tax_group_id = query.value(4)
-        pack_size = query.value(5)
-        pack_price = query.value(6)
+        rack = str(query.value(5) or "").strip()
+        pack_size = query.value(6)
+        pack_price = query.value(7)
 
         # Autofill formula if available, otherwise clear stale text.
         self.formula_input.setText(generic_name)
         self.dosage.setText(strength)
+        self.rack_input.setText(rack)
 
         # Autofill pack size when available and clear stale value otherwise.
         self.pack_size_input.setText(str(pack_size) if pack_size not in (None, "") else "")
@@ -1038,6 +1078,7 @@ class AddProductWidget(QWidget):
         tax_group_id = self.tax_group_combo.currentData()
         generic_name = self.formula_input.text().strip() or None
         code = self.code_input.text().strip() or None
+        rack = self.rack_input.text().strip()
 
         qty_text = self.quantity_input.text().strip()
         unit_cost_text = self.unit_cost_input.text().strip()
@@ -1053,9 +1094,15 @@ class AddProductWidget(QWidget):
 
         # ---------- Expiry ----------
         expiry_date = None
-        qdate = self.expiry_input.date()
-        if qdate.isValid() and qdate > QDate.currentDate():
-            expiry_date = qdate.toPython().isoformat()
+        expiry_text = self.expiry_input.text().strip()
+        if expiry_text:
+            parsed_expiry = self.parse_expiry_month_year(expiry_text)
+            if parsed_expiry is None:
+                AppMessageBox.information(None, "Missing Data", "Expiry must be in MM-YY format, for example 04-26.")
+                self.expiry_input.setFocus()
+                self.expiry_input.selectAll()
+                return
+            expiry_date = parsed_expiry.toString("yyyy-MM-dd")
 
         # ---------- Validation ----------
         if not display_name:
@@ -1066,8 +1113,8 @@ class AddProductWidget(QWidget):
             AppMessageBox.information(None, "Missing Data", "Quantity is required.")
             return
 
-        if quantity <= 0:
-            AppMessageBox.information(None, "Missing Data", "Quantity must be greater than 0.")
+        if quantity < 0:
+            AppMessageBox.information(None, "Missing Data", "Quantity cannot be less than 0.")
             return
 
         if not pack_size:
@@ -1124,12 +1171,13 @@ class AddProductWidget(QWidget):
                         form,
                         strength,
                         packing,
+                        rack,
                         manufacturer_id,
                         discount_group_id,
                         tax_group_id,
                         status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """)
                 
                 
@@ -1146,6 +1194,7 @@ class AddProductWidget(QWidget):
                 product_query.addBindValue(form)
                 product_query.addBindValue(strength)
                 product_query.addBindValue(packing)
+                product_query.addBindValue(rack)
                 product_query.addBindValue(manufacturer_id)
                 product_query.addBindValue(discount_group_id)
                 product_query.addBindValue(tax_group_id)
@@ -1161,11 +1210,12 @@ class AddProductWidget(QWidget):
             status_query = QSqlQuery(db)
             status_query.prepare("""
                 UPDATE product
-                SET status = 'used', discount_group_id = ?, tax_group_id = ?
+                SET status = 'used', discount_group_id = ?, tax_group_id = ?, rack = ?
                 WHERE id = ?
             """)
             status_query.addBindValue(discount_group_id)
             status_query.addBindValue(tax_group_id)
+            status_query.addBindValue(rack)
             status_query.addBindValue(product_id)
             if not status_query.exec():
                 raise Exception(status_query.lastError().text())
@@ -1257,13 +1307,13 @@ class AddProductWidget(QWidget):
         self.brand_input.setCurrentIndex(-1)
         self.brand_input.lineEdit().clear()
         self.pack_size_input.clear()
+        self.rack_input.clear()
         
         self.quantity_input.clear()
         
         self.formula_input.clear()
         self.batch_input.clear()
-        self.expiry_input.setMinimumDate(self.default_expiry_date())
-        self.expiry_input.setDate(self.default_expiry_date())
+        self.expiry_input.clear()
         
         self.unit_cost_input.clear()
         self.pack_price_input.clear()
@@ -1534,7 +1584,7 @@ class ImportDialog(QDialog):
                         form,
                         strength,
                         packing,
-                        pack_size,
+                        rack,
                         manufacturer_id
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1548,7 +1598,7 @@ class ImportDialog(QDialog):
                 query.addBindValue(form or None)
                 query.addBindValue(strength or None)
                 query.addBindValue(packing or None)
-                query.addBindValue(pack_size)
+                query.addBindValue("")
                 query.addBindValue(manufacturer_id)
 
                 if not query.exec():

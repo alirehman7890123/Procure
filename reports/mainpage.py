@@ -1,8 +1,8 @@
 
-from PySide6.QtWidgets import QWidget, QPushButton, QComboBox, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QTableWidget, QTableWidgetItem, QSpacerItem, QSizePolicy, QToolButton
+from PySide6.QtWidgets import QWidget, QPushButton, QComboBox, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QTableWidget, QTableWidgetItem, QSpacerItem, QSizePolicy, QToolButton, QDialog, QLineEdit
 from PySide6.QtCore import QFile, Qt,QDate
 from PySide6.QtSql import  QSqlQuery
-from PySide6.QtGui import QCursor
+from PySide6.QtGui import QCursor, QColor
 from datetime import date
 from datetime import datetime
 from functools import partial
@@ -388,6 +388,7 @@ class MainReportsPage(QWidget):
             "Non-Moving / Dead Stock": self.show_dead_nonmoving_stock_dialog,
             "Batch Traceability Report": self.show_batch_traceability_report_dialog,
             "Inventory Adjustment Log": self.show_inventory_adjustment_log_dialog,
+            "Opening Stock Cost Review": self.show_opening_stock_cost_review_dialog,
         }
         return handler_map.get(report_name)
 
@@ -2483,6 +2484,7 @@ class MainReportsPage(QWidget):
             "Non-Moving / Dead Stock",
             "Batch Traceability Report",
             "Inventory Adjustment Log",
+            "Opening Stock Cost Review",
         ]
 
         layout = QVBoxLayout(card)
@@ -2731,6 +2733,17 @@ class MainReportsPage(QWidget):
         
         purchased_cost = report_service.ReportService().get_total_purchase_amount()
         self.known_stock_cost_data.setText(f"{purchased_cost:.2f}")
+
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 4, 0, 0)
+        action_row.addStretch()
+
+        review_opening_costs_btn = QPushButton("Review Opening Costs")
+        review_opening_costs_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        review_opening_costs_btn.setStyleSheet(self.report_action_btn_style())
+        review_opening_costs_btn.clicked.connect(self.show_opening_stock_cost_review_dialog)
+        action_row.addWidget(review_opening_costs_btn)
+        card_layout.addLayout(action_row)
         
         
         return card
@@ -6047,6 +6060,18 @@ class MainReportsPage(QWidget):
         purchased_cost = report_service.ReportService().get_total_purchase_amount()
         self.known_stock_cost_data.setText(f"{purchased_cost:.2f}")
 
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 4, 0, 0)
+        action_row.addStretch()
+
+        review_opening_costs_btn = QPushButton("Review Opening Costs")
+        review_opening_costs_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        review_opening_costs_btn.setStyleSheet(self.report_action_btn_style())
+        review_opening_costs_btn.clicked.connect(self.show_opening_stock_cost_review_dialog)
+        action_row.addWidget(review_opening_costs_btn)
+
+        layout.addLayout(action_row)
+
         return card
 
     def create_inventory_alerts_card(self):
@@ -6108,6 +6133,281 @@ class MainReportsPage(QWidget):
         self.low_stock_count.setText(f"{count['low_stock_products']:.2f}")
 
         return card
+
+    def get_opening_stock_cost_review_rows(self):
+        query = QSqlQuery()
+        if not query.exec(
+            """
+            WITH sold_rollup AS (
+                SELECT
+                    sb.batch_id,
+                    COALESCE(SUM(sb.qty_taken), 0) AS sold_qty,
+                    COALESCE(SUM(CASE WHEN sb.unit_cost IS NULL THEN sb.qty_taken ELSE 0 END), 0) AS unknown_sold_qty
+                FROM sold_batch sb
+                GROUP BY sb.batch_id
+            )
+            SELECT
+                b.id,
+                COALESCE(p.display_name, ''),
+                COALESCE(b.batch_no, ''),
+                COALESCE(b.expiry_date, ''),
+                COALESCE(b.total_received, 0),
+                COALESCE(b.quantity_remaining, 0),
+                COALESCE(sr.sold_qty, 0),
+                COALESCE(sr.unknown_sold_qty, 0),
+                b.unit_cost,
+                COALESCE(b.received_at, '')
+            FROM batch b
+            JOIN product p ON p.id = b.product_id
+            LEFT JOIN sold_rollup sr ON sr.batch_id = b.id
+            WHERE LOWER(COALESCE(b.source, '')) = 'opening'
+            ORDER BY
+                CASE WHEN b.unit_cost IS NULL THEN 0 ELSE 1 END,
+                p.display_name ASC,
+                b.received_at ASC,
+                b.id ASC
+            """
+        ):
+            AppMessageBox.critical(self, "Load Failed", f"Could not load opening stock batches: {query.lastError().text()}")
+            return []
+
+        rows = []
+        while query.next():
+            unit_cost_value = query.value(8)
+            rows.append({
+                "batch_id": int(query.value(0) or 0),
+                "product_name": str(query.value(1) or ""),
+                "batch_no": str(query.value(2) or ""),
+                "expiry_date": str(query.value(3) or ""),
+                "added_qty": float(query.value(4) or 0.0),
+                "remaining_qty": float(query.value(5) or 0.0),
+                "sold_qty": float(query.value(6) or 0.0),
+                "unknown_sold_qty": float(query.value(7) or 0.0),
+                "unit_cost": float(unit_cost_value) if unit_cost_value is not None else None,
+                "received_at": str(query.value(9) or ""),
+            })
+        return rows
+
+    def show_opening_stock_cost_review_dialog(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Opening Stock Cost Review")
+        dialog.resize(1080, 640)
+
+        header_layout, content_layout, footer_layout = self.build_report_dialog_shell(dialog)
+
+        heading = QLabel("Opening Stock Cost Review")
+        heading.setStyleSheet("font-size: 16px; font-weight: 700; color: #223746;")
+        subtitle = QLabel(
+            "Fill in missing opening-stock batch costs here. Saving a cost will also backfill matching sold-batch cost history so profit and loss can be recalculated more completely."
+        )
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet("font-size: 12px; color: #5A7183; padding-left: 0;")
+        header_layout.addWidget(heading)
+        header_layout.addWidget(subtitle)
+
+        summary_label = QLabel()
+        summary_label.setWordWrap(True)
+        summary_label.setStyleSheet("font-size: 11px; color: #5A7183; font-weight: 600; padding-left: 0;")
+        header_layout.addWidget(summary_label)
+
+        table = QTableWidget()
+        table.setColumnCount(10)
+        table.setHorizontalHeaderLabels([
+            "Batch ID", "Product", "Batch", "Expiry", "Added", "Remaining",
+            "Sold", "Unknown Sold", "Unit Cost", "Status"
+        ])
+        table.setAlternatingRowColors(True)
+        table.verticalHeader().setVisible(False)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setColumnHidden(0, True)
+        content_layout.addWidget(table)
+
+        note_label = QLabel(
+            "Tip: rows marked Missing affect profit coverage. You can update them later anytime; the related opening-stock sales history will be refreshed with the new cost."
+        )
+        note_label.setWordWrap(True)
+        note_label.setStyleSheet("font-size: 11px; color: #5A7183; padding-left: 0;")
+        content_layout.addWidget(note_label)
+
+        def make_readonly_item(text, align=Qt.AlignLeft | Qt.AlignVCenter):
+            item = QTableWidgetItem(text)
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            item.setTextAlignment(align)
+            return item
+
+        def refresh_table():
+            rows = self.get_opening_stock_cost_review_rows()
+            table.setRowCount(0)
+            missing_count = 0
+            impacted_qty = 0.0
+
+            for row_data in rows:
+                row = table.rowCount()
+                table.insertRow(row)
+
+                unit_cost = row_data["unit_cost"]
+                is_missing = unit_cost is None
+                if is_missing:
+                    missing_count += 1
+                    impacted_qty += float(row_data["unknown_sold_qty"] or 0.0)
+
+                status_text = "Missing Cost" if is_missing else "Known Cost"
+                if is_missing and float(row_data["unknown_sold_qty"] or 0.0) > 0:
+                    status_text = "Missing - Profit Pending"
+
+                table.setItem(row, 0, make_readonly_item(str(row_data["batch_id"])))
+                table.setItem(row, 1, make_readonly_item(str(row_data["product_name"])))
+                table.setItem(row, 2, make_readonly_item(str(row_data["batch_no"])))
+                table.setItem(row, 3, make_readonly_item(str(row_data["expiry_date"])))
+                table.setItem(row, 4, make_readonly_item(f"{float(row_data['added_qty']):,.2f}", Qt.AlignRight | Qt.AlignVCenter))
+                table.setItem(row, 5, make_readonly_item(f"{float(row_data['remaining_qty']):,.2f}", Qt.AlignRight | Qt.AlignVCenter))
+                table.setItem(row, 6, make_readonly_item(f"{float(row_data['sold_qty']):,.2f}", Qt.AlignRight | Qt.AlignVCenter))
+                table.setItem(row, 7, make_readonly_item(f"{float(row_data['unknown_sold_qty']):,.2f}", Qt.AlignRight | Qt.AlignVCenter))
+
+                cost_edit = QLineEdit()
+                cost_edit.setPlaceholderText("Enter unit cost")
+                cost_edit.setText("" if unit_cost is None else f"{float(unit_cost):.6f}".rstrip("0").rstrip("."))
+                cost_edit.setProperty("batch_id", row_data["batch_id"])
+                cost_edit.setProperty("previous_cost", unit_cost)
+                if is_missing:
+                    cost_edit.setStyleSheet("QLineEdit { background-color: #FFF7E6; border: 1px solid #E0B04B; }")
+                table.setCellWidget(row, 8, cost_edit)
+
+                status_item = make_readonly_item(status_text)
+                if is_missing:
+                    status_item.setForeground(QColor("#B45309"))
+                    for col in range(table.columnCount()):
+                        item = table.item(row, col)
+                        if item is not None:
+                            item.setBackground(QColor("#FFF9EE"))
+                else:
+                    status_item.setForeground(QColor("#2E7D32"))
+                table.setItem(row, 9, status_item)
+
+            table.resizeColumnsToContents()
+            summary_label.setText(
+                f"Opening batches: {len(rows)} | Missing cost: {missing_count} | Sold quantity still excluded from known profit: {impacted_qty:,.2f}"
+            )
+
+        def save_cost_updates():
+            updates = []
+            validation_errors = []
+
+            for row in range(table.rowCount()):
+                cost_widget = table.cellWidget(row, 8)
+                if cost_widget is None:
+                    continue
+
+                batch_id = int(cost_widget.property("batch_id") or 0)
+                previous_cost = cost_widget.property("previous_cost")
+                raw_text = cost_widget.text().strip()
+
+                if not raw_text:
+                    continue
+
+                try:
+                    new_cost = float(raw_text)
+                except ValueError:
+                    validation_errors.append(f"Batch #{batch_id}: cost must be a valid number.")
+                    continue
+
+                if new_cost < 0:
+                    validation_errors.append(f"Batch #{batch_id}: cost cannot be negative.")
+                    continue
+
+                old_cost = float(previous_cost) if previous_cost is not None else None
+                if old_cost is not None and abs(old_cost - new_cost) < 0.000001:
+                    continue
+
+                updates.append((batch_id, new_cost))
+
+            if validation_errors:
+                AppMessageBox.warning(dialog, "Validation Error", "\n".join(validation_errors[:5]))
+                return
+
+            if not updates:
+                AppMessageBox.information(dialog, "No Changes", "Enter or change at least one opening batch cost to save.")
+                return
+
+            tx = QSqlQuery()
+            if not tx.exec("BEGIN IMMEDIATE"):
+                AppMessageBox.critical(dialog, "Save Failed", f"Could not start save transaction: {tx.lastError().text()}")
+                return
+
+            try:
+                updated_batches = 0
+                updated_sold_rows = 0
+
+                for batch_id, new_cost in updates:
+                    batch_update = QSqlQuery()
+                    batch_update.prepare("UPDATE batch SET unit_cost = ? WHERE id = ?")
+                    batch_update.addBindValue(new_cost)
+                    batch_update.addBindValue(batch_id)
+                    if not batch_update.exec():
+                        raise Exception(batch_update.lastError().text())
+                    updated_batches += 1
+
+                    sold_count_query = QSqlQuery()
+                    sold_count_query.prepare("SELECT COUNT(*) FROM sold_batch WHERE batch_id = ?")
+                    sold_count_query.addBindValue(batch_id)
+                    sold_rows_for_batch = 0
+                    if sold_count_query.exec() and sold_count_query.next():
+                        sold_rows_for_batch = int(sold_count_query.value(0) or 0)
+
+                    sold_update = QSqlQuery()
+                    sold_update.prepare(
+                        """
+                        UPDATE sold_batch
+                        SET unit_cost = ?,
+                            line_cost = ROUND(COALESCE(qty_taken, 0) * ?, 2)
+                        WHERE batch_id = ?
+                        """
+                    )
+                    sold_update.addBindValue(new_cost)
+                    sold_update.addBindValue(new_cost)
+                    sold_update.addBindValue(batch_id)
+                    if not sold_update.exec():
+                        raise Exception(sold_update.lastError().text())
+                    updated_sold_rows += sold_rows_for_batch
+
+                commit_query = QSqlQuery()
+                if not commit_query.exec("COMMIT"):
+                    raise Exception(commit_query.lastError().text())
+
+                refresh_table()
+                AppMessageBox.success(
+                    dialog,
+                    "Saved",
+                    f"Updated {updated_batches} opening batch cost(s) and refreshed {updated_sold_rows} sold-batch allocation row(s).",
+                )
+            except Exception as exc:
+                rollback_query = QSqlQuery()
+                rollback_query.exec("ROLLBACK")
+                AppMessageBox.critical(dialog, "Save Failed", f"Could not save opening stock costs: {exc}")
+
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        refresh_btn.setStyleSheet(self.report_action_btn_style())
+        refresh_btn.clicked.connect(refresh_table)
+
+        save_btn = QPushButton("Save Costs")
+        save_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        save_btn.setStyleSheet(self.report_action_btn_style())
+        save_btn.clicked.connect(save_cost_updates)
+
+        close_btn = QPushButton("Close")
+        close_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        close_btn.setStyleSheet(self.report_action_btn_style())
+        close_btn.clicked.connect(dialog.accept)
+
+        footer_layout.addWidget(refresh_btn)
+        footer_layout.addStretch()
+        footer_layout.addWidget(save_btn)
+        footer_layout.addWidget(close_btn)
+
+        refresh_table()
+        dialog.exec()
 
     def create_dues_summary_card(self):
         card = QFrame()

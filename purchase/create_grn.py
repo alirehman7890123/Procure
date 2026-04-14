@@ -90,7 +90,6 @@ class DiscountEditDialog(QDialog):
                 selection-color: #111111;
             }
         """)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(12)
@@ -154,6 +153,32 @@ class DiscountEditDialog(QDialog):
 
     def selected_discount(self):
         return self.mode_combo.currentData(), float(self.value_spin.value())
+
+
+def parse_expiry_month_year(text):
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+
+    match = re.fullmatch(r"(\d{2})-(\d{2})", raw)
+    if not match:
+        return None
+
+    month = int(match.group(1))
+    year_two_digits = int(match.group(2))
+    if month < 1 or month > 12:
+        return None
+
+    year = 2000 + year_two_digits
+    normalized = QDate(year, month, 1)
+    if not normalized.isValid():
+        return None
+
+    current_month_start = QDate.currentDate().addDays(1 - QDate.currentDate().day())
+    if normalized < current_month_start:
+        return None
+
+    return normalized
 
 
 class CreateGRNWidget(QWidget):
@@ -256,7 +281,7 @@ class CreateGRNWidget(QWidget):
         headers = [
             "Product",
             "Batch",
-            "Expiry (DD-MM-YYYY)",
+            "Expiry (MM-YY)",
             "Qty Ord",
             "Qty Prev",
             "Qty Rem",
@@ -550,9 +575,24 @@ class CreateGRNWidget(QWidget):
             self.focus_widget(discount_widget)
 
     def _read_money(self, edit: QLineEdit) -> float:
+        raw = ""
         try:
-            return float((edit.text() or "").strip() or 0.0)
+            raw = (edit.text() or "").strip()
         except (AttributeError, TypeError, ValueError):
+            return 0.0
+
+        raw = raw.replace(",", "")
+        raw = re.sub(r"[^0-9.\-]", "", raw)
+        if raw.count(".") > 1:
+            first_dot = raw.find(".")
+            raw = raw[:first_dot + 1] + raw[first_dot + 1:].replace(".", "")
+
+        if raw in {"", "-", ".", "-."}:
+            return 0.0
+
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
             return 0.0
 
     def on_payment_method_changed(self, method):
@@ -744,10 +784,10 @@ class CreateGRNWidget(QWidget):
             batch_edit.textChanged.connect(self.recalculate_totals)
             self.items_table.setCellWidget(row, 1, batch_edit)
             
-            # Column 2: Expiry Date (editable with date mask)
+            # Column 2: Expiry Date (editable as MM-YY)
             expiry_edit = SelectAllLineEdit()
-            expiry_edit.setInputMask("00-00-0000")
-            expiry_edit.setPlaceholderText("DD-MM-YYYY")
+            expiry_edit.setInputMask("00-00;_")
+            expiry_edit.setPlaceholderText("MM-YY")
             expiry_edit.textChanged.connect(self.recalculate_totals)
             self.items_table.setCellWidget(row, 2, expiry_edit)
             
@@ -836,7 +876,7 @@ class CreateGRNWidget(QWidget):
             tax = float(tax_widget.value()) if tax_widget else 0.0
             
             # Line total = (Qty * Price) - Discount + Tax
-            line_total = (qty * price) - discount + tax
+            line_total = max(0.0, (qty * price) - discount + tax)
             total += line_total
             
             # Update column 10: Line Total
@@ -857,26 +897,24 @@ class CreateGRNWidget(QWidget):
         This matches the sales effective_line_total pattern.
         """
         # Get header adjustments (amount fields, matching purchase invoice)
-        header_discount = self._read_money(self.header_discount_edit)
-        tax_236g = self._read_money(self.tax_236g_edit)
-        tax_236h = self._read_money(self.tax_236h_edit)
-        sales_tax = self._read_money(self.sales_tax_edit)
-        cn_adjustment = self._read_money(self.cn_adjustment_edit)
+        header_discount = max(0.0, self._read_money(self.header_discount_edit))
+        tax_236g = max(0.0, self._read_money(self.tax_236g_edit))
+        tax_236h = max(0.0, self._read_money(self.tax_236h_edit))
+        sales_tax = max(0.0, self._read_money(self.sales_tax_edit))
+        cn_adjustment = max(0.0, self._read_money(self.cn_adjustment_edit))
         
         # Calculate subtotal and total from all line items
         line_subtotal = 0.0
         for row in range(self.items_table.rowCount()):
             item = self.items_table.item(row, 10)
             if item:
-                try:
-                    line_subtotal += float(item.text() or 0)
-                except ValueError:
-                    pass
-        
-        taxable = line_subtotal - header_discount
-        net_amount = taxable + tax_236g + sales_tax - tax_236h
+                line_subtotal += max(0.0, self._read_money(item))
+
+        header_discount = min(header_discount, line_subtotal)
+        taxable = max(0.0, line_subtotal - header_discount)
+        net_amount = max(0.0, taxable + tax_236g + sales_tax - tax_236h)
         # Keep landing-cost distribution aligned with purchase invoice behavior.
-        total_with_fees = line_subtotal - header_discount + tax_236g - tax_236h + sales_tax - cn_adjustment
+        total_with_fees = max(0.0, line_subtotal - header_discount + tax_236g - tax_236h + sales_tax - cn_adjustment)
         
         # Update header displays
         self.subtotal_label.setText(f"{line_subtotal:.2f}")
@@ -896,12 +934,9 @@ class CreateGRNWidget(QWidget):
         for row in range(len(self._line_refs)):
             item = self.items_table.item(row, 10)
             if item:
-                try:
-                    line_total = float(item.text() or 0)
-                    landing_cost = line_total * distribution_factor
-                    self._line_refs[row]["landing_cost"] = landing_cost
-                except ValueError:
-                    self._line_refs[row]["landing_cost"] = 0.0
+                line_total = max(0.0, self._read_money(item))
+                landing_cost = max(0.0, line_total * distribution_factor)
+                self._line_refs[row]["landing_cost"] = landing_cost
 
 
     def create_stock_batches_from_receipts(self, receipt_rows, grn_number):
@@ -1329,16 +1364,16 @@ class CreateGRNWidget(QWidget):
 
         rep = self.rep_combo.currentData()
 
-        subtotal = self._read_money(self.subtotal_label)
-        discount = self._read_money(self.header_discount_edit)
-        taxable = self._read_money(self.taxable_label)
-        tax_236g = self._read_money(self.tax_236g_edit)
-        tax_236h = self._read_money(self.tax_236h_edit)
-        sales_tax = self._read_money(self.sales_tax_edit)
-        netamount = self._read_money(self.net_amount_label)
-        cn_adjustment = self._read_money(self.cn_adjustment_edit)
-        total = self._read_money(self.total_with_fees_label)
-        paid = self._read_money(self.paid_amount)
+        subtotal = max(0.0, self._read_money(self.subtotal_label))
+        discount = min(max(0.0, self._read_money(self.header_discount_edit)), subtotal)
+        taxable = max(0.0, self._read_money(self.taxable_label))
+        tax_236g = max(0.0, self._read_money(self.tax_236g_edit))
+        tax_236h = max(0.0, self._read_money(self.tax_236h_edit))
+        sales_tax = max(0.0, self._read_money(self.sales_tax_edit))
+        netamount = max(0.0, self._read_money(self.net_amount_label))
+        cn_adjustment = max(0.0, self._read_money(self.cn_adjustment_edit))
+        total = max(0.0, self._read_money(self.total_with_fees_label))
+        paid = max(0.0, self._read_money(self.paid_amount))
         remaining = self._read_money(self.remaining_amount)
 
         if not grn_number:
@@ -1538,6 +1573,11 @@ class CreateGRNWidget(QWidget):
                 unit_price = float(price_widget.value())
                 batch_no = batch_widget.text().strip() if batch_widget else ""
                 expiry_date = expiry_widget.text().strip() if expiry_widget else ""
+                if expiry_date:
+                    parsed_expiry = parse_expiry_month_year(expiry_date)
+                    if parsed_expiry is None:
+                        raise Exception(f"Row {row + 1}: Expiry must be in MM-YY format, for example 04-26.")
+                    expiry_date = parsed_expiry.toString("yyyy-MM-dd")
                 discount = self._line_discount_amount(row, qty_received, unit_price)
                 tax = float(tax_widget.value()) if tax_widget else 0.0
                 landing_cost = line_ref.get("landing_cost") or unit_price  # Fallback to unit_price if not calculated

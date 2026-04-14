@@ -142,7 +142,7 @@ class AuthWindow(QMainWindow):
 
         field_style = """
             QLineEdit {
-                padding: 5px 10px;
+                padding: 8px 12px;
                 border: 1px solid #ccc;
                 border-radius: 5px;
                 background-color: #fbfcfd;
@@ -176,7 +176,7 @@ class AuthWindow(QMainWindow):
                 border-radius: 4px;
                 font-size: 12px;
                 font-weight: 700;
-                padding: 4px 10px;
+                padding: 7px 14px;
                 font-family: 'montserrat';
             }
             QPushButton:hover {
@@ -768,6 +768,45 @@ class AuthWindow(QMainWindow):
             if self._ensure_sqlite_column(conn, "supplier_transaction", "payment_reference", "TEXT"):
                 changed.append("supplier_transaction.payment_reference")
 
+            if self._ensure_sqlite_column(conn, "product", "rack", "TEXT DEFAULT ''"):
+                changed.append("product.rack")
+
+            if self._ensure_sqlite_column(conn, "tax_group", "fixed_amount", "REAL DEFAULT 0.00"):
+                changed.append("tax_group.fixed_amount")
+
+            if self._ensure_sqlite_column(conn, "tax_group", "apply_on_sale", "INTEGER DEFAULT 1"):
+                changed.append("tax_group.apply_on_sale")
+
+            if self._ensure_sqlite_column(conn, "discount_group", "fixed_amount", "REAL DEFAULT 0.00"):
+                changed.append("discount_group.fixed_amount")
+
+            if self._ensure_sqlite_column(conn, "discount_group", "apply_on_sale", "INTEGER DEFAULT 1"):
+                changed.append("discount_group.apply_on_sale")
+
+            if self._ensure_sqlite_column(conn, "accounting_settings", "sales_discount_policy", "TEXT DEFAULT 'both'"):
+                changed.append("accounting_settings.sales_discount_policy")
+
+            if self._ensure_sqlite_column(conn, "accounting_settings", "global_sales_discount_group_id", "INTEGER"):
+                changed.append("accounting_settings.global_sales_discount_group_id")
+
+            if self._ensure_sqlite_column(conn, "accounting_settings", "global_sales_discount_enabled", "INTEGER DEFAULT 0"):
+                changed.append("accounting_settings.global_sales_discount_enabled")
+
+            if self._ensure_sqlite_column(conn, "accounting_settings", "global_sales_tax_group_id", "INTEGER"):
+                changed.append("accounting_settings.global_sales_tax_group_id")
+
+            if self._ensure_sqlite_column(conn, "accounting_settings", "global_sales_tax_enabled", "INTEGER DEFAULT 0"):
+                changed.append("accounting_settings.global_sales_tax_enabled")
+
+            if self._ensure_sqlite_column(conn, "accounting_settings", "theme_primary_color", "TEXT DEFAULT '#2F5D7C'"):
+                changed.append("accounting_settings.theme_primary_color")
+
+            if self._ensure_sqlite_column(conn, "accounting_settings", "theme_sidebar_color", "TEXT DEFAULT '#151325'"):
+                changed.append("accounting_settings.theme_sidebar_color")
+
+            if self._ensure_sqlite_column(conn, "accounting_settings", "sales_tax_policy", "TEXT DEFAULT 'both'"):
+                changed.append("accounting_settings.sales_tax_policy")
+
             if changed:
                 conn.commit()
                 print("Applied runtime schema migrations:", ", ".join(changed))
@@ -962,6 +1001,14 @@ class AuthWindow(QMainWindow):
 
                 opening_inventory_value REAL DEFAULT 0,
                 opening_inventory_set_at TIMESTAMP,
+                sales_discount_policy TEXT DEFAULT 'both',
+                global_sales_discount_group_id INTEGER,
+                global_sales_discount_enabled INTEGER DEFAULT 0,
+                global_sales_tax_group_id INTEGER,
+                global_sales_tax_enabled INTEGER DEFAULT 0,
+                theme_primary_color TEXT DEFAULT '#2F5D7C',
+                theme_sidebar_color TEXT DEFAULT '#151325',
+                sales_tax_policy TEXT DEFAULT 'both',
 
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP
@@ -1185,6 +1232,8 @@ class AuthWindow(QMainWindow):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
                 discount_percent REAL DEFAULT 0.00,
+                fixed_amount REAL DEFAULT 0.00,
+                apply_on_sale INTEGER DEFAULT 1,
                 status TEXT DEFAULT 'active',
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -1204,6 +1253,8 @@ class AuthWindow(QMainWindow):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
                 tax_percent REAL DEFAULT 0.00,
+                fixed_amount REAL DEFAULT 0.00,
+                apply_on_sale INTEGER DEFAULT 1,
                 status TEXT DEFAULT 'active',
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -1217,22 +1268,26 @@ class AuthWindow(QMainWindow):
     def seed_discount_group_table(self):
         query = QSqlQuery()
         query.prepare("""
-            INSERT OR IGNORE INTO discount_group (name, discount_percent, status)
-            VALUES (?, ?, 'active')
+            INSERT OR IGNORE INTO discount_group (name, discount_percent, fixed_amount, apply_on_sale, status)
+            VALUES (?, ?, ?, ?, 'active')
         """)
         query.addBindValue("No Discount")
         query.addBindValue(0.0)
+        query.addBindValue(0.0)
+        query.addBindValue(1)
         if not query.exec():
             print("Discount group seed failed:", query.lastError().text())
 
     def seed_tax_group_table(self):
         query = QSqlQuery()
         query.prepare("""
-            INSERT OR IGNORE INTO tax_group (name, tax_percent, status)
-            VALUES (?, ?, 'active')
+            INSERT OR IGNORE INTO tax_group (name, tax_percent, fixed_amount, apply_on_sale, status)
+            VALUES (?, ?, ?, ?, 'active')
         """)
         query.addBindValue("No Tax")
         query.addBindValue(0.0)
+        query.addBindValue(0.0)
+        query.addBindValue(0)
         if not query.exec():
             print("Tax group seed failed:", query.lastError().text())
  
@@ -1427,9 +1482,10 @@ class AuthWindow(QMainWindow):
                 form,
                 strength,
                 packing,
+                rack,
                 manufacturer_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """)
 
         price_query = QSqlQuery(db)
@@ -1476,6 +1532,7 @@ class AuthWindow(QMainWindow):
                     query.addBindValue(form)
                     query.addBindValue(strength)
                     query.addBindValue(packing)
+                    query.addBindValue("")
                     query.addBindValue(manufacturer_id)
 
                     if not query.exec():
@@ -1520,6 +1577,7 @@ class AuthWindow(QMainWindow):
                 form TEXT,                               -- e.g. Tab
                 strength TEXT,                           -- e.g. 10mg
                 packing TEXT,                            -- e.g. 10x10s
+                rack TEXT DEFAULT '',                    -- optional storage location
                 manufacturer_id INTEGER,                 -- FK to manufacturer table
                 discount_group_id INTEGER,
                 tax_group_id INTEGER,
@@ -1534,6 +1592,21 @@ class AuthWindow(QMainWindow):
             return False
 
         print("Table 'product' created successfully.")
+
+        rack_exists = False
+        if query.exec("PRAGMA table_info(product)"):
+            while query.next():
+                if str(query.value(1) or "").strip().lower() == "rack":
+                    rack_exists = True
+                    break
+        else:
+            AppMessageBox.critical(None, "Error", f"Product schema check failed: {query.lastError().text()}")
+            return False
+
+        if not rack_exists:
+            if not query.exec("ALTER TABLE product ADD COLUMN rack TEXT DEFAULT ''"):
+                AppMessageBox.critical(None, "Error", f"Product table migration failed: {query.lastError().text()}")
+                return False
 
         # Create indexes
         indexes = [

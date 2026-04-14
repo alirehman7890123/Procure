@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import QPushButton, QSizePolicy
 from PySide6.QtCore import Qt, QSize
+from utilities.app_theme import get_theme_palette
 
 class SideBarButton(QPushButton):
     def __init__(self, text="", normal_color="#2F5D7C", hover_color="#3D6A89",
@@ -24,10 +25,22 @@ class SideBarButton(QPushButton):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setFixedHeight(42)
         self.setFlat(True)
-        self.setIconSize(QSize(16, 16))
+        self.setIconSize(QSize(18, 18))
         self.setAttribute(Qt.WA_Hover, True)
         self.setCursor(Qt.PointingHandCursor)
         self.setText(self._display_text)
+        self.refresh_theme()
+        self._apply_style()
+
+    def refresh_theme(self):
+        palette = get_theme_palette()
+        self.normal_color = palette["sidebar_bg"]
+        self.hover_color = palette["sidebar_hover"]
+        self.text_normal = palette["sidebar_text"]
+        self.text_hover = "#FFFFFF"
+        self.active_color = palette["sidebar_active"]
+        self.active_text = palette["sidebar_active_text"]
+        self.active_indicator = palette["sidebar_active"]
         self._apply_style()
 
     def enterEvent(self, event):
@@ -58,14 +71,14 @@ class SideBarButton(QPushButton):
         if self._is_active:
             bg = self.active_color
             fg = self.active_text
-            border = "#F3EBDD"
+            border = self.active_color
         elif self._is_hovered:
-            bg = "#242039"
+            bg = self.hover_color
             fg = "#FFFFFF"
-            border = "#2F2A48"
+            border = self.hover_color
         else:
             bg = "transparent"
-            fg = "#DDD9EB"
+            fg = self.text_normal
             border = "transparent"
 
         text_align = "center" if self._is_collapsed else "left"
