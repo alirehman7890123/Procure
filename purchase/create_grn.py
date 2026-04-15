@@ -14,6 +14,28 @@ from utilities.session_gate import require_open_session
 from utilities.session_service import get_active_session_id
 from utilities.stylus import load_stylesheets
 from utilities.app_messagebox import AppMessageBox
+from services.grn_posting_service import (
+    build_goods_receipt_payload,
+    collect_grn_billing_data,
+    collect_grn_totals_payload,
+    normalize_grn_receipt_line,
+)
+from services.grn_transaction_service import (
+    insert_goods_receipt_header,
+    insert_goods_receipt_line,
+    update_goods_receipt_status,
+)
+from services.purchase_transaction_service import (
+    fetch_product_pack_size,
+    insert_batch_record,
+    fetch_supplier_balances,
+    insert_purchase_header,
+    insert_purchase_item,
+    insert_supplier_transaction,
+    mark_product_used,
+    update_supplier_balances,
+)
+from services.purchase_posting_service import build_purchase_header_payload, build_supplier_transaction_payload
 
 
 class MyTable(QTableWidget):
@@ -954,16 +976,10 @@ class CreateGRNWidget(QWidget):
             if product_id <= 0 or qty_received <= 0:
                 continue
 
-            size_query = QSqlQuery()
-            size_query.prepare("SELECT pack_size FROM price_pack WHERE product_id = ? AND is_default = 1 LIMIT 1")
-            size_query.addBindValue(product_id)
-
-            pack_size = 1
-            if size_query.exec() and size_query.next():
-                try:
-                    pack_size = int(size_query.value(0) or 1)
-                except (TypeError, ValueError):
-                    pack_size = 1
+            try:
+                pack_size = int(fetch_product_pack_size(product_id) or 1)
+            except Exception:
+                pack_size = 1
 
             if pack_size <= 0:
                 pack_size = 1
@@ -975,44 +991,73 @@ class CreateGRNWidget(QWidget):
                 landing_cost / (qty_received * pack_size), 6
             ) if qty_received > 0 and pack_size > 0 else 0.0
 
-            batch_query = QSqlQuery()
-            batch_query.prepare("""
-                INSERT INTO batch (
-                    batch_no,
-                    expiry_date,
-                    product_id,
-                    purchaseitem_id,
-                    total_received,
-                    paid_qty,
-                    quantity_remaining,
-                    unit_cost,
-                    source
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """)
-
-            # Use batch_no and expiry_date from GRN line items instead of NULL
-            batch_query.addBindValue(batch_no)
-            batch_query.addBindValue(expiry_date)
-            batch_query.addBindValue(product_id)
-            batch_query.addBindValue(purchaseitem_id if purchaseitem_id else None)
-            batch_query.addBindValue(total_received_units)
-            batch_query.addBindValue(total_received_units)
-            batch_query.addBindValue(total_received_units)
-            batch_query.addBindValue(landing_cost_per_unit)
-            batch_query.addBindValue("PURCHASE")
-
-            if not batch_query.exec():
-                raise Exception(f"Batch creation failed: {batch_query.lastError().text()}")
-
-            status_query = QSqlQuery()
-            status_query.prepare("UPDATE product SET status = 'used' WHERE id = ?")
-            status_query.addBindValue(product_id)
-            if not status_query.exec():
-                raise Exception(f"Product status update failed: {status_query.lastError().text()}")
+            insert_batch_record(
+                {
+                    "batch_no": batch_no,
+                    "expiry_date": expiry_date,
+                    "product_id": product_id,
+                    "purchaseitem_id": purchaseitem_id if purchaseitem_id else None,
+                    "total_received": total_received_units,
+                    "paid_qty": total_received_units,
+                    "quantity_remaining": total_received_units,
+                    "unit_cost": landing_cost_per_unit,
+                    "source": "PURCHASE",
+                }
+            )
+            mark_product_used(product_id)
 
             posted_rows += 1
 
         return posted_rows
+
+    def _collect_grn_header_amounts(self):
+        return {
+            "header_discount": self._read_money(self.header_discount_edit),
+            "tax_236g": self._read_money(self.tax_236g_edit),
+            "tax_236h": self._read_money(self.tax_236h_edit),
+            "sales_tax": self._read_money(self.sales_tax_edit),
+            "cn_adjustment": self._read_money(self.cn_adjustment_edit),
+            "subtotal": self._read_money(self.subtotal_label),
+            "taxable": self._read_money(self.taxable_label),
+            "netamount": self._read_money(self.net_amount_label),
+            "total_value": self._read_money(self.total_with_fees_label),
+        }
+
+    def _collect_receipt_rows(self, grn_id):
+        line_count = 0
+        receipt_rows = []
+
+        for row, line_ref in enumerate(self._line_refs):
+            batch_widget = self.items_table.cellWidget(row, 1)
+            expiry_widget = self.items_table.cellWidget(row, 2)
+            qty_widget = self.items_table.cellWidget(row, 6)
+            price_widget = self.items_table.cellWidget(row, 7)
+            tax_widget = self.items_table.cellWidget(row, 9)
+
+            if qty_widget is None or price_widget is None:
+                continue
+
+            line_payload = normalize_grn_receipt_line(
+                row_number=row + 1,
+                po_line_id=int(line_ref.get("po_line_id") or 0),
+                product_id=int(line_ref.get("product_id") or 0),
+                qty_received=int(qty_widget.value()),
+                unit_price=float(price_widget.value()),
+                batch_no=batch_widget.text().strip() if batch_widget else "",
+                expiry_date=expiry_widget.text().strip() if expiry_widget else "",
+                discount=self._line_discount_amount(row, int(qty_widget.value()), float(price_widget.value())),
+                tax=float(tax_widget.value()) if tax_widget else 0.0,
+                landing_cost=line_ref.get("landing_cost") or float(price_widget.value()),
+                expiry_parser=parse_expiry_month_year,
+            )
+            if line_payload is None:
+                continue
+
+            insert_goods_receipt_line(grn_id, line_payload)
+            line_count += 1
+            receipt_rows.append(dict(line_payload))
+
+        return line_count, receipt_rows
 
     def get_po_supplier(self, po_id):
         query = QSqlQuery()
@@ -1095,31 +1140,6 @@ class CreateGRNWidget(QWidget):
         if session_id is None:
             raise Exception("No active session found for billing.")
 
-        purchase_query = QSqlQuery()
-        purchase_query.prepare("""
-            INSERT INTO purchase (
-                supplier,
-                rep,
-                sellerinvoice,
-                subtotal,
-                discount,
-                tax_236g,
-                tax_236h,
-                salestax,
-                netamount,
-                cn_adjustment,
-                total,
-                paid,
-                remaining,
-                writeoff,
-                payable,
-                receivable,
-                due_date,
-                session_id
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """)
-
         subtotal = float(totals.get("subtotal") or 0.0)
         discount = float(totals.get("discount") or 0.0)
         taxable = float(totals.get("taxable") or 0.0)
@@ -1136,30 +1156,30 @@ class CreateGRNWidget(QWidget):
         payable = float(billing_data.get("payable") or 0.0)
         receivable = float(billing_data.get("receivable") or 0.0)
         due_date = billing_data.get("due_date")
-
-        purchase_query.addBindValue(supplier_id)
-        purchase_query.addBindValue(rep_id)
-        purchase_query.addBindValue(grn_number)
-        purchase_query.addBindValue(subtotal)
-        purchase_query.addBindValue(discount)
-        purchase_query.addBindValue(tax_236g)
-        purchase_query.addBindValue(tax_236h)
-        purchase_query.addBindValue(sales_tax)
-        purchase_query.addBindValue(netamount)
-        purchase_query.addBindValue(cn_adjustment)
-        purchase_query.addBindValue(float(total_value))
-        purchase_query.addBindValue(paid)
-        purchase_query.addBindValue(remaining)
-        purchase_query.addBindValue(writeoff)
-        purchase_query.addBindValue(payable)
-        purchase_query.addBindValue(receivable)
-        purchase_query.addBindValue(due_date)
-        purchase_query.addBindValue(int(session_id))
-
-        if not purchase_query.exec():
-            raise Exception(f"Purchase bill creation failed: {purchase_query.lastError().text()}")
-
-        purchase_id = int(purchase_query.lastInsertId())
+        purchase_header_payload = build_purchase_header_payload(
+            supplier=supplier_id,
+            rep=rep_id,
+            sellerinvoice=grn_number,
+            subtotal=subtotal,
+            discount=discount,
+            taxable=taxable,
+            tax_236g=tax_236g,
+            tax_236h=tax_236h,
+            sales_tax=sales_tax,
+            netamount=netamount,
+            cn_adjustment=cn_adjustment,
+            total=total_value,
+            paid=paid,
+            remaining=remaining,
+            session_id=int(session_id),
+            settlement={
+                "writeoff": writeoff,
+                "payable": payable,
+                "receivable": receivable,
+                "due_date": due_date,
+            },
+        )
+        purchase_id = insert_purchase_header(purchase_header_payload)
 
         item_rows = 0
         for row in receipt_rows:
@@ -1175,113 +1195,45 @@ class CreateGRNWidget(QWidget):
 
             # Line total = (Qty * Price) - Discount + Tax
             line_total = (qty_received * unit_price) - discount + tax
-            item_query = QSqlQuery()
-            item_query.prepare("""
-                INSERT INTO purchaseitem (
-                    purchase,
-                    product,
-                    qty,
-                    bonus,
-                    rate,
-                    discount,
-                    tax,
-                    total,
-                    landing_cost
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """)
-            item_query.addBindValue(purchase_id)
-            item_query.addBindValue(product_id)
-            item_query.addBindValue(qty_received)
-            item_query.addBindValue(0)
-            item_query.addBindValue(unit_price)
-            item_query.addBindValue(discount)
-            item_query.addBindValue(tax)
-            item_query.addBindValue(line_total)
-            item_query.addBindValue(landing_cost)  # Store landing_cost
-
-            if not item_query.exec():
-                raise Exception(f"Purchase bill item creation failed: {item_query.lastError().text()}")
-            purchaseitem_id = item_query.lastInsertId()
-            try:
-                purchaseitem_id = int(purchaseitem_id)
-            except (TypeError, ValueError):
-                purchaseitem_id = None
+            purchaseitem_id = insert_purchase_item(
+                purchase_id,
+                {
+                    "product": product_id,
+                    "qty": qty_received,
+                    "bonus": 0,
+                    "rate": unit_price,
+                    "item_discount": discount,
+                    "item_tax": tax,
+                    "item_total": line_total,
+                    "landing_cost": landing_cost,
+                },
+            )
             row["purchaseitem_id"] = purchaseitem_id
             item_rows += 1
 
         if item_rows == 0:
             raise Exception("Purchase bill creation failed: no bill items were created.")
 
-        balance_query = QSqlQuery()
-        balance_query.prepare("SELECT payable, receiveable FROM supplier WHERE id = ?")
-        balance_query.addBindValue(supplier_id)
-        if not balance_query.exec() or not balance_query.next():
-            raise Exception("Could not fetch supplier balances for transaction posting.")
-
-        payable_before = float(balance_query.value(0) or 0.0)
-        receiveable_before = float(balance_query.value(1) or 0.0)
-        payable_after = payable_before + payable
-        receiveable_after = receiveable_before + receivable
-
-        transaction_query = QSqlQuery()
-        transaction_query.prepare("""
-            INSERT INTO supplier_transaction
-            (
-                supplier, transaction_type, ref, return_ref,
-                payable_before, due_amount, paid, remaining_due, payable_after,
-                receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
-                rep, session_id,
-                payment_method, bank_name, account_no, transaction_mode,
-                wallet_provider, wallet_no, payment_reference
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """)
-
-        transaction_query.addBindValue(supplier_id)
-        transaction_query.addBindValue("PURCHASE")
-        transaction_query.addBindValue(purchase_id)
-        transaction_query.addBindValue(None)
-
-        transaction_query.addBindValue(payable_before)
-        transaction_query.addBindValue(float(total_value))
-        transaction_query.addBindValue(paid)
-        transaction_query.addBindValue(payable)
-        transaction_query.addBindValue(payable_after)
-
-        transaction_query.addBindValue(receiveable_before)
-        transaction_query.addBindValue(receivable)
-        transaction_query.addBindValue(paid)
-        transaction_query.addBindValue(receivable)
-        transaction_query.addBindValue(receiveable_after)
-
-        transaction_query.addBindValue(rep_id)
-        transaction_query.addBindValue(int(session_id))
-
-        transaction_query.addBindValue(payment_data.get("payment_method"))
-        transaction_query.addBindValue(payment_data.get("bank_name"))
-        transaction_query.addBindValue(payment_data.get("account_no"))
-        transaction_query.addBindValue(payment_data.get("transaction_mode"))
-        transaction_query.addBindValue(payment_data.get("wallet_provider"))
-        transaction_query.addBindValue(payment_data.get("wallet_no"))
-        transaction_query.addBindValue(payment_data.get("payment_reference"))
-
-        if not transaction_query.exec():
-            raise Exception(f"Supplier transaction posting failed: {transaction_query.lastError().text()}")
-
-        supplier_update = QSqlQuery()
-        supplier_update.prepare("UPDATE supplier SET payable = ?, receiveable = ? WHERE id = ?")
-        supplier_update.addBindValue(payable_after)
-        supplier_update.addBindValue(receiveable_after)
-        supplier_update.addBindValue(supplier_id)
-        if not supplier_update.exec():
-            raise Exception(f"Supplier balance update failed: {supplier_update.lastError().text()}")
-
-        grn_update = QSqlQuery()
-        grn_update.prepare("UPDATE goods_receipt SET status = ? WHERE grn_number = ?")
-        grn_update.addBindValue("billed")
-        grn_update.addBindValue(grn_number)
-        if not grn_update.exec():
-            raise Exception(f"GRN status update failed: {grn_update.lastError().text()}")
+        balances = fetch_supplier_balances(supplier_id)
+        supplier_txn_payload = build_supplier_transaction_payload(
+            purchase_id=purchase_id,
+            supplier_id=supplier_id,
+            rep_id=rep_id,
+            session_id=int(session_id),
+            total=total_value,
+            paid=paid,
+            settlement={"payable": payable, "receivable": receivable},
+            payable_before=balances["payable_before"],
+            receiveable_before=balances["receiveable_before"],
+            payment=payment_data,
+        )
+        insert_supplier_transaction(supplier_txn_payload)
+        update_supplier_balances(
+            supplier_id,
+            payable_after=supplier_txn_payload["payable_after"],
+            receiveable_after=supplier_txn_payload["receiveable_after"],
+        )
+        update_goods_receipt_status(grn_number, "billed")
 
         return purchase_id
 
@@ -1359,9 +1311,6 @@ class CreateGRNWidget(QWidget):
         return True
 
     def collect_billing_data(self, supplier_id, grn_number):
-        if supplier_id <= 0:
-            raise Exception("Could not resolve supplier for selected PO.")
-
         rep = self.rep_combo.currentData()
 
         subtotal = max(0.0, self._read_money(self.subtotal_label))
@@ -1376,55 +1325,28 @@ class CreateGRNWidget(QWidget):
         paid = max(0.0, self._read_money(self.paid_amount))
         remaining = self._read_money(self.remaining_amount)
 
-        if not grn_number:
-            raise Exception("GRN number is required.")
-        if total < 0:
-            raise Exception("Final amount cannot be negative.")
-        if paid < 0:
-            raise Exception("Paid amount cannot be negative.")
-
-        expected_remaining = round(total - paid, 2)
-        if abs(expected_remaining - remaining) > 0.01:
-            raise Exception("Remaining amount does not match total - paid.")
-
-        writeoff = 0.0
-        payable = 0.0
-        receivable = 0.0
-        if remaining > 0.0:
-            if self.writeoff_check.isChecked():
-                writeoff = remaining
-            else:
-                payable = remaining
-        elif remaining < 0.0:
-            receivable = abs(remaining)
-
-        due_date = self.compute_due_date() if payable > 0 else None
+        due_date = self.compute_due_date() if remaining > 0 and not self.writeoff_check.isChecked() else None
 
         session_id = get_active_session_id(strict=True)
-        if session_id is None:
-            raise Exception("No active session found for billing.")
-
-        return {
-            "supplier": supplier_id,
-            "rep": rep,
-            "sellerinvoice": grn_number,
-            "subtotal": subtotal,
-            "discount": discount,
-            "taxable": taxable,
-            "tax_236g": tax_236g,
-            "tax_236h": tax_236h,
-            "sales_tax": sales_tax,
-            "netamount": netamount,
-            "cn_adjustment": cn_adjustment,
-            "total": total,
-            "paid": paid,
-            "remaining": remaining,
-            "writeoff": writeoff,
-            "payable": payable,
-            "receivable": receivable,
-            "due_date": due_date,
-            "session_id": session_id,
-        }
+        return collect_grn_billing_data(
+            supplier_id=supplier_id,
+            rep=rep,
+            grn_number=grn_number,
+            subtotal=subtotal,
+            discount=discount,
+            taxable=taxable,
+            tax_236g=tax_236g,
+            tax_236h=tax_236h,
+            sales_tax=sales_tax,
+            netamount=netamount,
+            cn_adjustment=cn_adjustment,
+            total=total,
+            paid=paid,
+            remaining=remaining,
+            writeoff_enabled=self.writeoff_check.isChecked(),
+            due_date=due_date,
+            session_id=session_id,
+        )
 
     def get_next_grn_number(self):
         query = QSqlQuery()
@@ -1497,147 +1419,39 @@ class CreateGRNWidget(QWidget):
             supplier_id = self.get_po_supplier(int(po_id))
             billing_data = self.collect_billing_data(supplier_id, grn_number)
             payment_data = self.payment_handler.payment_data.copy()
-
-            grn_query = QSqlQuery()
-            grn_query.prepare("""
-                INSERT INTO goods_receipt (
-                    grn_number,
-                    po_id,
-                    grn_date,
-                    status,
-                    total_value,
-                    header_discount,
-                    header_tax,
-                    discount,
-                    tax_236g,
-                    tax_236h,
-                    salestax,
-                    cn_adjustment,
-                    taxable,
-                    netamount,
-                    session_id,
-                    notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """)
-
-            # Get header amounts (same shape as purchase invoice)
-            header_discount = self._read_money(self.header_discount_edit)
-            tax_236g = self._read_money(self.tax_236g_edit)
-            tax_236h = self._read_money(self.tax_236h_edit)
-            sales_tax = self._read_money(self.sales_tax_edit)
-            cn_adjustment = self._read_money(self.cn_adjustment_edit)
-            subtotal = self._read_money(self.subtotal_label)
-            taxable = self._read_money(self.taxable_label)
-            netamount = self._read_money(self.net_amount_label)
-            total_value = self._read_money(self.total_with_fees_label)
-            # Backward-compatible aggregate columns
-            header_tax = (tax_236g - tax_236h + sales_tax)
-            
-            grn_query.addBindValue(grn_number)
-            grn_query.addBindValue(int(po_id))
-            grn_query.addBindValue(self.grn_date_edit.date().toString("yyyy-MM-dd"))
-            grn_query.addBindValue("received")
-            grn_query.addBindValue(total_value)
-            grn_query.addBindValue(header_discount)
-            grn_query.addBindValue(header_tax)
-            grn_query.addBindValue(0.0)
-            grn_query.addBindValue(tax_236g)
-            grn_query.addBindValue(tax_236h)
-            grn_query.addBindValue(sales_tax)
-            grn_query.addBindValue(cn_adjustment)
-            grn_query.addBindValue(taxable)
-            grn_query.addBindValue(netamount)
-            grn_query.addBindValue(session_id)
-            grn_query.addBindValue((self.notes_edit.text() or "").strip())
-
-            if not grn_query.exec():
-                raise Exception(grn_query.lastError().text())
-
-            grn_id = int(grn_query.lastInsertId())
-
-            line_count = 0
-            receipt_rows = []
-            for row, line_ref in enumerate(self._line_refs):
-                # Column 1: Batch Number
-                batch_widget = self.items_table.cellWidget(row, 1)
-                # Column 2: Expiry Date
-                expiry_widget = self.items_table.cellWidget(row, 2)
-                qty_widget = self.items_table.cellWidget(row, 6)
-                price_widget = self.items_table.cellWidget(row, 7)
-                tax_widget = self.items_table.cellWidget(row, 9)
-                
-                if qty_widget is None or price_widget is None:
-                    continue
-
-                qty_received = int(qty_widget.value())
-                unit_price = float(price_widget.value())
-                batch_no = batch_widget.text().strip() if batch_widget else ""
-                expiry_date = expiry_widget.text().strip() if expiry_widget else ""
-                if expiry_date:
-                    parsed_expiry = parse_expiry_month_year(expiry_date)
-                    if parsed_expiry is None:
-                        raise Exception(f"Row {row + 1}: Expiry must be in MM-YY format, for example 04-26.")
-                    expiry_date = parsed_expiry.toString("yyyy-MM-dd")
-                discount = self._line_discount_amount(row, qty_received, unit_price)
-                tax = float(tax_widget.value()) if tax_widget else 0.0
-                landing_cost = line_ref.get("landing_cost") or unit_price  # Fallback to unit_price if not calculated
-                
-                if qty_received <= 0:
-                    continue
-
-                po_line_id = int(line_ref.get("po_line_id") or 0)
-                # Retrieve product_id from stored reference - NOT saved directly in goods_receipt_line
-                # but retrieved via po_line_id -> purchase_order_line.product relationship
-                product_id = int(line_ref.get("product_id") or 0)
-
-                line_query = QSqlQuery()
-                # Note: goods_receipt_line now stores: batch_no, expiry_date, discount, tax, landing_cost
-                # Product ID can be derived via: goods_receipt_line.po_line_id -> purchase_order_line.product
-                line_query.prepare("""
-                    INSERT INTO goods_receipt_line (
-                        grn_id, po_line_id, qty_received, unit_price_received, total_received,
-                        batch_no, expiry_date, discount, tax, landing_cost
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """)
-                line_query.addBindValue(grn_id)
-                line_query.addBindValue(int(po_line_id))
-                line_query.addBindValue(qty_received)
-                line_query.addBindValue(unit_price)
-                line_query.addBindValue(qty_received * unit_price)
-                line_query.addBindValue(batch_no if batch_no else None)
-                line_query.addBindValue(expiry_date if expiry_date else None)
-                line_query.addBindValue(discount)
-                line_query.addBindValue(tax)
-                line_query.addBindValue(landing_cost)
-
-                if not line_query.exec():
-                    raise Exception(line_query.lastError().text())
-                line_count += 1
-                receipt_rows.append({
-                    "product_id": product_id,
-                    "qty_received": qty_received,
-                    "unit_price": unit_price,
-                    "batch_no": batch_no,
-                    "expiry_date": expiry_date,
-                    "discount": discount,
-                    "tax": tax,
-                    "landing_cost": landing_cost,  # Add landing_cost to receipt_rows
-                })
+            header_values = self._collect_grn_header_amounts()
+            grn_payload = build_goods_receipt_payload(
+                grn_number=grn_number,
+                po_id=int(po_id),
+                grn_date=self.grn_date_edit.date().toString("yyyy-MM-dd"),
+                total_value=header_values["total_value"],
+                header_discount=header_values["header_discount"],
+                tax_236g=header_values["tax_236g"],
+                tax_236h=header_values["tax_236h"],
+                sales_tax=header_values["sales_tax"],
+                cn_adjustment=header_values["cn_adjustment"],
+                taxable=header_values["taxable"],
+                netamount=header_values["netamount"],
+                session_id=session_id,
+                notes=(self.notes_edit.text() or "").strip(),
+            )
+            grn_id = insert_goods_receipt_header(grn_payload)
+            line_count, receipt_rows = self._collect_receipt_rows(grn_id)
 
             if line_count == 0:
                 raise Exception("At least one line must have received quantity > 0.")
 
-            totals_payload = {
-                "subtotal": subtotal,
-                "discount": header_discount,
-                "taxable": taxable,
-                "tax_236g": tax_236g,
-                "tax_236h": tax_236h,
-                "sales_tax": sales_tax,
-                "netamount": netamount,
-                "cn_adjustment": cn_adjustment,
-                "total": total_value,
-            }
+            totals_payload = collect_grn_totals_payload(
+                subtotal=header_values["subtotal"],
+                discount=header_values["header_discount"],
+                taxable=header_values["taxable"],
+                tax_236g=header_values["tax_236g"],
+                tax_236h=header_values["tax_236h"],
+                sales_tax=header_values["sales_tax"],
+                netamount=header_values["netamount"],
+                cn_adjustment=header_values["cn_adjustment"],
+                total=header_values["total_value"],
+            )
             purchase_bill_id = self.create_bill_from_grn(
                 po_id=int(po_id),
                 grn_number=grn_number,

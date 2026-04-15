@@ -10,6 +10,10 @@ import pandas as pd  # <-- for reading CSV/Excel easily
 
 from utilities.stylus import load_stylesheets
 from utilities.permissions import Permissions
+from services.accounting_settings_service import (
+    load_opening_inventory_value,
+    save_opening_inventory_value,
+)
 
 
 
@@ -387,12 +391,8 @@ class AddProductWidget(QWidget):
         layout.addWidget(password_input)
 
         # Load existing value
-        query = QSqlQuery()
-        if query.exec("SELECT opening_inventory_value FROM accounting_settings WHERE id = 1"):
-            if query.next():
-                existing_value = query.value(0)
-                if existing_value is not None:
-                    cost_input.setText(str(existing_value))
+        existing_value = load_opening_inventory_value()
+        cost_input.setText(str(existing_value))
 
         # Save Button
         save_button = QPushButton("Save")
@@ -418,20 +418,10 @@ class AddProductWidget(QWidget):
                 AppMessageBox.critical(dialog, "Access Denied", "Invalid admin password.")
                 return
 
-            # Insert or Update id = 1
-            query = QSqlQuery()
-            query.prepare("""
-                INSERT INTO accounting_settings (id, opening_inventory_value, updated_at)
-                VALUES (1, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(id)
-                DO UPDATE SET
-                    opening_inventory_value = excluded.opening_inventory_value,
-                    updated_at = CURRENT_TIMESTAMP
-            """)
-            query.addBindValue(new_cost)
-
-            if not query.exec():
-                AppMessageBox.critical(dialog, "Error", query.lastError().text())
+            try:
+                save_opening_inventory_value(new_cost)
+            except Exception as exc:
+                AppMessageBox.critical(dialog, "Error", str(exc))
                 return
 
             AppMessageBox.information(dialog, "Success", "Estimated cost updated successfully.")
@@ -635,11 +625,15 @@ class AddProductWidget(QWidget):
 
         formula_label = self.field_label("Formula")
         main_grid.addWidget(formula_label, 1, 0)
-        main_grid.addWidget(self.formula_input, 1, 1, 1, 3)
+        main_grid.addWidget(self.formula_input, 1, 1, 1, 1)
 
         pack_size_label = self.field_label("Pack Size", align_right=True)
-        main_grid.addWidget(pack_size_label, 1, 4)
-        main_grid.addWidget(self.pack_size_input, 1, 5)
+        main_grid.addWidget(pack_size_label, 1, 2)
+        main_grid.addWidget(self.pack_size_input, 1, 3)
+
+        rack_label = self.field_label("Rack", align_right=True)
+        main_grid.addWidget(rack_label, 1, 4)
+        main_grid.addWidget(self.rack_input, 1, 5)
 
         main_grid.setColumnStretch(1, 5)
         main_grid.setColumnStretch(2, 2)
@@ -650,7 +644,7 @@ class AddProductWidget(QWidget):
         section_layout.addLayout(main_grid)
         self.register_section_focus(section_frame, [
             self.name_input, self.dosage, self.form, self.brand_input,
-            self.formula_input, self.pack_size_input
+            self.formula_input, self.rack_input, self.pack_size_input
         ])
         
 
@@ -662,35 +656,34 @@ class AddProductWidget(QWidget):
         batch_grid.setHorizontalSpacing(10)
         batch_grid.setVerticalSpacing(8)
 
-        quantity_label = self.field_label("Qty")
-        self.quantity_input = QLineEdit()
-        batch_grid.addWidget(quantity_label, 0, 0)
-        batch_grid.addWidget(self.quantity_input, 0, 1)
-        
-        unit_cost_label = self.field_label("Cost", align_right=True)
-        self.unit_cost_input = QLineEdit()
-        self.unit_cost_input.setPlaceholderText("purchase price per pack")
-        batch_grid.addWidget(unit_cost_label, 0, 2)
-        batch_grid.addWidget(self.unit_cost_input, 0, 3)
-
-
+        batch_label = self.field_label("Batch")
         self.batch_input = QLineEdit()
         self.batch_input.textEdited.connect(lambda text: self.force_uppercase_line_edit(self.batch_input, text))
+        batch_grid.addWidget(batch_label, 0, 0)
+        batch_grid.addWidget(self.batch_input, 0, 1)
+        
+        expiry_label = self.field_label("Expiry (MM-YY)", align_right=True)
         self.expiry_input = QLineEdit()
         self.expiry_input.setPlaceholderText("MM-YY")
         self.expiry_input.setInputMask("00-00;_")
+        batch_grid.addWidget(expiry_label, 0, 2)
+        batch_grid.addWidget(self.expiry_input, 0, 3)
 
-        batch_label = self.field_label("Batch", align_right=True)
-        batch_grid.addWidget(batch_label, 0, 4)
-        batch_grid.addWidget(self.batch_input, 0, 5)
+        pack_price_label = self.field_label("Sale Price", align_right=True)
+        self.pack_price_input = QLineEdit()
+        batch_grid.addWidget(pack_price_label, 0, 4)
+        batch_grid.addWidget(self.pack_price_input, 0, 5)
 
-        expiry_label = self.field_label("Expiry (MM-YY)", align_right=True)
-        batch_grid.addWidget(expiry_label, 0, 6)
-        batch_grid.addWidget(self.expiry_input, 0, 7)
+        quantity_label = self.field_label("Qty", align_right=True)
+        self.quantity_input = QLineEdit()
+        batch_grid.addWidget(quantity_label, 0, 6)
+        batch_grid.addWidget(self.quantity_input, 0, 7)
 
-        rack_label = self.field_label("Rack")
-        batch_grid.addWidget(rack_label, 1, 0)
-        batch_grid.addWidget(self.rack_input, 1, 1)
+        unit_cost_label = self.field_label("Cost (Purchase)")
+        self.unit_cost_input = QLineEdit()
+        self.unit_cost_input.setPlaceholderText("purchase price per pack")
+        batch_grid.addWidget(unit_cost_label, 1, 0)
+        batch_grid.addWidget(self.unit_cost_input, 1, 1)
 
         batch_grid.setColumnStretch(1, 3)
         batch_grid.setColumnStretch(3, 3)
@@ -699,8 +692,8 @@ class AddProductWidget(QWidget):
 
         section_layout.addLayout(batch_grid)
         self.register_section_focus(section_frame, [
-            self.quantity_input, self.unit_cost_input, self.batch_input, self.expiry_input,
-            self.rack_input
+            self.batch_input, self.expiry_input, self.pack_price_input, self.quantity_input,
+            self.unit_cost_input
         ])
         
         
@@ -771,38 +764,33 @@ class AddProductWidget(QWidget):
         pricing_grid.setHorizontalSpacing(10)
         pricing_grid.setVerticalSpacing(8)
 
-        pack_price_label = self.field_label("Price")
-        self.pack_price_input = QLineEdit()
-        pricing_grid.addWidget(pack_price_label, 0, 0)
-        pricing_grid.addWidget(self.pack_price_input, 0, 1)
-
-        unit_price_label = self.field_label("Unit Price", align_right=True)
+        unit_price_label = self.field_label("Unit Price")
         self.unit_price_input = QLabel()
         self.unit_price_input.setStyleSheet("font-size: 12px; font-weight: 700; color: #2F5D7C; padding-left: 0;")
-        pricing_grid.addWidget(unit_price_label, 0, 2)
-        pricing_grid.addWidget(self.unit_price_input, 0, 3)
+        pricing_grid.addWidget(unit_price_label, 0, 0)
+        pricing_grid.addWidget(self.unit_price_input, 0, 1)
 
         code_label = self.field_label("Code", align_right=True)
-        pricing_grid.addWidget(code_label, 0, 4)
-        pricing_grid.addWidget(self.code_input, 0, 5)
+        pricing_grid.addWidget(code_label, 0, 2)
+        pricing_grid.addWidget(self.code_input, 0, 3)
 
-        discount_group_label = self.field_label("Discount")
+        discount_group_label = self.field_label("Discount", align_right=True)
         self.discount_group_combo = QComboBox()
         self.populate_discount_group_combobox(self.discount_group_combo)
-        pricing_grid.addWidget(discount_group_label, 1, 0)
-        pricing_grid.addWidget(self.discount_group_combo, 1, 1)
+        pricing_grid.addWidget(discount_group_label, 0, 4)
+        pricing_grid.addWidget(self.discount_group_combo, 0, 5)
 
-        tax_group_label = self.field_label("Tax", align_right=True)
+        tax_group_label = self.field_label("Tax")
         self.tax_group_combo = QComboBox()
         self.populate_tax_group_combobox(self.tax_group_combo)
-        pricing_grid.addWidget(tax_group_label, 1, 2)
-        pricing_grid.addWidget(self.tax_group_combo, 1, 3)
+        pricing_grid.addWidget(tax_group_label, 1, 0)
+        pricing_grid.addWidget(self.tax_group_combo, 1, 1)
 
         reorder_label = self.field_label("Reorder", align_right=True)
         self.reorder_level = QLineEdit()
         self.reorder_level.setPlaceholderText("Reorder Level (units)")
-        pricing_grid.addWidget(reorder_label, 1, 4)
-        pricing_grid.addWidget(self.reorder_level, 1, 5)
+        pricing_grid.addWidget(reorder_label, 1, 2)
+        pricing_grid.addWidget(self.reorder_level, 1, 3)
 
         pricing_grid.setColumnStretch(1, 3)
         pricing_grid.setColumnStretch(3, 3)
@@ -810,7 +798,7 @@ class AddProductWidget(QWidget):
 
         section_layout.addLayout(pricing_grid)
         self.register_section_focus(section_frame, [
-            self.pack_size_input, self.pack_price_input, self.discount_group_combo,
+            self.unit_price_input, self.code_input, self.discount_group_combo,
             self.tax_group_combo, self.reorder_level
         ])
         
@@ -898,13 +886,13 @@ class AddProductWidget(QWidget):
         self.form.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.brand_input))
         self.brand_input.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.formula_input))
         self.formula_input.returnPressed.connect(lambda: self.focus_next_field(self.pack_size_input))
-        self.pack_size_input.returnPressed.connect(lambda: self.focus_next_field(self.quantity_input))
-        self.quantity_input.returnPressed.connect(lambda: self.focus_next_field(self.unit_cost_input))
-        self.unit_cost_input.returnPressed.connect(lambda: self.focus_next_field(self.batch_input))
+        self.pack_size_input.returnPressed.connect(lambda: self.focus_next_field(self.rack_input))
+        self.rack_input.returnPressed.connect(lambda: self.focus_next_field(self.batch_input))
         self.batch_input.returnPressed.connect(lambda: self.focus_next_field(self.expiry_input))
-        self.expiry_input.returnPressed.connect(lambda: self.focus_next_field(self.rack_input))
-        self.rack_input.returnPressed.connect(lambda: self.focus_next_field(self.pack_price_input))
-        self.pack_price_input.returnPressed.connect(lambda: self.focus_next_field(self.code_input))
+        self.expiry_input.returnPressed.connect(lambda: self.focus_next_field(self.pack_price_input))
+        self.pack_price_input.returnPressed.connect(lambda: self.focus_next_field(self.quantity_input))
+        self.quantity_input.returnPressed.connect(lambda: self.focus_next_field(self.unit_cost_input))
+        self.unit_cost_input.returnPressed.connect(lambda: self.focus_next_field(self.code_input))
         self.code_input.returnPressed.connect(lambda: self.focus_next_field(self.reorder_level))
         self.reorder_level.returnPressed.connect(self.save_button.click)
     

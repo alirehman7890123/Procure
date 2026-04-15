@@ -1,6 +1,7 @@
 
 from PySide6.QtSql import  QSqlQuery
 from PySide6.QtCore import QDate
+from services.accounting_settings_service import load_opening_inventory_value
 
 
 
@@ -252,6 +253,155 @@ class ReportService:
             })
 
         return rows
+
+    def get_customer_outstanding_rows(self):
+        query = QSqlQuery()
+        sql = """
+            SELECT
+                COALESCE(name, 'Walk-in Customer') AS customer_name,
+                COALESCE(receiveable, 0) AS receivable,
+                COALESCE(payable, 0) AS payable
+            FROM customer
+            WHERE COALESCE(receiveable, 0) > 0 OR COALESCE(payable, 0) > 0
+            ORDER BY COALESCE(receiveable, 0) DESC, COALESCE(payable, 0) DESC, name ASC
+        """
+        if not query.exec(sql):
+            print("Customer outstanding query failed:", query.lastError().text())
+            return []
+
+        rows = []
+        while query.next():
+            receivable = float(query.value(1) or 0.0)
+            payable = float(query.value(2) or 0.0)
+            rows.append({
+                "customer_name": str(query.value(0) or ""),
+                "receivable": receivable,
+                "payable": payable,
+                "net_exposure": receivable - payable,
+            })
+        return rows
+
+    def get_supplier_outstanding_rows(self):
+        query = QSqlQuery()
+        sql = """
+            SELECT
+                COALESCE(name, 'Unknown Supplier') AS supplier_name,
+                COALESCE(payable, 0) AS payable,
+                COALESCE(receiveable, 0) AS receivable
+            FROM supplier
+            WHERE COALESCE(payable, 0) > 0 OR COALESCE(receiveable, 0) > 0
+            ORDER BY COALESCE(payable, 0) DESC, COALESCE(receiveable, 0) DESC, name ASC
+        """
+        if not query.exec(sql):
+            print("Supplier outstanding query failed:", query.lastError().text())
+            return []
+
+        rows = []
+        while query.next():
+            payable = float(query.value(1) or 0.0)
+            receivable = float(query.value(2) or 0.0)
+            rows.append({
+                "supplier_name": str(query.value(0) or ""),
+                "payable": payable,
+                "receivable": receivable,
+                "net_exposure": payable - receivable,
+            })
+        return rows
+
+    def get_used_product_options(self):
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT id, display_name
+            FROM product
+            WHERE status = 'used'
+            ORDER BY display_name ASC
+        """)
+        if not query.exec():
+            print("Used product options query failed:", query.lastError().text())
+            return []
+
+        rows = []
+        while query.next():
+            rows.append({
+                "product_id": int(query.value(0) or 0),
+                "display_name": str(query.value(1) or ""),
+            })
+        return rows
+
+    def get_hourly_sales_data(self):
+        from datetime import datetime
+
+        local_offset = datetime.now().astimezone().utcoffset()
+        offset_hours = int(local_offset.total_seconds() // 3600)
+        offset_str = f"{offset_hours:+d} hours"
+        today = datetime.now().strftime('%Y-%m-%d')
+        hourly_sales = {i: 0 for i in range(24)}
+
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT 
+                strftime('%H', datetime(creation_date, :offset)) AS hour,
+                COALESCE(SUM(total), 0) AS total_sales
+            FROM sales
+            WHERE 
+                date(datetime(creation_date, :offset)) = date(:today)
+            GROUP BY hour
+            ORDER BY hour
+        """)
+        query.bindValue(":offset", offset_str)
+        query.bindValue(":today", today)
+
+        if query.exec():
+            while query.next():
+                hour = int(query.value(0) or 0)
+                total = float(query.value(1) or 0.0)
+                hourly_sales[hour] = total
+        else:
+            print("Hourly sales query failed:", query.lastError().text())
+
+        return hourly_sales
+
+    def get_monthly_sales_data(self):
+        monthly_sales = {day: 0 for day in range(1, 32)}
+
+        query = QSqlQuery()
+        query.prepare("""
+            WITH RECURSIVE days(day) AS (
+                SELECT 1
+                UNION ALL
+                SELECT day + 1 FROM days WHERE day < 31
+            )
+            SELECT
+                days.day,
+                COALESCE(SUM(s.total), 0) AS total_sales
+            FROM
+                days
+            LEFT JOIN
+                sales s
+                ON CAST(STRFTIME('%d', s.creation_date) AS INTEGER) = days.day
+                AND STRFTIME('%Y-%m', s.creation_date) = STRFTIME('%Y-%m', 'now')
+            GROUP BY
+                days.day
+            ORDER BY
+                days.day
+        """)
+
+        if query.exec():
+            while query.next():
+                day = int(query.value(0) or 0)
+                total = float(query.value(1) or 0.0)
+                monthly_sales[day] = total
+        else:
+            print("Monthly sales query failed:", query.lastError().text())
+
+        return monthly_sales
+
+    def get_business_name(self):
+        query = QSqlQuery()
+        query.prepare("SELECT businessname FROM business WHERE id = 1")
+        if query.exec() and query.next():
+            return str(query.value(0) or "ProCure Medics")
+        return "ProCure Medics"
 
     def get_sales_summary_rows(self, duration="today", limit=500):
         where_clause = self._duration_where("s.creation_date", duration)
@@ -1261,6 +1411,527 @@ class ReportService:
             })
         return rows
 
+    def get_batch_reference_details(self, batch_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                b.id,
+                COALESCE(b.batch_no, ''),
+                COALESCE(p.display_name, ''),
+                COALESCE(b.expiry_date, ''),
+                COALESCE(b.total_received, 0),
+                COALESCE(b.quantity_remaining, 0),
+                COALESCE(b.received_at, ''),
+                COALESCE(b.source, '')
+            FROM batch b
+            LEFT JOIN product p ON p.id = b.product_id
+            WHERE b.id = ?
+            LIMIT 1
+            """
+        )
+        query.addBindValue(batch_id)
+
+        if query.exec() and query.next():
+            return [
+                ("Batch ID", query.value(0)),
+                ("Batch No", query.value(1)),
+                ("Product", query.value(2)),
+                ("Expiry", query.value(3)),
+                ("Total Received", query.value(4)),
+                ("Remaining", query.value(5)),
+                ("Received At", query.value(6)),
+                ("Source", query.value(7)),
+            ]
+
+        return None
+
+    def get_sales_reference_details(self, sales_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                s.id,
+                s.creation_date,
+                COALESCE(s.total, 0),
+                COALESCE(a.username, ''),
+                COALESCE(c.name, '')
+            FROM sales s
+            LEFT JOIN auth a ON a.id = s.salesman
+            LEFT JOIN customer c ON c.id = s.customer
+            WHERE s.id = ?
+            LIMIT 1
+            """
+        )
+        query.addBindValue(sales_id)
+
+        if query.exec() and query.next():
+            return [
+                ("Sales ID", query.value(0)),
+                ("Date", query.value(1)),
+                ("Total", query.value(2)),
+                ("Salesman", query.value(3)),
+                ("Customer", query.value(4)),
+            ]
+
+        return None
+
+    def get_sales_return_reference_details(self, return_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                sr.id,
+                sr.creation_date,
+                COALESCE(sr.total, 0),
+                COALESCE(sr.salesorder, 0)
+            FROM salesreturn sr
+            WHERE sr.id = ?
+            LIMIT 1
+            """
+        )
+        query.addBindValue(return_id)
+
+        if query.exec() and query.next():
+            return [
+                ("Sales Return ID", query.value(0)),
+                ("Date", query.value(1)),
+                ("Total", query.value(2)),
+                ("Sales Order", query.value(3)),
+            ]
+
+        return None
+
+    def get_purchase_return_reference_details(self, return_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                pr.id,
+                pr.creation_date,
+                COALESCE(pr.total, 0),
+                COALESCE(s.name, '')
+            FROM purchase_return pr
+            LEFT JOIN supplier s ON s.id = pr.supplier
+            WHERE pr.id = ?
+            LIMIT 1
+            """
+        )
+        query.addBindValue(return_id)
+
+        if query.exec() and query.next():
+            return [
+                ("Purchase Return ID", query.value(0)),
+                ("Date", query.value(1)),
+                ("Total", query.value(2)),
+                ("Supplier", query.value(3)),
+            ]
+
+        return None
+
+    def get_adjustment_reference_details(self, adjustment_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                ia.id,
+                ia.created_at,
+                COALESCE(ia.adjustment_type, ''),
+                COALESCE(ia.qty, 0),
+                COALESCE(ia.old_qty, 0),
+                COALESCE(ia.new_qty, 0),
+                COALESCE(ia.reason, ''),
+                COALESCE(a.username, ''),
+                COALESCE(b.batch_no, '')
+            FROM inventory_adjustment ia
+            LEFT JOIN auth a ON a.id = ia.adjusted_by
+            LEFT JOIN batch b ON b.id = ia.batch_id
+            WHERE ia.id = ?
+            LIMIT 1
+            """
+        )
+        query.addBindValue(adjustment_id)
+
+        if query.exec() and query.next():
+            return [
+                ("Adjustment ID", query.value(0)),
+                ("Date", query.value(1)),
+                ("Type", query.value(2)),
+                ("Qty Change", query.value(3)),
+                ("Old Qty", query.value(4)),
+                ("New Qty", query.value(5)),
+                ("Reason", query.value(6)),
+                ("Adjusted By", query.value(7)),
+                ("Batch", query.value(8)),
+            ]
+
+        return None
+
+    def get_purchase_item_reference_details(self, purchase_item_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                pi.id,
+                pi.creation_date,
+                COALESCE(p.display_name, ''),
+                COALESCE(pi.qty, 0),
+                COALESCE(pi.rate, 0),
+                COALESCE(pi.total, 0)
+            FROM purchaseitem pi
+            LEFT JOIN product p ON p.id = pi.product
+            WHERE pi.id = ?
+            LIMIT 1
+            """
+        )
+        query.addBindValue(purchase_item_id)
+
+        if query.exec() and query.next():
+            return [
+                ("Purchase Item ID", query.value(0)),
+                ("Date", query.value(1)),
+                ("Product", query.value(2)),
+                ("Qty", query.value(3)),
+                ("Rate", query.value(4)),
+                ("Total", query.value(5)),
+            ]
+
+        return None
+
+    def get_purchase_reference_details(self, purchase_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                p.id,
+                p.creation_date,
+                COALESCE(s.name, ''),
+                COALESCE(r.name, ''),
+                COALESCE(p.sellerinvoice, ''),
+                COALESCE(p.total, 0),
+                COALESCE(p.paid, 0),
+                COALESCE(p.remaining, 0)
+            FROM purchase p
+            LEFT JOIN supplier s ON s.id = p.supplier
+            LEFT JOIN rep r ON r.id = p.rep
+            WHERE p.id = ?
+            LIMIT 1
+            """
+        )
+        query.addBindValue(purchase_id)
+
+        if query.exec() and query.next():
+            return [
+                ("Purchase ID", query.value(0)),
+                ("Date", query.value(1)),
+                ("Supplier", query.value(2)),
+                ("Rep", query.value(3)),
+                ("Seller Invoice", query.value(4)),
+                ("Total", query.value(5)),
+                ("Paid", query.value(6)),
+                ("Remaining", query.value(7)),
+            ]
+
+        return None
+
+    def get_po_reference_details(self, po_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                po.id,
+                COALESCE(po.po_number, ''),
+                COALESCE(po.po_date, ''),
+                COALESCE(s.name, ''),
+                COALESCE(po.status, ''),
+                COALESCE(po.total_value, 0),
+                COALESCE(po.expected_delivery_date, ''),
+                COALESCE((SELECT SUM(qty_ordered) FROM purchase_order_line WHERE po_id = po.id), 0),
+                COALESCE((
+                    SELECT SUM(grl.qty_received)
+                    FROM goods_receipt_line grl
+                    JOIN purchase_order_line pol ON pol.id = grl.po_line_id
+                    WHERE pol.po_id = po.id
+                ), 0)
+            FROM purchase_order po
+            LEFT JOIN supplier s ON s.id = po.supplier
+            WHERE po.id = ?
+            LIMIT 1
+            """
+        )
+        query.addBindValue(po_id)
+
+        if query.exec() and query.next():
+            ordered_qty = float(query.value(7) or 0)
+            received_qty = float(query.value(8) or 0)
+            return [
+                ("PO ID", query.value(0)),
+                ("PO Number", query.value(1)),
+                ("PO Date", query.value(2)),
+                ("Supplier", query.value(3)),
+                ("Status", query.value(4)),
+                ("Total Value", query.value(5)),
+                ("Expected Delivery", query.value(6)),
+                ("Ordered Qty", query.value(7)),
+                ("Received Qty", query.value(8)),
+                ("Remaining Qty", max(ordered_qty - received_qty, 0.0)),
+            ]
+
+        return None
+
+    def get_grn_reference_details(self, grn_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                gr.id,
+                COALESCE(gr.grn_number, ''),
+                COALESCE(gr.grn_date, ''),
+                COALESCE(po.po_number, ''),
+                COALESCE(s.name, ''),
+                COALESCE(gr.status, ''),
+                COALESCE(gr.total_value, 0)
+            FROM goods_receipt gr
+            LEFT JOIN purchase_order po ON po.id = gr.po_id
+            LEFT JOIN supplier s ON s.id = po.supplier
+            WHERE gr.id = ?
+            LIMIT 1
+            """
+        )
+        query.addBindValue(grn_id)
+
+        if query.exec() and query.next():
+            return [
+                ("GRN ID", query.value(0)),
+                ("GRN Number", query.value(1)),
+                ("GRN Date", query.value(2)),
+                ("PO Number", query.value(3)),
+                ("Supplier", query.value(4)),
+                ("Status", query.value(5)),
+                ("Total Value", query.value(6)),
+            ]
+
+        return None
+
+    def get_customer_transaction_reference_details(self, txn_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                ct.id,
+                ct.creation_date,
+                COALESCE(c.name, ''),
+                COALESCE(ct.transaction_type, ''),
+                COALESCE(ct.ref, 0),
+                COALESCE(ct.received, 0),
+                COALESCE(ct.payment_method, ''),
+                COALESCE(ct.payment_reference, '')
+            FROM customer_transaction ct
+            LEFT JOIN customer c ON c.id = ct.customer
+            WHERE ct.id = ?
+            LIMIT 1
+            """
+        )
+        query.addBindValue(txn_id)
+
+        if query.exec() and query.next():
+            return [
+                ("Receipt ID", query.value(0)),
+                ("Date", query.value(1)),
+                ("Customer", query.value(2)),
+                ("Transaction Type", query.value(3)),
+                ("Reference", query.value(4)),
+                ("Amount Received", query.value(5)),
+                ("Payment Method", query.value(6)),
+                ("Payment Reference", query.value(7)),
+            ]
+
+        return None
+
+    def get_price_change_reference_details(self, change_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                pc.id,
+                pc.created_at,
+                COALESCE(p.display_name, ''),
+                COALESCE(pc.previous_price, 0),
+                COALESCE(pc.new_price, 0),
+                COALESCE(pc.source, ''),
+                COALESCE(pc.username, '')
+            FROM price_changes pc
+            LEFT JOIN product p ON p.id = pc.product_id
+            WHERE pc.id = ?
+            LIMIT 1
+            """
+        )
+        query.addBindValue(change_id)
+
+        if query.exec() and query.next():
+            return [
+                ("Change ID", query.value(0)),
+                ("Date", query.value(1)),
+                ("Product", query.value(2)),
+                ("Previous Price", query.value(3)),
+                ("New Price", query.value(4)),
+                ("Source", query.value(5)),
+                ("Username", query.value(6)),
+            ]
+
+        return None
+
+    def get_daily_session_reference_details(self, session_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                id,
+                COALESCE(session_date, ''),
+                COALESCE(opening_cash, 0),
+                COALESCE(system_cash, 0),
+                COALESCE(actual_cash, 0),
+                COALESCE(withdrawal, 0),
+                COALESCE(cash_difference, 0),
+                COALESCE(opened_at, ''),
+                COALESCE(closed_at, ''),
+                COALESCE(status, '')
+            FROM daily_session
+            WHERE id = ?
+            LIMIT 1
+            """
+        )
+        query.addBindValue(session_id)
+
+        if query.exec() and query.next():
+            return [
+                ("Session ID", query.value(0)),
+                ("Session Date", query.value(1)),
+                ("Opening Cash", query.value(2)),
+                ("System Cash", query.value(3)),
+                ("Actual Cash", query.value(4)),
+                ("Withdrawal", query.value(5)),
+                ("Cash Difference", query.value(6)),
+                ("Opened At", query.value(7)),
+                ("Closed At", query.value(8)),
+                ("Status", query.value(9)),
+            ]
+
+        return None
+
+    def get_opening_stock_cost_review_rows(self):
+        query = QSqlQuery()
+        if not query.exec(
+            """
+            WITH sold_rollup AS (
+                SELECT
+                    sb.batch_id,
+                    COALESCE(SUM(sb.qty_taken), 0) AS sold_qty,
+                    COALESCE(SUM(CASE WHEN sb.unit_cost IS NULL THEN sb.qty_taken ELSE 0 END), 0) AS unknown_sold_qty
+                FROM sold_batch sb
+                GROUP BY sb.batch_id
+            )
+            SELECT
+                b.id,
+                COALESCE(p.display_name, ''),
+                COALESCE(b.batch_no, ''),
+                COALESCE(b.expiry_date, ''),
+                COALESCE(b.total_received, 0),
+                COALESCE(b.quantity_remaining, 0),
+                COALESCE(sr.sold_qty, 0),
+                COALESCE(sr.unknown_sold_qty, 0),
+                b.unit_cost,
+                COALESCE(b.received_at, '')
+            FROM batch b
+            JOIN product p ON p.id = b.product_id
+            LEFT JOIN sold_rollup sr ON sr.batch_id = b.id
+            WHERE LOWER(COALESCE(b.source, '')) = 'opening'
+            ORDER BY
+                CASE WHEN b.unit_cost IS NULL THEN 0 ELSE 1 END,
+                p.display_name ASC,
+                b.received_at ASC,
+                b.id ASC
+            """
+        ):
+            raise Exception(f"Could not load opening stock batches: {query.lastError().text()}")
+
+        rows = []
+        while query.next():
+            unit_cost_value = query.value(8)
+            rows.append(
+                {
+                    "batch_id": int(query.value(0) or 0),
+                    "product_name": str(query.value(1) or ""),
+                    "batch_no": str(query.value(2) or ""),
+                    "expiry_date": str(query.value(3) or ""),
+                    "added_qty": float(query.value(4) or 0.0),
+                    "remaining_qty": float(query.value(5) or 0.0),
+                    "sold_qty": float(query.value(6) or 0.0),
+                    "unknown_sold_qty": float(query.value(7) or 0.0),
+                    "unit_cost": float(unit_cost_value) if unit_cost_value is not None else None,
+                    "received_at": str(query.value(9) or ""),
+                }
+            )
+        return rows
+
+    def save_opening_stock_cost_updates(self, updates):
+        updates = list(updates or [])
+        if not updates:
+            return {"updated_batches": 0, "updated_sold_rows": 0}
+
+        tx = QSqlQuery()
+        if not tx.exec("BEGIN IMMEDIATE"):
+            raise Exception(f"Could not start save transaction: {tx.lastError().text()}")
+
+        try:
+            updated_batches = 0
+            updated_sold_rows = 0
+
+            for batch_id, new_cost in updates:
+                batch_update = QSqlQuery()
+                batch_update.prepare("UPDATE batch SET unit_cost = ? WHERE id = ?")
+                batch_update.addBindValue(new_cost)
+                batch_update.addBindValue(batch_id)
+                if not batch_update.exec():
+                    raise Exception(batch_update.lastError().text())
+                updated_batches += 1
+
+                sold_count_query = QSqlQuery()
+                sold_count_query.prepare("SELECT COUNT(*) FROM sold_batch WHERE batch_id = ?")
+                sold_count_query.addBindValue(batch_id)
+                sold_rows_for_batch = 0
+                if sold_count_query.exec() and sold_count_query.next():
+                    sold_rows_for_batch = int(sold_count_query.value(0) or 0)
+
+                sold_update = QSqlQuery()
+                sold_update.prepare(
+                    """
+                    UPDATE sold_batch
+                    SET unit_cost = ?,
+                        line_cost = ROUND(COALESCE(qty_taken, 0) * ?, 2)
+                    WHERE batch_id = ?
+                    """
+                )
+                sold_update.addBindValue(new_cost)
+                sold_update.addBindValue(new_cost)
+                sold_update.addBindValue(batch_id)
+                if not sold_update.exec():
+                    raise Exception(sold_update.lastError().text())
+                updated_sold_rows += sold_rows_for_batch
+
+            commit_query = QSqlQuery()
+            if not commit_query.exec("COMMIT"):
+                raise Exception(commit_query.lastError().text())
+
+            return {
+                "updated_batches": updated_batches,
+                "updated_sold_rows": updated_sold_rows,
+            }
+        except Exception:
+            rollback_query = QSqlQuery()
+            rollback_query.exec("ROLLBACK")
+            raise
+
     def get_dead_nonmoving_stock(self, threshold_days=90, view_mode="all", limit=2000):
         """Return products with on-hand stock that are dead or non-moving."""
 
@@ -2095,21 +2766,7 @@ class ReportService:
 
     
     def get_opening_estimate_amount(self):
-
-        query_string = """
-            SELECT opening_inventory_value
-            FROM accounting_settings WHERE id=1
-        """
-
-        query = QSqlQuery()
-        query.prepare(query_string)
-
-        if query.exec() and query.next():
-            value = query.value(0)
-            print("Value is: ", value)
-            return float(value) if value not in (None, '') else 0.0
-
-        return 0.0
+        return load_opening_inventory_value()
         
         
         
@@ -2186,6 +2843,93 @@ class ReportService:
             "near_expiry_batches": near_expiry_batches,
             "low_stock_products": low_stock_products,
         }
+
+    def get_near_expiry_rows(self, days=60):
+        try:
+            days = int(days)
+        except Exception:
+            days = 60
+        days = max(days, 1)
+
+        query = QSqlQuery()
+        sql = f"""
+            WITH parsed AS (
+                SELECT
+                    p.display_name,
+                    b.batch_no,
+                    b.expiry_date,
+                    b.quantity_remaining,
+                    CASE
+                        WHEN b.expiry_date LIKE '____-__-__' THEN date(b.expiry_date)
+                        WHEN b.expiry_date LIKE '__-__-____'
+                            THEN date(substr(b.expiry_date, 7, 4) || '-' || substr(b.expiry_date, 4, 2) || '-' || substr(b.expiry_date, 1, 2))
+                        ELSE NULL
+                    END AS expiry_norm
+                FROM batch b
+                JOIN product p ON p.id = b.product_id
+                WHERE
+                    b.quantity_remaining > 0
+                    AND p.status = 'used'
+                    AND b.expiry_date IS NOT NULL
+            )
+            SELECT
+                display_name,
+                batch_no,
+                expiry_date,
+                CAST(julianday(expiry_norm) - julianday('now') AS INTEGER) AS days_left,
+                quantity_remaining
+            FROM parsed
+            WHERE
+                expiry_norm IS NOT NULL
+                AND expiry_norm <= DATE('now', '+{days} days')
+            ORDER BY expiry_norm ASC
+        """
+        if not query.exec(sql):
+            raise Exception(f"Near expiry query failed: {query.lastError().text()}")
+
+        rows = []
+        while query.next():
+            rows.append(
+                {
+                    "product_name": query.value(0),
+                    "batch_no": query.value(1),
+                    "expiry_date": query.value(2),
+                    "days_left": query.value(3),
+                    "qty_remaining": query.value(4),
+                }
+            )
+        return rows
+
+    def get_low_stock_rows(self):
+        query = QSqlQuery()
+        sql = """
+            SELECT 
+                p.display_name,
+                IFNULL(SUM(b.quantity_remaining), 0) AS total_stock
+            FROM product p
+            LEFT JOIN batch b ON b.product_id = p.id
+            LEFT JOIN (
+                SELECT product_id, MAX(COALESCE(reorder_level, 0)) AS reorder_level
+                FROM price_pack
+                GROUP BY product_id
+            ) pp ON pp.product_id = p.id
+            WHERE p.status = 'used'
+            GROUP BY p.id
+            HAVING IFNULL(SUM(b.quantity_remaining), 0) <= MAX(COALESCE(pp.reorder_level, 0))
+            ORDER BY p.display_name ASC
+        """
+        if not query.exec(sql):
+            raise Exception(f"Low stock query failed: {query.lastError().text()}")
+
+        rows = []
+        while query.next():
+            rows.append(
+                {
+                    "product_name": query.value(0),
+                    "total_stock": query.value(1),
+                }
+            )
+        return rows
         
            
         

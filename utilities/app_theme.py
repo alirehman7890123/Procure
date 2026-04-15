@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from PySide6.QtGui import QColor
-from PySide6.QtSql import QSqlQuery
 from PySide6.QtWidgets import QApplication
 
+from services.accounting_settings_service import load_theme_settings as load_theme_settings_from_service
 
 DEFAULT_THEME = {
     "theme_primary_color": "#2F5D7C",
@@ -33,20 +33,11 @@ def tint(color_value, factor):
 
 
 def get_theme_settings():
-    settings = dict(DEFAULT_THEME)
-    query = QSqlQuery()
-    if query.exec(
-        """
-        SELECT
-            COALESCE(theme_primary_color, ''),
-            COALESCE(theme_sidebar_color, '')
-        FROM accounting_settings
-        WHERE id = 1
-        """
-    ) and query.next():
-        settings["theme_primary_color"] = normalize_hex(query.value(0), DEFAULT_THEME["theme_primary_color"])
-        settings["theme_sidebar_color"] = normalize_hex(query.value(1), DEFAULT_THEME["theme_sidebar_color"])
-    return settings
+    settings = load_theme_settings_from_service()
+    return {
+        "theme_primary_color": normalize_hex(settings["theme_primary_color"], DEFAULT_THEME["theme_primary_color"]),
+        "theme_sidebar_color": normalize_hex(settings["theme_sidebar_color"], DEFAULT_THEME["theme_sidebar_color"]),
+    }
 
 
 def get_theme_palette():

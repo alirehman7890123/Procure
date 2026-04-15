@@ -20,6 +20,10 @@ from PySide6.QtWidgets import (
 from utilities.app_messagebox import AppMessageBox
 from utilities.permissions import Permissions
 from utilities.stylus import load_stylesheets
+from services.accounting_settings_service import (
+    load_sales_tax_settings as load_sales_tax_settings_from_service,
+    save_sales_tax_settings as save_sales_tax_settings_to_service,
+)
 
 
 class TaxSettingsWidget(QWidget):
@@ -231,11 +235,8 @@ class TaxSettingsWidget(QWidget):
         self.name_edit.setFocus()
 
     def load_sales_tax_policy(self):
-        query = QSqlQuery()
-        if query.exec("SELECT sales_tax_policy FROM accounting_settings WHERE id = 1") and query.next():
-            policy = str(query.value(0) or "both").strip() or "both"
-        else:
-            policy = "both"
+        settings = load_sales_tax_settings_from_service()
+        policy = settings["policy"]
         index = self.sales_tax_policy_combo.findData(policy)
         self.sales_tax_policy_combo.setCurrentIndex(index if index >= 0 else 0)
 
@@ -267,19 +268,9 @@ class TaxSettingsWidget(QWidget):
         self.global_tax_combo.blockSignals(False)
 
     def load_global_sales_tax(self):
-        query = QSqlQuery()
-        if query.exec(
-            """
-            SELECT COALESCE(global_sales_tax_group_id, NULL), COALESCE(global_sales_tax_enabled, 0)
-            FROM accounting_settings
-            WHERE id = 1
-            """
-        ) and query.next():
-            selected_group_id = query.value(0)
-            enabled = bool(int(query.value(1) or 0))
-        else:
-            selected_group_id = None
-            enabled = False
+        settings = load_sales_tax_settings_from_service()
+        selected_group_id = settings["group_id"]
+        enabled = bool(settings["enabled"])
         self.populate_global_tax_combo(selected_group_id)
         self.global_tax_enabled_check.setChecked(enabled)
 
@@ -287,35 +278,17 @@ class TaxSettingsWidget(QWidget):
         sales_tax_policy = self.sales_tax_policy_combo.currentData()
         global_tax_group_id = self.global_tax_combo.currentData()
         global_tax_enabled = 1 if self.global_tax_enabled_check.isChecked() else 0
-
-        if global_tax_enabled and global_tax_group_id is None:
-            AppMessageBox.warning(self, "Validation Error", "Select a global sales tax group before enabling global tax.")
-            return False
-
-        policy_query = QSqlQuery()
-        policy_query.prepare(
-            """
-            INSERT INTO accounting_settings (
-                id,
-                sales_tax_policy,
-                global_sales_tax_group_id,
-                global_sales_tax_enabled,
-                updated_at
+        try:
+            save_sales_tax_settings_to_service(
+                policy=sales_tax_policy,
+                group_id=global_tax_group_id,
+                enabled=bool(global_tax_enabled),
             )
-            VALUES (1, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(id)
-            DO UPDATE SET
-                sales_tax_policy = excluded.sales_tax_policy,
-                global_sales_tax_group_id = excluded.global_sales_tax_group_id,
-                global_sales_tax_enabled = excluded.global_sales_tax_enabled,
-                updated_at = CURRENT_TIMESTAMP
-            """
-        )
-        policy_query.addBindValue(sales_tax_policy)
-        policy_query.addBindValue(global_tax_group_id)
-        policy_query.addBindValue(global_tax_enabled)
-        if not policy_query.exec():
-            AppMessageBox.error(self, "Save Failed", policy_query.lastError().text())
+        except ValueError as exc:
+            AppMessageBox.warning(self, "Validation Error", str(exc))
+            return False
+        except Exception as exc:
+            AppMessageBox.error(self, "Save Failed", str(exc))
             return False
 
         self.load_sales_tax_policy()
@@ -420,14 +393,6 @@ class TaxSettingsWidget(QWidget):
 
         status = self.status_combo.currentData()
         apply_on_sale = 1 if self.apply_on_sale_check.isChecked() else 0
-        sales_tax_policy = self.sales_tax_policy_combo.currentData()
-        global_tax_group_id = self.global_tax_combo.currentData()
-        global_tax_enabled = 1 if self.global_tax_enabled_check.isChecked() else 0
-
-        if global_tax_enabled and global_tax_group_id is None:
-            AppMessageBox.warning(self, "Validation Error", "Select a global sales tax group before enabling global tax.")
-            return
-
         query = QSqlQuery()
         if self.current_tax_group_id is None:
             query.prepare(

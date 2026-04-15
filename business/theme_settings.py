@@ -16,6 +16,10 @@ from utilities.app_messagebox import AppMessageBox
 from utilities.app_theme import DEFAULT_THEME, apply_app_theme, normalize_hex
 from utilities.permissions import Permissions
 from utilities.stylus import load_stylesheets
+from services.accounting_settings_service import (
+    load_theme_settings as load_theme_settings_from_service,
+    save_theme_settings as save_theme_settings_to_service,
+)
 
 
 class ThemeSettingsWidget(QWidget):
@@ -125,23 +129,9 @@ class ThemeSettingsWidget(QWidget):
         )
 
     def load_theme_settings(self):
-        query = QSqlQuery()
-        if query.exec(
-            """
-            SELECT
-                COALESCE(theme_primary_color, ?),
-                COALESCE(theme_sidebar_color, ?)
-            FROM accounting_settings
-            WHERE id = 1
-            """
-            .replace("?", f"'{DEFAULT_THEME['theme_primary_color']}'", 1)
-            .replace("?", f"'{DEFAULT_THEME['theme_sidebar_color']}'", 1)
-        ) and query.next():
-            self.primary_color = normalize_hex(query.value(0), DEFAULT_THEME["theme_primary_color"])
-            self.sidebar_color = normalize_hex(query.value(1), DEFAULT_THEME["theme_sidebar_color"])
-        else:
-            self.primary_color = DEFAULT_THEME["theme_primary_color"]
-            self.sidebar_color = DEFAULT_THEME["theme_sidebar_color"]
+        settings = load_theme_settings_from_service()
+        self.primary_color = normalize_hex(settings["theme_primary_color"], DEFAULT_THEME["theme_primary_color"])
+        self.sidebar_color = normalize_hex(settings["theme_sidebar_color"], DEFAULT_THEME["theme_sidebar_color"])
         self._apply_preview(self.primary_preview, self.primary_color)
         self._apply_preview(self.sidebar_preview, self.sidebar_color)
 
@@ -165,22 +155,13 @@ class ThemeSettingsWidget(QWidget):
 
     @Permissions.require_permission("business.update")
     def save_theme(self):
-        query = QSqlQuery()
-        query.prepare(
-            """
-            INSERT INTO accounting_settings (id, theme_primary_color, theme_sidebar_color, updated_at)
-            VALUES (1, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(id)
-            DO UPDATE SET
-                theme_primary_color = excluded.theme_primary_color,
-                theme_sidebar_color = excluded.theme_sidebar_color,
-                updated_at = CURRENT_TIMESTAMP
-            """
-        )
-        query.addBindValue(self.primary_color)
-        query.addBindValue(self.sidebar_color)
-        if not query.exec():
-            AppMessageBox.error(self, "Save Failed", query.lastError().text())
+        try:
+            save_theme_settings_to_service(
+                primary_color=self.primary_color,
+                sidebar_color=self.sidebar_color,
+            )
+        except Exception as exc:
+            AppMessageBox.error(self, "Save Failed", str(exc))
             return
 
         apply_app_theme()

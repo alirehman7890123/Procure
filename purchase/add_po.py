@@ -1,9 +1,9 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QDateEdit,
-    QComboBox, QTableWidget, QTableWidgetItem, QFrame, QMessageBox, QHeaderView,
-    QCompleter, QSizePolicy, QGridLayout, QCheckBox, QDialog
+    QComboBox, QTableWidget, QTableWidgetItem, QFrame, QHeaderView,
+    QSizePolicy, QGridLayout, QCheckBox, QDialog
 )
-from PySide6.QtCore import Qt, Signal, QDate, QTimer, QStringListModel
+from PySide6.QtCore import Qt, Signal, QDate
 from PySide6.QtSql import QSqlQuery, QSqlDatabase
 from PySide6.QtGui import QColor, QKeySequence, QShortcut, QIntValidator, QDoubleValidator
 from utilities.stylus import load_stylesheets
@@ -13,7 +13,20 @@ from utilities.session_service import get_active_session_id
 from utilities.permissions import Permissions
 from utilities.app_messagebox import AppMessageBox
 from utilities.product_search_widget import ProductSearchBox
-import re
+from services.purchase_order_service import (
+    build_purchase_order_header_payload,
+    compute_reorder_suggestion,
+    fetch_last_purchase_order_cost,
+    fetch_low_stock_products,
+    fetch_next_purchase_order_number,
+    fetch_pack_size,
+    fetch_product_reorder_level,
+    fetch_recent_sales_units,
+    insert_purchase_order_header,
+    insert_purchase_order_line,
+    normalize_po_number,
+    normalize_purchase_order_line_row,
+)
 
 
 class SelectAllLineEdit(QLineEdit):
@@ -211,6 +224,7 @@ class AddPOWidget(QWidget):
     """Create New Purchase Order Widget"""
 
     po_list_signal = Signal()
+    _default_reorder_hint = "When enabled, qty is suggested from product sales in the last 30 days."
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -506,7 +520,7 @@ class AddPOWidget(QWidget):
         if checked:
             self._suggest_reorder_qty(product_id)
         else:
-            self._reorder_hint.setText("When enabled, qty is suggested from product sales in the last 30 days.")
+            self._reorder_hint.setText(self._default_reorder_hint)
 
     def _handle_item_return_pressed(self, combo):
         text = combo.currentText().strip()
@@ -569,58 +583,14 @@ class AddPOWidget(QWidget):
     def _get_last_cost(self, product_id):
         if product_id is None:
             return None, None
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT rate
-            FROM purchaseitem
-            WHERE product = ?
-            ORDER BY id DESC
-            LIMIT 1
-        """)
-        query.addBindValue(product_id)
-        if query.exec() and query.next():
-            try:
-                return float(query.value(0) or 0.0), "invoice"
-            except (TypeError, ValueError):
-                pass
-
-        query.prepare("""
-            SELECT unit_price
-            FROM purchase_order_line
-            WHERE product = ?
-            ORDER BY id DESC
-            LIMIT 1
-        """)
-        query.addBindValue(product_id)
-        if query.exec() and query.next():
-            try:
-                return float(query.value(0) or 0.0), "po"
-            except (TypeError, ValueError):
-                pass
-
-        return None, None
+        return fetch_last_purchase_order_cost(product_id)
 
     def _get_reorder_level(self, product_id):
-        query = QSqlQuery()
-        query.prepare(
-            """
-            SELECT COALESCE(MAX(COALESCE(reorder_level, 0)), 0)
-            FROM price_pack
-            WHERE product_id = ?
-            """
-        )
-        query.addBindValue(product_id)
-        if query.exec() and query.next():
-            try:
-                return int(float(query.value(0) or 0))
-            except (TypeError, ValueError):
-                return 0
-        return 0
+        return fetch_product_reorder_level(product_id)
 
     def _suggest_reorder_qty(self, product_id):
         if not self._suggest_reorder_checkbox.isChecked():
-            self._reorder_hint.setText("When enabled, qty is suggested from product sales in the last 30 days.")
+            self._reorder_hint.setText(self._default_reorder_hint)
             return
 
         if product_id is None:
@@ -628,68 +598,27 @@ class AddPOWidget(QWidget):
             self._reorder_hint.setText("Suggested qty: -")
             return
 
-        query = QSqlQuery()
-        pack_query = QSqlQuery()
-        pack_query.prepare(
-            """
-            SELECT COALESCE(pack_size, 1)
-            FROM price_pack
-            WHERE product_id = ?
-            ORDER BY is_default DESC, id ASC
-            LIMIT 1
-            """
-        )
-        pack_query.addBindValue(product_id)
-
-        pack_size = 1
-        if pack_query.exec() and pack_query.next():
-            try:
-                pack_size = max(1, int(float(pack_query.value(0) or 1)))
-            except (TypeError, ValueError):
-                pack_size = 1
-
-        query.prepare(
-            """
-            SELECT COALESCE(SUM(COALESCE(si.qty_sold, 0)), 0)
-            FROM salesitem si
-            JOIN sales s ON s.id = si.sales_id
-            WHERE si.product_id = ?
-              AND DATE(s.creation_date) >= DATE('now', '-30 days')
-            """
-        )
-        query.addBindValue(product_id)
-
-        if not query.exec():
+        try:
+            suggestion = compute_reorder_suggestion(
+                suggested_units=fetch_recent_sales_units(product_id),
+                pack_size=fetch_pack_size(product_id),
+                reorder_level=self._get_reorder_level(product_id),
+            )
+        except Exception:
             self._reorder_hint.setText("Suggested qty unavailable.")
             return
 
-        suggested_units = 0
-        if query.next():
-            try:
-                suggested_units = int(float(query.value(0) or 0))
-            except (TypeError, ValueError):
-                suggested_units = 0
-
-        suggested_qty = 0
-        average_per_day = 0.0
-        if suggested_units > 0:
-            suggested_qty = max(1, (suggested_units + pack_size - 1) // pack_size)
-            average_per_day = suggested_units / 30.0
-
-        if suggested_qty > 0:
-            self._entry_qty.setText(str(suggested_qty))
+        if suggestion["suggested_qty"] > 0 and suggestion["source"] == "sales_30d":
+            self._entry_qty.setText(str(suggestion["suggested_qty"]))
             self._reorder_hint.setText(
-                f"Suggested qty: {suggested_qty} pack(s) from {suggested_units} unit sales in last 30 days | Avg/day: {average_per_day:.1f} unit(s)"
+                f"Suggested qty: {suggestion['suggested_qty']} pack(s) from {suggestion['suggested_units']} unit sales in last 30 days | Avg/day: {suggestion['average_per_day']:.1f} unit(s)"
             )
             return
 
-        reorder_query = QSqlQuery()
-        reorder_level = self._get_reorder_level(product_id)
-
-        if reorder_level > 0:
-            self._entry_qty.setText(str(reorder_level))
+        if suggestion["suggested_qty"] > 0 and suggestion["source"] == "reorder_level":
+            self._entry_qty.setText(str(suggestion["suggested_qty"]))
             self._reorder_hint.setText(
-                f"Suggested qty: {reorder_level} pack(s) from reorder level | Avg/day: 0.0 unit(s)"
+                f"Suggested qty: {suggestion['suggested_qty']} pack(s) from reorder level | Avg/day: 0.0 unit(s)"
             )
         else:
             self._entry_qty.clear()
@@ -699,6 +628,63 @@ class AddPOWidget(QWidget):
         widget.setFocus()
         if hasattr(widget, "selectAll"):
             widget.selectAll()
+
+    def _reset_entry_line(self):
+        self._entry_product.setCurrentIndex(-1)
+        self._entry_product.lineEdit().clear()
+        self._entry_qty.clear()
+        self._entry_price.clear()
+        self._entry_total.setText("0.00")
+        self._reorder_hint.setText(self._default_reorder_hint)
+
+    def _collect_entry_line_values(self):
+        product_name = self._entry_product.currentText().strip()
+        product_id = self._entry_product.currentData()
+        qty_text = self._entry_qty.text().strip()
+        price_text = self._entry_price.text().strip()
+        return {
+            "product_name": product_name,
+            "product_id": product_id,
+            "qty_text": qty_text,
+            "price_text": price_text,
+        }
+
+    def _build_entry_line_payload(self):
+        entry = self._collect_entry_line_values()
+        if not entry["product_name"]:
+            raise ValueError("Please select a product first.")
+        if entry["product_id"] is None:
+            raise ValueError("Product not found. Please add it to the product list first.")
+        if not entry["qty_text"] or entry["qty_text"] == "0":
+            raise ValueError("Packs cannot be empty or zero.")
+        if not entry["price_text"] or entry["price_text"] == "0":
+            raise ValueError("Cost per pack cannot be empty or zero.")
+
+        try:
+            return {
+                "product_id": entry["product_id"],
+                "product_name": entry["product_name"],
+                "qty": int(entry["qty_text"]),
+                "price": float(entry["price_text"]),
+            }
+        except ValueError:
+            raise ValueError("Packs must be whole numbers and cost must be numeric.")
+
+    def _row_widget(self, row, column):
+        return self.items_table.cellWidget(row, column)
+
+    def _collect_po_header_values(self):
+        return {
+            "supplier_id": self.supplier_combo.currentData(),
+            "po_date": self.po_date.date().toString("yyyy-MM-dd"),
+            "expected_delivery_date": self.delivery_date.date().toString("yyyy-MM-dd"),
+            "total_value": float(self.total_value_label.text() or 0.0),
+            "notes": (self.notes_edit.text() or "").strip(),
+        }
+
+    def _persist_po_lines(self, po_id, row_payloads):
+        for row_payload in row_payloads:
+            insert_purchase_order_line(po_id, row_payload)
 
     # ─────────────────────────────────────────────────────────────
     # Entry line helpers
@@ -717,56 +703,30 @@ class AddPOWidget(QWidget):
     # ─────────────────────────────────────────────────────────────
 
     def _add_row(self):
-        product_name = self._entry_product.currentText().strip()
-        product_id = self._entry_product.currentData()
-
-        if not product_name:
-            AppMessageBox.information(self, "Error", "Please select a product first.")
-            self._entry_product.setFocus()
-            return
-        if product_id is None:
-            AppMessageBox.information(
-                self, "Error",
-                "Product not found. Please add it to the product list first."
-            )
-            self._entry_product.setFocus()
-            return
-
-        qty_text = self._entry_qty.text().strip()
-        price_text = self._entry_price.text().strip()
-
-        if not qty_text or qty_text == "0":
-            AppMessageBox.information(self, "Error", "Packs cannot be empty or zero.")
-            self._entry_qty.setFocus()
-            return
-        if not price_text or price_text == "0":
-            AppMessageBox.information(self, "Error", "Cost per pack cannot be empty or zero.")
-            self._entry_price.setFocus()
-            return
-
         try:
-            qty = int(qty_text)
-            price = float(price_text)
-        except ValueError:
-            AppMessageBox.information(self, "Error", "Packs must be whole numbers and cost must be numeric.")
+            payload = self._build_entry_line_payload()
+        except ValueError as exc:
+            AppMessageBox.information(self, "Error", str(exc))
+            if "product" in str(exc).lower():
+                self._entry_product.setFocus()
+            elif "pack" in str(exc).lower():
+                self._entry_qty.setFocus()
+            else:
+                self._entry_price.setFocus()
             return
 
-        self._upsert_po_item_row(product_id, product_name, qty, price)
-
-        # reset entry line
-        self._entry_product.setCurrentIndex(-1)
-        self._entry_product.lineEdit().clear()
-        self._entry_qty.clear()
-        self._entry_price.clear()
-        self._entry_total.setText("0.00")
-        self._reorder_hint.setText(
-            "When enabled, qty is suggested from product sales in the last 30 days."
+        self._upsert_po_item_row(
+            payload["product_id"],
+            payload["product_name"],
+            payload["qty"],
+            payload["price"],
         )
+        self._reset_entry_line()
         self._entry_product.setFocus()
 
     def _find_existing_po_row(self, product_id):
         for row in range(self.items_table.rowCount()):
-            product_combo = self.items_table.cellWidget(row, 1)
+            product_combo = self._row_widget(row, 1)
             if product_combo and product_combo.currentData() == product_id:
                 return row
         return -1
@@ -816,14 +776,14 @@ class AddPOWidget(QWidget):
     def _upsert_po_item_row(self, product_id, product_name, qty, price):
         existing_row = self._find_existing_po_row(product_id)
         if existing_row >= 0:
-            qty_edit = self.items_table.cellWidget(existing_row, 2)
+            qty_edit = self._row_widget(existing_row, 2)
             if isinstance(qty_edit, QLineEdit):
                 try:
                     current_qty = int(qty_edit.text() or 0)
                 except ValueError:
                     current_qty = 0
                 qty_edit.setText(str(current_qty + qty))
-            price_edit = self.items_table.cellWidget(existing_row, 3)
+            price_edit = self._row_widget(existing_row, 3)
             if isinstance(price_edit, QLineEdit):
                 price_edit.setText(f"{price:.2f}")
             self._recalc_row(existing_row)
@@ -833,70 +793,7 @@ class AddPOWidget(QWidget):
         self._update_grand_total()
 
     def _fetch_low_stock_products(self):
-        query = QSqlQuery()
-        query.prepare(
-            """
-            SELECT
-                p.id,
-                COALESCE(p.display_name, '') AS product_name,
-                COALESCE(m.name, '') AS manufacturer_name,
-                COALESCE(bs.total_stock, 0) AS stock_qty,
-                COALESCE(pp.reorder_level, 0) AS reorder_level
-            FROM product p
-            LEFT JOIN manufacturer m ON p.manufacturer_id = m.id
-            LEFT JOIN (
-                SELECT product_id, COALESCE(SUM(quantity_remaining), 0) AS total_stock
-                FROM batch
-                GROUP BY product_id
-            ) bs ON bs.product_id = p.id
-            LEFT JOIN (
-                SELECT product_id, MAX(COALESCE(reorder_level, 0)) AS reorder_level
-                FROM price_pack
-                GROUP BY product_id
-            ) pp ON pp.product_id = p.id
-            WHERE p.status = 'used'
-              AND (
-                    COALESCE(bs.total_stock, 0) <= COALESCE(pp.reorder_level, 0)
-                    OR COALESCE(bs.total_stock, 0) <= 0
-                  )
-            ORDER BY COALESCE(m.name, 'Unassigned Manufacturer') ASC, COALESCE(p.display_name, '') ASC
-            """
-        )
-        if not query.exec():
-            raise Exception(query.lastError().text())
-
-        rows = []
-        while query.next():
-            product_id = query.value(0)
-            product_name = str(query.value(1) or "").strip()
-            manufacturer_name = str(query.value(2) or "").strip() or "Unassigned Manufacturer"
-            try:
-                stock_qty = int(float(query.value(3) or 0))
-            except (TypeError, ValueError):
-                stock_qty = 0
-            try:
-                reorder_level = int(float(query.value(4) or 0))
-            except (TypeError, ValueError):
-                reorder_level = 0
-            suggested_qty = max(reorder_level - stock_qty, 1) if reorder_level > stock_qty else 1
-            last_cost, _ = self._get_last_cost(product_id)
-            if stock_qty <= 0:
-                status_reason = "Out of stock"
-            elif reorder_level > 0:
-                status_reason = "Below reorder level"
-            else:
-                status_reason = "Low stock"
-            rows.append({
-                "product_id": product_id,
-                "product_name": product_name,
-                "manufacturer_name": manufacturer_name,
-                "stock_qty": stock_qty,
-                "reorder_level": reorder_level,
-                "suggested_qty": suggested_qty,
-                "last_cost": last_cost or 0.0,
-                "status_reason": status_reason,
-            })
-        return rows
+        return fetch_low_stock_products()
 
     def _open_low_stock_dialog(self):
         try:
@@ -939,9 +836,9 @@ class AddPOWidget(QWidget):
         )
 
     def _recalc_row(self, row):
-        qty_w  = self.items_table.cellWidget(row, 2)
-        price_w = self.items_table.cellWidget(row, 3)
-        total_w = self.items_table.cellWidget(row, 4)
+        qty_w = self._row_widget(row, 2)
+        price_w = self._row_widget(row, 3)
+        total_w = self._row_widget(row, 4)
         if not (qty_w and price_w and total_w):
             return
         try:
@@ -955,17 +852,17 @@ class AddPOWidget(QWidget):
     def _remove_row(self, target_row):
         self.items_table.removeRow(target_row)
         for row in range(self.items_table.rowCount()):
-            counter = self.items_table.cellWidget(row, 0)
+            counter = self._row_widget(row, 0)
             if isinstance(counter, QLabel):
                 counter.setText(str(row + 1))
-            qty_w = self.items_table.cellWidget(row, 2)
+            qty_w = self._row_widget(row, 2)
             if isinstance(qty_w, QLineEdit):
                 try:
                     qty_w.textChanged.disconnect()
                 except RuntimeError:
                     pass
                 qty_w.textChanged.connect(lambda _, r=row: self._recalc_row(r))
-            del_btn = self.items_table.cellWidget(row, 5)
+            del_btn = self._row_widget(row, 5)
             if isinstance(del_btn, QPushButton):
                 try:
                     del_btn.clicked.disconnect()
@@ -977,7 +874,7 @@ class AddPOWidget(QWidget):
     def _update_grand_total(self):
         total = 0.0
         for row in range(self.items_table.rowCount()):
-            w = self.items_table.cellWidget(row, 4)
+            w = self._row_widget(row, 4)
             if w:
                 try:
                     total += float(w.text())
@@ -998,24 +895,24 @@ class AddPOWidget(QWidget):
             self.supplier_combo.addItem(str(query.value(1)), query.value(0))
 
     def get_next_po_number(self):
-        query = QSqlQuery()
-        if not query.exec(
-            """
-            SELECT MAX(CAST(SUBSTR(po_number, 4) AS INTEGER))
-            FROM purchase_order
-            WHERE po_number LIKE 'PO-%'
-            """
-        ):
-            return "PO-1001"
+        return fetch_next_purchase_order_number()
 
-        next_no = 1001
-        if query.next() and query.value(0) is not None:
-            try:
-                next_no = max(int(query.value(0)) + 1, 1001)
-            except (TypeError, ValueError):
-                next_no = 1001
+    def _collect_po_rows(self):
+        rows = []
+        for row in range(self.items_table.rowCount()):
+            product_combo = self._row_widget(row, 1)
+            qty_widget = self._row_widget(row, 2)
+            price_widget = self._row_widget(row, 3)
 
-        return f"PO-{next_no}"
+            rows.append(
+                normalize_purchase_order_line_row(
+                    product_id=product_combo.currentData() if product_combo else None,
+                    qty=qty_widget.text() if qty_widget else "",
+                    unit_price=price_widget.text() if price_widget else "",
+                    row_number=row + 1,
+                )
+            )
+        return rows
 
     # ─────────────────────────────────────────────────────────────
     # Save PO
@@ -1036,20 +933,19 @@ class AddPOWidget(QWidget):
         if not po_number:
             po_number = self.get_next_po_number()
         else:
-            po_number = po_number.upper()
-            if not re.fullmatch(r"PO-\d+", po_number):
-                AppMessageBox.warning(
-                    self,
-                    "Invalid PO Number",
-                    "PO number must follow format PO-<digits>, e.g. PO-1001.",
-                )
+            try:
+                po_number = normalize_po_number(po_number)
+            except ValueError as exc:
+                AppMessageBox.warning(self, "Invalid PO Number", str(exc))
                 return
 
-        supplier_id = self.supplier_combo.currentData()
-        po_date = self.po_date.date().toString("yyyy-MM-dd")
-        expected_delivery = self.delivery_date.date().toString("yyyy-MM-dd")
-        total_value = float(self.total_value_label.text())
-        notes = (self.notes_edit.text() or "").strip()
+        header_values = self._collect_po_header_values()
+
+        try:
+            row_payloads = self._collect_po_rows()
+        except ValueError as exc:
+            AppMessageBox.warning(self, "Invalid Line Item", str(exc))
+            return
 
         db = QSqlDatabase.database()
         if not db.transaction():
@@ -1057,53 +953,18 @@ class AddPOWidget(QWidget):
             return
 
         try:
-            po_query = QSqlQuery()
             session_id = get_active_session_id(strict=True)
-
-            po_query.prepare("""
-                INSERT INTO purchase_order (po_number, supplier, po_date, expected_delivery_date, status, total_value, notes, session_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """)
-            po_query.addBindValue(po_number)
-            po_query.addBindValue(supplier_id)
-            po_query.addBindValue(po_date)
-            po_query.addBindValue(expected_delivery)
-            po_query.addBindValue("draft")
-            po_query.addBindValue(total_value)
-            po_query.addBindValue(notes)
-            po_query.addBindValue(session_id)
-
-            if not po_query.exec():
-                raise Exception(f"PO insert failed: {po_query.lastError().text()}")
-
-            po_id = po_query.lastInsertId()
-
-            for row in range(self.items_table.rowCount()):
-                product_combo = self.items_table.cellWidget(row, 1)
-                qty_widget    = self.items_table.cellWidget(row, 2)
-                price_widget  = self.items_table.cellWidget(row, 3)
-
-                product_id = product_combo.currentData()
-                try:
-                    qty = int(qty_widget.text())
-                    unit_price = float(price_widget.text())
-                except ValueError:
-                    raise Exception(f"Invalid numeric data on row {row + 1}.")
-                total_price = qty * unit_price
-
-                line_query = QSqlQuery()
-                line_query.prepare("""
-                    INSERT INTO purchase_order_line (po_id, product, qty_ordered, unit_price, total_price)
-                    VALUES (?, ?, ?, ?, ?)
-                """)
-                line_query.addBindValue(po_id)
-                line_query.addBindValue(product_id)
-                line_query.addBindValue(qty)
-                line_query.addBindValue(unit_price)
-                line_query.addBindValue(total_price)
-
-                if not line_query.exec():
-                    raise Exception(f"Line item insert failed: {line_query.lastError().text()}")
+            header_payload = build_purchase_order_header_payload(
+                po_number=po_number,
+                supplier_id=header_values["supplier_id"],
+                po_date=header_values["po_date"],
+                expected_delivery_date=header_values["expected_delivery_date"],
+                total_value=header_values["total_value"],
+                notes=header_values["notes"],
+                session_id=session_id,
+            )
+            po_id = insert_purchase_order_header(header_payload)
+            self._persist_po_lines(po_id, row_payloads)
 
             if not db.commit():
                 raise Exception("Failed to commit PO.")
@@ -1139,14 +1000,7 @@ class AddPOWidget(QWidget):
         self.notes_edit.clear()
         self.items_table.setRowCount(0)
         self.total_value_label.setText("0.00")
-        self._entry_product.setCurrentIndex(-1)
-        self._entry_product.lineEdit().clear()
-        self._entry_qty.clear()
-        self._entry_price.clear()
-        self._entry_total.setText("0.00")
-        self._reorder_hint.setText(
-            "When enabled, qty is suggested from product sales in the last 30 days."
-        )
+        self._reset_entry_line()
 
     def on_back_clicked(self):
         self.po_list_signal.emit()

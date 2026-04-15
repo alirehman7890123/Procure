@@ -19,6 +19,31 @@ from utilities.payment_handler import PaymentMethodHandler
 from utilities.permissions import Permissions
 from utilities.app_messagebox import AppMessageBox
 from sales.pricing_logic import compute_header_totals, compute_line_pricing
+from services.accounting_settings_service import load_sales_policy_settings
+from services.sales_defaults_service import resolve_sales_header_pricing
+from services.sales_posting_service import (
+    build_customer_transaction_note,
+    build_sales_header_payload,
+    compute_customer_transaction_balances,
+    compute_due_date_from_option,
+    resolve_sales_settlement,
+)
+from services.sales_items_service import (
+    compute_fifo_allocation_plan,
+    normalize_sales_item_row,
+)
+from services.sales_transaction_service import (
+    build_customer_transaction_payload,
+    decrement_batch_quantity,
+    fetch_customer_balances,
+    fetch_fifo_batch_rows,
+    fetch_total_available_stock,
+    insert_customer_transaction_record,
+    insert_sales_header,
+    insert_sales_item_record as persist_sales_item_record,
+    insert_sold_batch_record,
+    update_customer_running_balance,
+)
 
 
 
@@ -520,8 +545,31 @@ class CreateSalesWidget(QWidget):
         
         info_box_layout = QHBoxLayout()
         
-        info_btn = QPushButton("i")
-        info_btn.setFixedWidth(40)
+        info_btn = QPushButton("?")
+        info_btn.setObjectName("PricingInfoButton")
+        info_btn.setFixedSize(32, 32)
+        info_btn.setCursor(Qt.PointingHandCursor)
+        info_btn.setStyleSheet(
+            """
+            QPushButton#PricingInfoButton {
+                background-color: #EFF5FA;
+                color: #2F5D7C;
+                border: 1px solid #C8D8E5;
+                border-radius: 16px;
+                font-size: 13px;
+                font-weight: 700;
+                padding: 0;
+            }
+            QPushButton#PricingInfoButton:hover {
+                background-color: #DDECF7;
+                border-color: #9FBCD3;
+                color: #1F445D;
+            }
+            QPushButton#PricingInfoButton:pressed {
+                background-color: #CFE3F2;
+            }
+            """
+        )
         info_btn.setToolTip("Show pricing details")
         info_btn.clicked.connect(self.show_pricing_details_dialog)
         self.line_pricing_info_btn = info_btn
@@ -1295,11 +1343,7 @@ class CreateSalesWidget(QWidget):
             )
 
     def load_sales_discount_policy(self):
-        query = QSqlQuery()
-        if query.exec("SELECT sales_discount_policy FROM accounting_settings WHERE id = 1") and query.next():
-            self.sales_discount_policy = str(query.value(0) or "both").strip() or "both"
-        else:
-            self.sales_discount_policy = "both"
+        self.sales_discount_policy = load_sales_policy_settings()["discount_policy"]
         return self.sales_discount_policy
 
     def _line_discount_enabled_by_policy(self):
@@ -1317,11 +1361,7 @@ class CreateSalesWidget(QWidget):
         return mapping.get(self.sales_discount_policy, "Both")
 
     def load_sales_tax_policy(self):
-        query = QSqlQuery()
-        if query.exec("SELECT sales_tax_policy FROM accounting_settings WHERE id = 1") and query.next():
-            self.sales_tax_policy = str(query.value(0) or "both").strip() or "both"
-        else:
-            self.sales_tax_policy = "both"
+        self.sales_tax_policy = load_sales_policy_settings()["tax_policy"]
         return self.sales_tax_policy
 
     def _line_tax_enabled_by_policy(self):
@@ -1954,6 +1994,12 @@ class CreateSalesWidget(QWidget):
         self.load_sales_tax_policy()
         customer_id = self.get_customer_id()
         has_pricing_fields = hasattr(self, "discount_entry") and hasattr(self, "tax_entry")
+        self.discount_group_manual_override = False
+        self.tax_group_manual_override = False
+        resolved = resolve_sales_header_pricing(customer_id)
+        self.sales_discount_policy = resolved["policies"]["discount_policy"]
+        self.sales_tax_policy = resolved["policies"]["tax_policy"]
+
         print(
             "[SALES][PRICING] Re-evaluating pricing defaults:",
             {
@@ -1963,44 +2009,58 @@ class CreateSalesWidget(QWidget):
             }
         )
 
-        self.discount_group_manual_override = False
-        self.tax_group_manual_override = False
-        self.active_discount_group_id = None
-        self.active_discount_group_name = ""
-        self.active_discount_percent = 0.0
-        self.active_discount_fixed_amount = 0.0
-        self.active_discount_apply_on_sale = False
-        self.active_discount_source = "none"
-        self.active_tax_group_id = None
-        self.active_tax_group_name = ""
-        self.active_tax_percent = 0.0
-        self.active_tax_fixed_amount = 0.0
-        self.active_tax_apply_on_sale = False
-        self.active_tax_source = "none"
+        discount_defaults = resolved["discount"]
+        tax_defaults = resolved["tax"]
+        global_discount_meta = resolved["global_discount_meta"]
+        global_tax_meta = resolved["global_tax_meta"]
 
-        global_discount = self.load_global_sales_discount()
-        if global_discount:
-            self.active_discount_group_id = global_discount["group_id"]
-            self.active_discount_group_name = global_discount["name"]
-            self.active_discount_percent = global_discount["percent"]
-            self.active_discount_fixed_amount = global_discount["fixed_amount"]
-            self.active_discount_apply_on_sale = global_discount["apply_on_sale"]
-            self.active_discount_source = "global_promo"
-            print("[SALES][GLOBAL] Loaded global promo discount:", global_discount)
-        else:
-            print("[SALES][GLOBAL] No active global promo discount found.")
+        self.active_discount_group_id = discount_defaults["group_id"]
+        self.active_discount_group_name = discount_defaults["name"]
+        self.active_discount_percent = discount_defaults["percent"]
+        self.active_discount_fixed_amount = discount_defaults["fixed_amount"]
+        self.active_discount_apply_on_sale = discount_defaults["apply_on_sale"]
+        self.active_discount_source = discount_defaults["source"]
 
-        global_tax = self.load_global_sales_tax()
-        if global_tax:
-            self.active_tax_group_id = global_tax["group_id"]
-            self.active_tax_group_name = global_tax["name"]
-            self.active_tax_percent = global_tax["percent"]
-            self.active_tax_fixed_amount = global_tax["fixed_amount"]
-            self.active_tax_apply_on_sale = global_tax["apply_on_sale"]
-            self.active_tax_source = "global_tax"
-            print("[SALES][GLOBAL] Loaded global sales tax:", global_tax)
+        self.active_tax_group_id = tax_defaults["group_id"]
+        self.active_tax_group_name = tax_defaults["name"]
+        self.active_tax_percent = tax_defaults["percent"]
+        self.active_tax_fixed_amount = tax_defaults["fixed_amount"]
+        self.active_tax_apply_on_sale = tax_defaults["apply_on_sale"]
+        self.active_tax_source = tax_defaults["source"]
+
+        if global_discount_meta["state"] == "ok":
+            print("[SALES][GLOBAL] Loaded global promo discount:", global_discount_meta["data"])
+        elif global_discount_meta["state"] == "disabled":
+            print(
+                "[SALES][GLOBAL] Global promo discount is disabled in accounting_settings.",
+                {"selected_group_id": global_discount_meta.get("selected_group_id")}
+            )
+        elif global_discount_meta["state"] == "enabled_without_selection":
+            print("[SALES][GLOBAL] Global promo discount is enabled, but no discount group is selected.")
+        elif global_discount_meta["state"] == "group_unresolved":
+            print(
+                "[SALES][GLOBAL] Global promo discount is enabled, but the selected discount group could not be resolved.",
+                {"selected_group_id": global_discount_meta.get("selected_group_id")}
+            )
         else:
-            print("[SALES][GLOBAL] No active global sales tax found.")
+            print("[SALES][GLOBAL] No accounting_settings row found for discount settings.")
+
+        if global_tax_meta["state"] == "ok":
+            print("[SALES][GLOBAL] Loaded global sales tax:", global_tax_meta["data"])
+        elif global_tax_meta["state"] == "disabled":
+            print(
+                "[SALES][GLOBAL] Global sales tax is disabled in accounting_settings.",
+                {"selected_group_id": global_tax_meta.get("selected_group_id")}
+            )
+        elif global_tax_meta["state"] == "enabled_without_selection":
+            print("[SALES][GLOBAL] Global sales tax is enabled, but no tax group is selected.")
+        elif global_tax_meta["state"] == "group_unresolved":
+            print(
+                "[SALES][GLOBAL] Global sales tax is enabled, but the selected tax group could not be resolved.",
+                {"selected_group_id": global_tax_meta.get("selected_group_id")}
+            )
+        else:
+            print("[SALES][GLOBAL] No accounting_settings row found for tax settings.")
 
         if customer_id is None:
             if has_pricing_fields:
@@ -2014,73 +2074,29 @@ class CreateSalesWidget(QWidget):
                 self.update_total_amount()
             return
 
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                dg.id,
-                COALESCE(dg.name, ''),
-                COALESCE(dg.discount_percent, 0),
-                COALESCE(dg.fixed_amount, 0),
-                COALESCE(dg.apply_on_sale, 1),
-                tg.id,
-                COALESCE(tg.name, ''),
-                CASE WHEN COALESCE(tg.apply_on_sale, 1) = 1 THEN COALESCE(tg.tax_percent, 0) ELSE 0 END,
-                COALESCE(tg.fixed_amount, 0),
-                COALESCE(tg.apply_on_sale, 1)
-            FROM customer c
-            LEFT JOIN discount_group dg ON dg.id = c.discount_group_id
-            LEFT JOIN tax_group tg ON tg.id = c.tax_group_id
-            WHERE c.id = ?
-        """)
-        query.addBindValue(customer_id)
+        if self.active_discount_source == "customer_default":
+            print(
+                "[SALES][PRICING] Using customer discount defaults:",
+                {
+                    "group_id": self.active_discount_group_id,
+                    "name": self.active_discount_group_name,
+                    "percent": self.active_discount_percent,
+                    "fixed_amount": self.active_discount_fixed_amount,
+                    "apply_on_sale": self.active_discount_apply_on_sale,
+                }
+            )
 
-        if query.exec() and query.next():
-            customer_discount_group_id = query.value(0)
-            customer_discount_group_name = str(query.value(1) or "")
-            customer_discount_percent = float(query.value(2) or 0.0)
-            customer_discount_fixed_amount = float(query.value(3) or 0.0)
-            customer_discount_apply_on_sale = bool(int(query.value(4) or 0))
-            customer_tax_group_id = query.value(5)
-            customer_tax_group_name = str(query.value(6) or "")
-            customer_tax_percent = float(query.value(7) or 0.0)
-            customer_tax_fixed_amount = float(query.value(8) or 0.0)
-            customer_tax_apply_on_sale = bool(int(query.value(9) or 0))
-
-            if self.active_discount_source != "global_promo":
-                self.active_discount_group_id = customer_discount_group_id
-                self.active_discount_group_name = customer_discount_group_name
-                self.active_discount_percent = customer_discount_percent
-                self.active_discount_fixed_amount = customer_discount_fixed_amount
-                self.active_discount_apply_on_sale = customer_discount_apply_on_sale
-                self.active_discount_source = "customer_default" if customer_discount_group_id is not None else "none"
-                print(
-                    "[SALES][PRICING] Using customer discount defaults:",
-                    {
-                        "group_id": customer_discount_group_id,
-                        "name": customer_discount_group_name,
-                        "percent": customer_discount_percent,
-                        "fixed_amount": customer_discount_fixed_amount,
-                        "apply_on_sale": customer_discount_apply_on_sale,
-                    }
-                )
-
-            if self.active_tax_source != "global_tax":
-                self.active_tax_group_id = customer_tax_group_id
-                self.active_tax_group_name = customer_tax_group_name
-                self.active_tax_percent = customer_tax_percent
-                self.active_tax_fixed_amount = customer_tax_fixed_amount
-                self.active_tax_apply_on_sale = customer_tax_apply_on_sale
-                self.active_tax_source = "customer_default" if customer_tax_group_id is not None else "none"
-                print(
-                    "[SALES][PRICING] Using customer tax defaults:",
-                    {
-                        "group_id": customer_tax_group_id,
-                        "name": customer_tax_group_name,
-                        "percent": customer_tax_percent,
-                        "fixed_amount": customer_tax_fixed_amount,
-                        "apply_on_sale": customer_tax_apply_on_sale,
-                    }
-                )
+        if self.active_tax_source == "customer_default":
+            print(
+                "[SALES][PRICING] Using customer tax defaults:",
+                {
+                    "group_id": self.active_tax_group_id,
+                    "name": self.active_tax_group_name,
+                    "percent": self.active_tax_percent,
+                    "fixed_amount": self.active_tax_fixed_amount,
+                    "apply_on_sale": self.active_tax_apply_on_sale,
+                }
+            )
 
         if has_pricing_fields and (self.active_discount_group_id is None or not self._header_discount_enabled_by_policy()):
             self.discount_entry.blockSignals(True)
@@ -2173,118 +2189,6 @@ class CreateSalesWidget(QWidget):
                 tax_status = "Global Tax: Off"
 
             self.global_pricing_status.setText(f"{discount_status} | {tax_status}")
-
-    def load_global_sales_discount(self):
-        query = QSqlQuery()
-        query.prepare(
-            """
-            SELECT
-                COALESCE(a.global_sales_discount_enabled, 0),
-                a.global_sales_discount_group_id,
-                dg.id,
-                COALESCE(dg.name, ''),
-                COALESCE(dg.discount_percent, 0),
-                COALESCE(dg.fixed_amount, 0),
-                COALESCE(dg.apply_on_sale, 1)
-            FROM accounting_settings a
-            LEFT JOIN discount_group dg ON dg.id = a.global_sales_discount_group_id
-            WHERE a.id = 1
-            LIMIT 1
-            """
-        )
-        if not query.exec():
-            print("[SALES][GLOBAL] Discount query failed:", query.lastError().text())
-            return None
-
-        if not query.next():
-            print("[SALES][GLOBAL] No accounting_settings row found for discount settings.")
-            return None
-
-        enabled = bool(int(query.value(0) or 0))
-        selected_group_id = query.value(1)
-        resolved_group_id = query.value(2)
-
-        if not enabled:
-            print(
-                "[SALES][GLOBAL] Global promo discount is disabled in accounting_settings.",
-                {"selected_group_id": selected_group_id}
-            )
-            return None
-
-        if selected_group_id in (None, ""):
-            print("[SALES][GLOBAL] Global promo discount is enabled, but no discount group is selected.")
-            return None
-
-        if resolved_group_id in (None, ""):
-            print(
-                "[SALES][GLOBAL] Global promo discount is enabled, but the selected discount group could not be resolved.",
-                {"selected_group_id": selected_group_id}
-            )
-            return None
-
-        return {
-            "group_id": resolved_group_id,
-            "name": str(query.value(3) or ""),
-            "percent": float(query.value(4) or 0.0),
-            "fixed_amount": float(query.value(5) or 0.0),
-            "apply_on_sale": bool(int(query.value(6) or 0)),
-        }
-
-    def load_global_sales_tax(self):
-        query = QSqlQuery()
-        query.prepare(
-            """
-            SELECT
-                COALESCE(a.global_sales_tax_enabled, 0),
-                a.global_sales_tax_group_id,
-                tg.id,
-                COALESCE(tg.name, ''),
-                COALESCE(tg.tax_percent, 0),
-                COALESCE(tg.fixed_amount, 0),
-                COALESCE(tg.apply_on_sale, 1)
-            FROM accounting_settings a
-            LEFT JOIN tax_group tg ON tg.id = a.global_sales_tax_group_id
-            WHERE a.id = 1
-            LIMIT 1
-            """
-        )
-        if not query.exec():
-            print("[SALES][GLOBAL] Tax query failed:", query.lastError().text())
-            return None
-
-        if not query.next():
-            print("[SALES][GLOBAL] No accounting_settings row found for tax settings.")
-            return None
-
-        enabled = bool(int(query.value(0) or 0))
-        selected_group_id = query.value(1)
-        resolved_group_id = query.value(2)
-
-        if not enabled:
-            print(
-                "[SALES][GLOBAL] Global sales tax is disabled in accounting_settings.",
-                {"selected_group_id": selected_group_id}
-            )
-            return None
-
-        if selected_group_id in (None, ""):
-            print("[SALES][GLOBAL] Global sales tax is enabled, but no tax group is selected.")
-            return None
-
-        if resolved_group_id in (None, ""):
-            print(
-                "[SALES][GLOBAL] Global sales tax is enabled, but the selected tax group could not be resolved.",
-                {"selected_group_id": selected_group_id}
-            )
-            return None
-
-        return {
-            "group_id": resolved_group_id,
-            "name": str(query.value(3) or ""),
-            "percent": float(query.value(4) or 0.0),
-            "fixed_amount": float(query.value(5) or 0.0),
-            "apply_on_sale": bool(int(query.value(6) or 0)),
-        }
         
         
         
@@ -2324,8 +2228,6 @@ class CreateSalesWidget(QWidget):
             received = self._parse_float_field(self.received_entry.text(), "Received", 0.0)
             remaining = self._parse_float_field(self.remainingdata.text(), "Remaining Amount", 0.0)
             
-            due_date = None  # Will be set if receiveable amount exists
-
             print("[SALES][HEADER] Starting sales receipt insert")
             print(
                 "[SALES][HEADER] Raw UI values:",
@@ -2373,70 +2275,43 @@ class CreateSalesWidget(QWidget):
                 AppMessageBox.warning(self, "Validation Error", "No active session found.")
                 return None
 
-            writeoff = payable = receiveable = 0.0
-
-            if remaining > 0:
-                if self.writeoff_check.isChecked():
-                    writeoff = remaining
-                    due_date = None
-                else:
-                    if customer_id is None:
-                        AppMessageBox.warning(
-                            self,
-                            "Error",
-                            "Walk-In Customer Can't Have Remaining Amount\nReceive Full amount or Write off"
-                        )
-                        return None
-                    receiveable = remaining
-                    due_date = self.compute_due_date()
-
-            elif remaining < 0:
-                payable = abs(remaining)
-
-            if customer_id is None:
-                payable = receiveable = 0.0
-                due_date = None
-
-            if not self.confirm_customer_credit_limit(customer_id, receiveable):
+            try:
+                settlement = resolve_sales_settlement(
+                    customer_id=customer_id,
+                    remaining=remaining,
+                    writeoff_enabled=self.writeoff_check.isChecked(),
+                    due_date_option_text=self.due_date_combo.currentText(),
+                )
+            except ValueError as exc:
+                AppMessageBox.warning(self, "Error", str(exc))
                 return None
 
-            print("Writeoff:", writeoff)
-            print("Payable:", payable)
-            print("Receiveables:", receiveable)
-
-            query = QSqlQuery()
-            query.prepare("""
-                INSERT INTO sales
-                (customer, salesman, subtotal, discount, taxable, tax,
-                net_amount, additional_charges, total, received,
-                remaining, writeoff, payable, receiveable, session_id, due_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """)
-
-    
-
-            query.addBindValue(customer_id)
-            query.addBindValue(salesman)
-            query.addBindValue(subtotal)
-            query.addBindValue(discount)
-            query.addBindValue(taxable)
-            query.addBindValue(tax)
-            query.addBindValue(net_amount)
-            query.addBindValue(additional_charges)
-            query.addBindValue(total)
-            query.addBindValue(received)
-            query.addBindValue(remaining)
-            query.addBindValue(writeoff)
-            query.addBindValue(payable)
-            query.addBindValue(receiveable)
-            query.addBindValue(session_id)
-            query.addBindValue(due_date)
-
-            if not query.exec():
-                AppMessageBox.error(self, "Database Error", query.lastError().text())
+            if not self.confirm_customer_credit_limit(customer_id, settlement["receiveable"]):
                 return None
 
-            sales_id = query.lastInsertId()
+            header_payload = build_sales_header_payload(
+                customer_id=customer_id,
+                salesman_id=salesman,
+                subtotal=subtotal,
+                discount=discount,
+                taxable=taxable,
+                tax=tax,
+                net_amount=net_amount,
+                additional_charges=additional_charges,
+                total=total,
+                received=received,
+                remaining=remaining,
+                session_id=session_id,
+                settlement=settlement,
+            )
+
+            print("[SALES][HEADER] Settlement:", settlement)
+            print("[SALES][HEADER] Header payload:", header_payload)
+            try:
+                sales_id = insert_sales_header(header_payload)
+            except Exception as exc:
+                AppMessageBox.error(self, "Database Error", str(exc))
+                return None
             print("Sales record inserted. ID:", sales_id)
             print(f"[SALES][HEADER] Sales header persisted successfully with sales_id={sales_id}")
 
@@ -2528,29 +2403,17 @@ class CreateSalesWidget(QWidget):
         # default values for walk-in / no customer
         payable_before = 0.0
         receiveable_before = 0.0
-        payable_now = 0.0
-        receiveable_now = 0.0
-        paid = 0.0
-        remaining_due = 0.0
-        remaining_now = 0.0
-        payable_after = 0.0
-        receiveable_after = 0.0
+        balance_state = compute_customer_transaction_balances(
+            payable_before=0.0,
+            receiveable_before=0.0,
+            remaining=remaining,
+        )
 
         # only fetch/update balances if customer exists
         if customer_id is not None:
-            balance_query = QSqlQuery()
-            balance_query.prepare("""
-                SELECT payable, receiveable
-                FROM customer
-                WHERE id = ?
-            """)
-            balance_query.addBindValue(customer_id)
-
-            if not balance_query.exec() or not balance_query.next():
-                raise Exception("Failed to fetch customer balance.")
-
-            payable_before = float(balance_query.value(0) or 0.0)
-            receiveable_before = float(balance_query.value(1) or 0.0)
+            existing_balances = fetch_customer_balances(customer_id)
+            payable_before = existing_balances["payable_before"]
+            receiveable_before = existing_balances["receiveable_before"]
             print(
                 "[SALES][TXN] Customer balances before:",
                 {
@@ -2559,24 +2422,20 @@ class CreateSalesWidget(QWidget):
                 }
             )
 
-            if remaining > 0:
-                receiveable_now = float(remaining)
-                remaining_now = float(remaining)
-            elif remaining < 0:
-                payable_now = abs(float(remaining))
-                remaining_due = abs(float(remaining))
-
-            payable_after = payable_before + payable_now
-            receiveable_after = receiveable_before + receiveable_now
+            balance_state = compute_customer_transaction_balances(
+                payable_before=payable_before,
+                receiveable_before=receiveable_before,
+                remaining=remaining,
+            )
             print(
                 "[SALES][TXN] Customer balance movement:",
                 {
-                    "payable_now": payable_now,
-                    "receiveable_now": receiveable_now,
-                    "remaining_due": remaining_due,
-                    "remaining_now": remaining_now,
-                    "payable_after": payable_after,
-                    "receiveable_after": receiveable_after,
+                    "payable_now": balance_state["payable_now"],
+                    "receiveable_now": balance_state["receiveable_now"],
+                    "remaining_due": balance_state["remaining_due"],
+                    "remaining_now": balance_state["remaining_now"],
+                    "payable_after": balance_state["payable_after"],
+                    "receiveable_after": balance_state["receiveable_after"],
                 }
             )
 
@@ -2590,81 +2449,128 @@ class CreateSalesWidget(QWidget):
         print("Payment data is as above")
         print("[SALES][TXN] Normalized payment data:", payment)
 
-        note = (
-            f"Sale ID {sales_id} recorded with total {total_amount}, "
-            f"received {received}, remaining {remaining}"
+        note = build_customer_transaction_note(
+            sales_id=sales_id,
+            total_amount=total_amount,
+            received=received,
+            remaining=remaining,
         )
+        txn_payload = build_customer_transaction_payload(
+            sales_id=sales_id,
+            customer_id=customer_id,
+            total_amount=self._float_or_default(total_amount, 0.0),
+            received=self._float_or_default(received, 0.0),
+            salesman_id=salesman_id,
+            session_id=session_id,
+            payment=payment,
+            note=note,
+            balance_state=balance_state,
+        )
+        transaction_id = insert_customer_transaction_record(txn_payload)
 
-        insert_txn = QSqlQuery()
-        insert_txn.prepare("""
-            INSERT INTO customer_transaction
-            (
-                customer, transaction_type, ref, return_ref,
-                payable_before, due_amount, paid, remaining_due, payable_after,
-                receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
-                payment_method, bank_name, account_no, transaction_mode,
-                wallet_provider, wallet_no, payment_reference,
-                salesman, note, session_id
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """)
-
-        insert_txn.addBindValue(customer_id)   # None becomes NULL
-        insert_txn.addBindValue("SALE")
-        insert_txn.addBindValue(sales_id)
-        insert_txn.addBindValue(None)
-
-        insert_txn.addBindValue(payable_before)
-        insert_txn.addBindValue(self._float_or_default(total_amount, 0.0))
-        insert_txn.addBindValue(paid)
-        insert_txn.addBindValue(remaining_due)
-        insert_txn.addBindValue(payable_after)
-
-        insert_txn.addBindValue(receiveable_before)
-        insert_txn.addBindValue(receiveable_now)
-        insert_txn.addBindValue(self._float_or_default(received, 0.0))
-        insert_txn.addBindValue(remaining_now)
-        insert_txn.addBindValue(receiveable_after)
-
-        insert_txn.addBindValue(payment.get("payment_method") or None)
-        insert_txn.addBindValue(payment.get("bank_name") or None)
-        insert_txn.addBindValue(payment.get("account_no") or None)
-        insert_txn.addBindValue(payment.get("transaction_mode") or None)
-        insert_txn.addBindValue(payment.get("wallet_provider") or None)
-        insert_txn.addBindValue(payment.get("wallet_no") or None)
-        insert_txn.addBindValue(payment.get("payment_reference") or None)
-
-        insert_txn.addBindValue(salesman_id)
-        insert_txn.addBindValue(note)
-        insert_txn.addBindValue(session_id)
-
-        if not insert_txn.exec():
-            raise Exception(insert_txn.lastError().text())
-
-        print("Transaction Stored with ID:", insert_txn.lastInsertId())
+        print("Transaction Stored with ID:", transaction_id)
         print(f"[SALES][TXN] Customer transaction persisted for sales_id={sales_id}")
 
         # only update customer running balance if linked customer exists
         if customer_id is not None:
-            update_customer = QSqlQuery()
-            update_customer.prepare("""
-                UPDATE customer
-                SET payable = ?, receiveable = ?
-                WHERE id = ?
-            """)
-            update_customer.addBindValue(payable_after)
-            update_customer.addBindValue(receiveable_after)
-            update_customer.addBindValue(customer_id)
-
-            if not update_customer.exec():
-                raise Exception(update_customer.lastError().text())
+            update_customer_running_balance(
+                customer_id,
+                payable_after=balance_state["payable_after"],
+                receiveable_after=balance_state["receiveable_after"],
+            )
 
         return True
-    
-        
-    
-        
-        
+
+    def _sales_row_widget_text(self, widget, field_name, row):
+        if widget is None:
+            raise Exception(f"Row {row + 1}: {field_name} widget is missing.")
+        return widget.text().strip()
+
+    def _collect_sales_item_header_values(self):
+        def safe_text(line_edit):
+            return line_edit.text().strip() if line_edit else ""
+
+        subtotal = self._float_or_default(safe_text(self.gross_entry), 0.0)
+        header_discount = self._float_or_default(safe_text(self.discount_entry), 0.0)
+        header_tax = self._float_or_default(safe_text(self.tax_entry), 0.0)
+        additional_charges = self._float_or_default(safe_text(self.additional_entry), 0.0)
+
+        return subtotal, header_discount, header_tax, additional_charges
+
+    def _persist_sales_item_record(self, sales_id, row_payload):
+        sale_item_id = persist_sales_item_record(sales_id, row_payload)
+        print("[SALES][ITEMS] salesitem insert payload:", {"sales_id": sales_id, **row_payload})
+        return sale_item_id
+
+    def _allocate_sales_fifo_batches(self, product_id, sale_item_id, qty_needed, row_number):
+        print(
+            f"[SALES][FIFO] Starting FIFO allocation for row={row_number}, "
+            f"product_id={product_id}, sale_item_id={sale_item_id}, qty_needed={qty_needed}"
+        )
+
+        batch_rows = fetch_fifo_batch_rows(product_id)
+        allocation_result = compute_fifo_allocation_plan(batch_rows, qty_needed)
+
+        for allocation in allocation_result["allocations"]:
+            batch_id = allocation["batch_id"]
+            available = allocation["available"]
+            unit_cost = allocation["unit_cost"]
+            take_qty = allocation["take_qty"]
+            line_cost = allocation["line_cost"]
+
+            if allocation["invalid_cost"]:
+                print(
+                    f"[SALES][FIFO][WARN] Invalid batch.unit_cost encountered for "
+                    f"batch_id={batch_id}, row={row_number}, raw_cost={allocation['raw_cost']!r}"
+                )
+            print(
+                "[SALES][FIFO] Batch candidate:",
+                {
+                    "row": row_number,
+                    "batch_id": batch_id,
+                    "available": available,
+                    "raw_cost": allocation["raw_cost"],
+                    "unit_cost": unit_cost,
+                    "remaining_qty_before": take_qty + allocation["remaining_after"],
+                }
+            )
+            print(
+                "Batch Data:",
+                "Batch ID:", batch_id,
+                "Available:", available,
+                "Unit Cost:", unit_cost,
+                "Taking Qty:", take_qty,
+                "Line Cost:", line_cost
+            )
+
+            decrement_batch_quantity(batch_id, take_qty)
+            print(
+                f"[SALES][FIFO] Batch updated: batch_id={batch_id}, "
+                f"deducted={take_qty}, remaining_after_update_should_be={available - take_qty}"
+            )
+            insert_sold_batch_record(sale_item_id, allocation)
+            print(
+                "[SALES][FIFO] sold_batch inserted:",
+                {
+                    "sale_item_id": sale_item_id,
+                    "batch_id": batch_id,
+                    "qty_taken": take_qty,
+                    "unit_cost": unit_cost,
+                    "line_cost": line_cost,
+                }
+            )
+            print(f"[SALES][FIFO] Remaining qty after batch {batch_id}: {allocation['remaining_after']}")
+
+        if allocation_result["remaining_qty"] > 0:
+            raise Exception(
+                f"FIFO allocation failed for product ID {product_id}. "
+                f"Unallocated qty: {allocation_result['remaining_qty']}"
+            )
+        print(
+            f"[SALES][FIFO] FIFO allocation completed for row={row_number}, "
+            f"product_id={product_id}, sale_item_id={sale_item_id}"
+        )
+
     def thermal_receipt_printer(self, sales_id):
         filename = "salesinvoice_thermal.pdf"
         return self.export_thermal_pdf(filename=filename, sales_id=sales_id)
@@ -2686,9 +2592,7 @@ class CreateSalesWidget(QWidget):
         if line_query.exec() and line_query.next():
             line_tax = float(line_query.value(0) or 0.0)
 
-        policy_query = QSqlQuery()
-        if policy_query.exec("SELECT sales_tax_policy FROM accounting_settings WHERE id = 1") and policy_query.next():
-            policy = str(policy_query.value(0) or "both").strip() or "both"
+        policy = load_sales_policy_settings()["tax_policy"]
 
         return {
             "line_tax": line_tax,
@@ -2906,268 +2810,7 @@ class CreateSalesWidget(QWidget):
     
         print("About to INSERT sales items with FIFO allocation for sales ID:", sales_id)
         print(f"[SALES][ITEMS] Starting item processing for sales_id={sales_id}")
-
-        def text_from_widget(widget, field_name, row):
-            if widget is None:
-                raise Exception(f"Row {row + 1}: {field_name} widget is missing.")
-            text = widget.text().strip()
-            return text
-
-        def to_int(text, field_name, row):
-            try:
-                cleaned = self._clean_numeric_text(text)
-                if cleaned == "":
-                    raise ValueError
-                return int(float(cleaned))
-            except (TypeError, ValueError):
-                raise Exception(f"Row {row + 1}: Invalid {field_name}.")
-
-        def to_float(text, field_name, row, default=0.0):
-            cleaned = self._clean_numeric_text(text)
-            if cleaned == "":
-                return default
-            try:
-                return float(cleaned)
-            except (TypeError, ValueError):
-                raise Exception(f"Row {row + 1}: Invalid {field_name}.")
-
-        def to_db_float(value, default=None):
-            cleaned = self._clean_numeric_text(value)
-            if cleaned == "":
-                return default
-            try:
-                return float(cleaned)
-            except (TypeError, ValueError):
-                return default
-
-        def get_total_available_stock(product_id):
-            query = QSqlQuery()
-            query.prepare("""
-                SELECT COALESCE(SUM(quantity_remaining), 0)
-                FROM batch
-                WHERE product_id = ?
-                AND quantity_remaining > 0
-                AND (
-                    expiry_date IS NULL
-                    OR (
-                        CASE
-                            WHEN expiry_date LIKE '____-__-__' THEN date(expiry_date)
-                            WHEN expiry_date LIKE '__-__-____'
-                                THEN date(substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2))
-                            ELSE NULL
-                        END
-                    ) >= date('now', 'localtime')
-                )
-            """)
-            query.addBindValue(product_id)
-
-            if not query.exec() or not query.next():
-                raise Exception(f"Stock check failed for product ID {product_id}.")
-
-            total_available = int(query.value(0) or 0)
-            print(f"[SALES][STOCK] Product {product_id} total available stock: {total_available}")
-            return total_available
-
-
-        def insert_sales_item_record(
-            sales_id, product_id, qty, rate, discount, tax,
-            discount_amount, tax_amount, discount_input_mode,
-            default_discount_group_id, default_tax_group_id,
-            discount_group_id, tax_group_id, discount_source, tax_source,
-            line_total, line_weight, effective_line_total
-        ):
-            query = QSqlQuery()
-            query.prepare("""
-                INSERT INTO salesitem
-                (sales_id, product_id, qty_sold, unit_price,
-                discount, tax, discount_amount, tax_amount, discount_input_mode,
-                default_discount_group_id, default_tax_group_id,
-                discount_group_id, tax_group_id, discount_source, tax_source,
-                line_total, line_weight, effective_line_total)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """)
-            query.addBindValue(sales_id)
-            query.addBindValue(product_id)
-            query.addBindValue(qty)
-            query.addBindValue(rate)
-            query.addBindValue(discount)
-            query.addBindValue(tax)
-            query.addBindValue(discount_amount)
-            query.addBindValue(tax_amount)
-            query.addBindValue(discount_input_mode)
-            query.addBindValue(default_discount_group_id)
-            query.addBindValue(default_tax_group_id)
-            query.addBindValue(discount_group_id)
-            query.addBindValue(tax_group_id)
-            query.addBindValue(discount_source)
-            query.addBindValue(tax_source)
-            query.addBindValue(line_total)
-            query.addBindValue(line_weight)
-            query.addBindValue(effective_line_total)
-
-            if not query.exec():
-                raise Exception(f"Failed to insert sales item: {query.lastError().text()}")
-
-            print(
-                "[SALES][ITEMS] salesitem insert payload:",
-                {
-                    "sales_id": sales_id,
-                    "product_id": product_id,
-                    "qty": qty,
-                    "rate": rate,
-                    "discount_percent": discount,
-                    "tax_percent": tax,
-                    "discount_amount": discount_amount,
-                    "tax_amount": tax_amount,
-                    "discount_input_mode": discount_input_mode,
-                    "default_discount_group_id": default_discount_group_id,
-                    "default_tax_group_id": default_tax_group_id,
-                    "discount_group_id": discount_group_id,
-                    "tax_group_id": tax_group_id,
-                    "discount_source": discount_source,
-                    "tax_source": tax_source,
-                    "line_total": line_total,
-                    "line_weight": line_weight,
-                    "effective_line_total": effective_line_total,
-                }
-            )
-            return query.lastInsertId()
-
-        def allocate_fifo_batches(product_id, sale_item_id, qty_needed, row_number):
-            remaining_qty = qty_needed
-            print(
-                f"[SALES][FIFO] Starting FIFO allocation for row={row_number}, "
-                f"product_id={product_id}, sale_item_id={sale_item_id}, qty_needed={qty_needed}"
-            )
-
-            batch_query = QSqlQuery()
-            batch_query.prepare("""
-                SELECT id, quantity_remaining, unit_cost
-                FROM batch
-                WHERE product_id = ?
-                AND quantity_remaining > 0
-                AND (
-                    expiry_date IS NULL
-                    OR (
-                        CASE
-                            WHEN expiry_date LIKE '____-__-__' THEN date(expiry_date)
-                            WHEN expiry_date LIKE '__-__-____'
-                                THEN date(substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2))
-                            ELSE NULL
-                        END
-                    ) >= date('now', 'localtime')
-                )
-                ORDER BY received_at ASC, id ASC
-            """)
-            batch_query.addBindValue(product_id)
-
-            if not batch_query.exec():
-                raise Exception(f"Failed to fetch FIFO batches: {batch_query.lastError().text()}")
-
-            while batch_query.next() and remaining_qty > 0:
-                batch_id = int(batch_query.value(0))
-                raw_available = batch_query.value(1)
-                available = int(to_db_float(raw_available, 0.0) or 0)
-
-                raw_cost = batch_query.value(2)
-                unit_cost = to_db_float(raw_cost, None)
-                if raw_cost is not None and unit_cost is None:
-                    print(
-                        f"[SALES][FIFO][WARN] Invalid batch.unit_cost encountered for "
-                        f"batch_id={batch_id}, row={row_number}, raw_cost={raw_cost!r}"
-                    )
-                print(
-                    "[SALES][FIFO] Batch candidate:",
-                    {
-                        "row": row_number,
-                        "batch_id": batch_id,
-                        "raw_available": raw_available,
-                        "available": available,
-                        "raw_cost": raw_cost,
-                        "unit_cost": unit_cost,
-                        "remaining_qty_before": remaining_qty,
-                    }
-                )
-
-                if available <= 0:
-                    print(f"[SALES][FIFO] Skipping batch_id={batch_id} because available <= 0")
-                    continue
-
-                take_qty = min(available, remaining_qty)
-                line_cost = round(take_qty * unit_cost, 2) if unit_cost is not None else None
-
-                print(
-                    "Batch Data:",
-                    "Batch ID:", batch_id,
-                    "Available:", available,
-                    "Unit Cost:", unit_cost,
-                    "Taking Qty:", take_qty,
-                    "Line Cost:", line_cost
-                )
-
-                update_batch = QSqlQuery()
-                update_batch.prepare("""
-                    UPDATE batch
-                    SET quantity_remaining = quantity_remaining - ?
-                    WHERE id = ?
-                """)
-                update_batch.addBindValue(take_qty)
-                update_batch.addBindValue(batch_id)
-
-                if not update_batch.exec():
-                    raise Exception(f"Failed to update batch {batch_id}: {update_batch.lastError().text()}")
-                print(
-                    f"[SALES][FIFO] Batch updated: batch_id={batch_id}, "
-                    f"deducted={take_qty}, remaining_after_update_should_be={available - take_qty}"
-                )
-
-                insert_sold = QSqlQuery()
-                insert_sold.prepare("""
-                    INSERT INTO sold_batch
-                    (sale_item_id, batch_id, qty_taken, unit_cost, line_cost)
-                    VALUES (?, ?, ?, ?, ?)
-                """)
-                insert_sold.addBindValue(sale_item_id)
-                insert_sold.addBindValue(batch_id)
-                insert_sold.addBindValue(take_qty)
-                insert_sold.addBindValue(unit_cost)
-                insert_sold.addBindValue(line_cost)
-
-                if not insert_sold.exec():
-                    raise Exception(f"Failed to insert sold batch: {insert_sold.lastError().text()}")
-                print(
-                    "[SALES][FIFO] sold_batch inserted:",
-                    {
-                        "sale_item_id": sale_item_id,
-                        "batch_id": batch_id,
-                        "qty_taken": take_qty,
-                        "unit_cost": unit_cost,
-                        "line_cost": line_cost,
-                    }
-                )
-
-                remaining_qty -= take_qty
-                print(f"[SALES][FIFO] Remaining qty after batch {batch_id}: {remaining_qty}")
-
-            if remaining_qty > 0:
-                raise Exception(f"FIFO allocation failed for product ID {product_id}. Unallocated qty: {remaining_qty}")
-            print(
-                f"[SALES][FIFO] FIFO allocation completed for row={row_number}, "
-                f"product_id={product_id}, sale_item_id={sale_item_id}"
-            )
-
-        def get_header_values():
-            def safe_text(line_edit):
-                return line_edit.text().strip() if line_edit else ""
-
-            subtotal = to_float(safe_text(self.gross_entry), "subtotal", 0, default=0.0)
-            header_discount = to_float(safe_text(self.discount_entry), "header discount", 0, default=0.0)
-            header_tax = to_float(safe_text(self.tax_entry), "header tax", 0, default=0.0)
-            additional_charges = to_float(safe_text(self.additional_entry), "additional charges", 0, default=0.0)
-
-            return subtotal, header_discount, header_tax, additional_charges
-
-        subtotal, header_discount, header_tax, additional_charges = get_header_values()
+        subtotal, header_discount, header_tax, additional_charges = self._collect_sales_item_header_values()
         print(
             "[SALES][ITEMS] Header values for weight distribution:",
             {
@@ -3219,111 +2862,98 @@ class CreateSalesWidget(QWidget):
             print(
                 f"[SALES][ROW {row + 1}] Raw widget texts:",
                 {
-                    "qty_text": text_from_widget(qty_widget, "quantity", row),
-                    "rate_text": text_from_widget(rate_widget, "rate", row),
-                    "discount_text": text_from_widget(discount_widget, "discount", row),
-                    "tax_text": text_from_widget(tax_widget, "tax", row),
-                    "total_text": text_from_widget(total_widget, "line total", row),
+                    "qty_text": self._sales_row_widget_text(qty_widget, "quantity", row),
+                    "rate_text": self._sales_row_widget_text(rate_widget, "rate", row),
+                    "discount_text": self._sales_row_widget_text(discount_widget, "discount", row),
+                    "tax_text": self._sales_row_widget_text(tax_widget, "tax", row),
+                    "total_text": self._sales_row_widget_text(total_widget, "line total", row),
                 }
             )
 
-            qty = to_int(text_from_widget(qty_widget, "quantity", row), "quantity", row)
-            rate = to_float(text_from_widget(rate_widget, "rate", row), "rate", row)
-            discount_display = to_float(text_from_widget(discount_widget, "discount", row), "discount", row)
-            tax_display = to_float(text_from_widget(tax_widget, "tax", row), "tax", row)
-            line_total = to_float(text_from_widget(total_widget, "line total", row), "line total", row)
-            discount_input_mode = str(discount_widget.property("discount_input_mode") or "percent")
-            discount_percent = to_db_float(discount_widget.property("discount_percent_applied"), None)
-            if discount_percent is None:
-                discount_percent = discount_display or 0.0
-            discount_amount = to_db_float(discount_widget.property("discount_amount_applied"), 0.0) or 0.0
-            tax_percent = to_db_float(tax_widget.property("tax_percent_applied"), None)
-            if tax_percent is None:
-                tax_percent = tax_display or 0.0
-            tax_amount = to_db_float(tax_widget.property("tax_amount_applied"), 0.0) or 0.0
-            default_discount_group_id = discount_widget.property("default_discount_group_id")
-            default_tax_group_id = tax_widget.property("default_tax_group_id")
-            discount_group_id = discount_widget.property("discount_group_id")
-            tax_group_id = tax_widget.property("tax_group_id")
-            discount_source = str(discount_widget.property("discount_source") or "manual_override")
-            tax_source = str(tax_widget.property("tax_source") or "manual_override")
-
-            if qty <= 0:
-                raise Exception(f"Row {row + 1}: Quantity must be greater than zero.")
-
-            if rate < 0:
-                raise Exception(f"Row {row + 1}: Rate cannot be negative.")
-
-            if discount_percent < 0 or discount_amount < 0:
-                raise Exception(f"Row {row + 1}: Discount cannot be negative.")
-
-            if tax_percent < 0 or tax_amount < 0:
-                raise Exception(f"Row {row + 1}: Tax cannot be negative.")
-
-            if line_total < 0:
-                raise Exception(f"Row {row + 1}: Line total cannot be negative.")
-
-            line_weight = (line_total / subtotal) if subtotal > 0 else 0.0
-            line_header_discount = header_discount * line_weight
-            line_header_tax = header_tax * line_weight
-            line_additional_charges = additional_charges * line_weight
-
-            effective_line_total = line_total - line_header_discount + line_header_tax + line_additional_charges
-            effective_line_total = round(effective_line_total, 2)
+            try:
+                normalized_row = normalize_sales_item_row(
+                    row_number=row + 1,
+                    product_id=product_id,
+                    qty_text=self._sales_row_widget_text(qty_widget, "quantity", row),
+                    rate_text=self._sales_row_widget_text(rate_widget, "rate", row),
+                    discount_text=self._sales_row_widget_text(discount_widget, "discount", row),
+                    tax_text=self._sales_row_widget_text(tax_widget, "tax", row),
+                    total_text=self._sales_row_widget_text(total_widget, "line total", row),
+                    discount_input_mode=discount_widget.property("discount_input_mode"),
+                    discount_percent_applied=discount_widget.property("discount_percent_applied"),
+                    discount_amount_applied=discount_widget.property("discount_amount_applied"),
+                    tax_percent_applied=tax_widget.property("tax_percent_applied"),
+                    tax_amount_applied=tax_widget.property("tax_amount_applied"),
+                    default_discount_group_id=discount_widget.property("default_discount_group_id"),
+                    default_tax_group_id=tax_widget.property("default_tax_group_id"),
+                    discount_group_id=discount_widget.property("discount_group_id"),
+                    tax_group_id=tax_widget.property("tax_group_id"),
+                    discount_source=discount_widget.property("discount_source"),
+                    tax_source=tax_widget.property("tax_source"),
+                    subtotal=subtotal,
+                    header_discount=header_discount,
+                    header_tax=header_tax,
+                    additional_charges=additional_charges,
+                )
+            except ValueError as exc:
+                raise Exception(str(exc))
 
             print(
-                "Line Weight:", line_weight,
-                "Line Header Discount:", line_header_discount,
-                "Line Header Tax:", line_header_tax,
-                "Line Additional Charges:", line_additional_charges
+                "Line Weight:", normalized_row["line_weight"],
+                "Line Header Discount:", normalized_row["line_header_discount"],
+                "Line Header Tax:", normalized_row["line_header_tax"],
+                "Line Additional Charges:", normalized_row["line_additional_charges"]
             )
 
             print(
                 "Validated Row Data:",
                 "Product ID:", product_id,
-                "Qty:", qty,
-                "Rate:", rate,
-                "Discount %:", discount_percent,
-                "Discount Amount:", discount_amount,
-                "Tax %:", tax_percent,
-                "Tax Amount:", tax_amount,
-                "Line Total:", line_total,
-                "Effective Line Total:", effective_line_total
+                "Qty:", normalized_row["qty"],
+                "Rate:", normalized_row["rate"],
+                "Discount %:", normalized_row["discount_percent"],
+                "Discount Amount:", normalized_row["discount_amount"],
+                "Tax %:", normalized_row["tax_percent"],
+                "Tax Amount:", normalized_row["tax_amount"],
+                "Line Total:", normalized_row["line_total"],
+                "Effective Line Total:", normalized_row["effective_line_total"]
             )
 
-            total_available = get_total_available_stock(product_id)
+            total_available = fetch_total_available_stock(product_id)
+            print(f"[SALES][STOCK] Product {product_id} total available stock: {total_available}")
             print("Available Stock is:", total_available)
 
-            if qty > total_available:
+            if normalized_row["qty"] > total_available:
                 raise Exception(f"Row {row + 1}: Insufficient stock for product ID {product_id}.")
 
-            sale_item_id = insert_sales_item_record(
-                sales_id=sales_id,
-                product_id=product_id,
-                qty=qty,
-                rate=rate,
-                discount=discount_percent,
-                tax=tax_percent,
-                discount_amount=discount_amount,
-                tax_amount=tax_amount,
-                discount_input_mode=discount_input_mode,
-                default_discount_group_id=default_discount_group_id,
-                default_tax_group_id=default_tax_group_id,
-                discount_group_id=discount_group_id,
-                tax_group_id=tax_group_id,
-                discount_source=discount_source,
-                tax_source=tax_source,
-                line_total=line_total,
-                line_weight=line_weight,
-                effective_line_total=effective_line_total
+            sale_item_id = self._persist_sales_item_record(
+                sales_id,
+                {
+                    "product_id": normalized_row["product_id"],
+                    "qty": normalized_row["qty"],
+                    "rate": normalized_row["rate"],
+                    "discount_percent": normalized_row["discount_percent"],
+                    "tax_percent": normalized_row["tax_percent"],
+                    "discount_amount": normalized_row["discount_amount"],
+                    "tax_amount": normalized_row["tax_amount"],
+                    "discount_input_mode": normalized_row["discount_input_mode"],
+                    "default_discount_group_id": normalized_row["default_discount_group_id"],
+                    "default_tax_group_id": normalized_row["default_tax_group_id"],
+                    "discount_group_id": normalized_row["discount_group_id"],
+                    "tax_group_id": normalized_row["tax_group_id"],
+                    "discount_source": normalized_row["discount_source"],
+                    "tax_source": normalized_row["tax_source"],
+                    "line_total": normalized_row["line_total"],
+                    "line_weight": normalized_row["line_weight"],
+                    "effective_line_total": normalized_row["effective_line_total"],
+                },
             )
 
             print("Sales Item ID is:", sale_item_id)
 
-            allocate_fifo_batches(
+            self._allocate_sales_fifo_batches(
                 product_id=product_id,
                 sale_item_id=sale_item_id,
-                qty_needed=qty,
+                qty_needed=normalized_row["qty"],
                 row_number=row + 1,
             )
 
@@ -5097,23 +4727,7 @@ class CreateSalesWidget(QWidget):
 
     def compute_due_date(self):
         """Compute due date based on selected days from combo box"""
-        from datetime import datetime, timedelta
-        
-        due_date_str = self.due_date_combo.currentText()
-        
-        # If "None" is selected or text doesn't start with "+", return None
-        if due_date_str == "None" or not due_date_str.startswith("+"):
-            return None
-
-        try:
-            # Extract number of days from text like "+30 days"
-            days = int(due_date_str.split()[0][1:])
-        except (ValueError, IndexError):
-            return None
-
-        today = datetime.now()
-        due = today + timedelta(days=days)
-        return due.strftime("%Y-%m-%d")
+        return compute_due_date_from_option(self.due_date_combo.currentText())
 
     
     

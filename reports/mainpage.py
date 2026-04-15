@@ -1,7 +1,6 @@
 
 from PySide6.QtWidgets import QWidget, QPushButton, QComboBox, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QTableWidget, QTableWidgetItem, QSpacerItem, QSizePolicy, QToolButton, QDialog, QLineEdit
 from PySide6.QtCore import QFile, Qt,QDate
-from PySide6.QtSql import  QSqlQuery
 from PySide6.QtGui import QCursor, QColor
 from datetime import date
 from datetime import datetime
@@ -1967,7 +1966,7 @@ class MainReportsPage(QWidget):
                 ("Payable", "payable"),
                 ("Net Exposure", "net_exposure"),
             ],
-            fetch_rows=lambda _duration: self.get_customer_outstanding_rows(),
+            fetch_rows=lambda _duration: report_service.ReportService().get_customer_outstanding_rows(),
             summary_builder=lambda rows: (
                 f"Rows: {len(rows)} | Receivable: {sum(float(r.get('receivable', 0) or 0) for r in rows):,.2f} | "
                 f"Payable: {sum(float(r.get('payable', 0) or 0) for r in rows):,.2f}"
@@ -1994,7 +1993,7 @@ class MainReportsPage(QWidget):
                 ("Receivable", "receivable"),
                 ("Net Exposure", "net_exposure"),
             ],
-            fetch_rows=lambda _duration: self.get_supplier_outstanding_rows(),
+            fetch_rows=lambda _duration: report_service.ReportService().get_supplier_outstanding_rows(),
             summary_builder=lambda rows: (
                 f"Rows: {len(rows)} | Payable: {sum(float(r.get('payable', 0) or 0) for r in rows):,.2f} | "
                 f"Receivable: {sum(float(r.get('receivable', 0) or 0) for r in rows):,.2f}"
@@ -2072,60 +2071,6 @@ class MainReportsPage(QWidget):
                 ],
             ),
         )
-
-    def get_customer_outstanding_rows(self):
-        query = QSqlQuery()
-        sql = """
-            SELECT
-                COALESCE(name, 'Walk-in Customer') AS customer_name,
-                COALESCE(receiveable, 0) AS receivable,
-                COALESCE(payable, 0) AS payable
-            FROM customer
-            WHERE COALESCE(receiveable, 0) > 0 OR COALESCE(payable, 0) > 0
-            ORDER BY COALESCE(receiveable, 0) DESC, COALESCE(payable, 0) DESC, name ASC
-        """
-        if not query.exec(sql):
-            print("Customer outstanding query failed:", query.lastError().text())
-            return []
-
-        rows = []
-        while query.next():
-            receivable = float(query.value(1) or 0.0)
-            payable = float(query.value(2) or 0.0)
-            rows.append({
-                "customer_name": str(query.value(0) or ""),
-                "receivable": receivable,
-                "payable": payable,
-                "net_exposure": receivable - payable,
-            })
-        return rows
-
-    def get_supplier_outstanding_rows(self):
-        query = QSqlQuery()
-        sql = """
-            SELECT
-                COALESCE(name, 'Unknown Supplier') AS supplier_name,
-                COALESCE(payable, 0) AS payable,
-                COALESCE(receiveable, 0) AS receivable
-            FROM supplier
-            WHERE COALESCE(payable, 0) > 0 OR COALESCE(receiveable, 0) > 0
-            ORDER BY COALESCE(payable, 0) DESC, COALESCE(receiveable, 0) DESC, name ASC
-        """
-        if not query.exec(sql):
-            print("Supplier outstanding query failed:", query.lastError().text())
-            return []
-
-        rows = []
-        while query.next():
-            payable = float(query.value(1) or 0.0)
-            receivable = float(query.value(2) or 0.0)
-            rows.append({
-                "supplier_name": str(query.value(0) or ""),
-                "payable": payable,
-                "receivable": receivable,
-                "net_exposure": payable - receivable,
-            })
-        return rows
 
     def get_overdue_recovery_rows(self):
         rows = report_service.ReportService().get_receivable_aging()
@@ -2875,16 +2820,8 @@ class MainReportsPage(QWidget):
         product_combo.setEditable(True)
         product_combo.addItem("All Products", None)
 
-        product_query = QSqlQuery()
-        product_query.prepare("""
-            SELECT id, display_name
-            FROM product
-            WHERE status = 'used'
-            ORDER BY display_name ASC
-        """)
-        if product_query.exec():
-            while product_query.next():
-                product_combo.addItem(str(product_query.value(1) or ""), int(product_query.value(0)))
+        for product_row in report_service.ReportService().get_used_product_options():
+            product_combo.addItem(product_row["display_name"], product_row["product_id"])
         filter_row.addWidget(product_combo, 1)
 
         reload_btn = QPushButton("Reload", objectName="TopRightButton")
@@ -3237,32 +3174,9 @@ class MainReportsPage(QWidget):
         sales_id = self.parse_reference_id(reference, "SALE#")
         if sales_id is None:
             return [("Error", "Invalid sales reference")]
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                s.id,
-                s.creation_date,
-                COALESCE(s.total, 0),
-                COALESCE(a.username, ''),
-                COALESCE(c.name, '')
-            FROM sales s
-            LEFT JOIN auth a ON a.id = s.salesman
-            LEFT JOIN customer c ON c.id = s.customer
-            WHERE s.id = ?
-            LIMIT 1
-        """)
-        query.addBindValue(sales_id)
-
-        if query.exec() and query.next():
-            return [
-                ("Sales ID", query.value(0)),
-                ("Date", query.value(1)),
-                ("Total", query.value(2)),
-                ("Salesman", query.value(3)),
-                ("Customer", query.value(4)),
-            ]
-
+        rows = report_service.ReportService().get_sales_reference_details(sales_id)
+        if rows:
+            return rows
         return [("Not Found", f"No sales record for {reference}")]
 
 
@@ -3270,28 +3184,9 @@ class MainReportsPage(QWidget):
         return_id = self.parse_reference_id(reference, "SR#")
         if return_id is None:
             return [("Error", "Invalid sales return reference")]
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                sr.id,
-                sr.creation_date,
-                COALESCE(sr.total, 0),
-                COALESCE(sr.salesorder, 0)
-            FROM salesreturn sr
-            WHERE sr.id = ?
-            LIMIT 1
-        """)
-        query.addBindValue(return_id)
-
-        if query.exec() and query.next():
-            return [
-                ("Sales Return ID", query.value(0)),
-                ("Date", query.value(1)),
-                ("Total", query.value(2)),
-                ("Sales Order", query.value(3)),
-            ]
-
+        rows = report_service.ReportService().get_sales_return_reference_details(return_id)
+        if rows:
+            return rows
         return [("Not Found", f"No sales return record for {reference}")]
 
 
@@ -3299,29 +3194,9 @@ class MainReportsPage(QWidget):
         return_id = self.parse_reference_id(reference, "PR#")
         if return_id is None:
             return [("Error", "Invalid purchase return reference")]
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                pr.id,
-                pr.creation_date,
-                COALESCE(pr.total, 0),
-                COALESCE(s.name, '')
-            FROM purchase_return pr
-            LEFT JOIN supplier s ON s.id = pr.supplier
-            WHERE pr.id = ?
-            LIMIT 1
-        """)
-        query.addBindValue(return_id)
-
-        if query.exec() and query.next():
-            return [
-                ("Purchase Return ID", query.value(0)),
-                ("Date", query.value(1)),
-                ("Total", query.value(2)),
-                ("Supplier", query.value(3)),
-            ]
-
+        rows = report_service.ReportService().get_purchase_return_reference_details(return_id)
+        if rows:
+            return rows
         return [("Not Found", f"No purchase return record for {reference}")]
 
 
@@ -3329,40 +3204,9 @@ class MainReportsPage(QWidget):
         adjustment_id = self.parse_reference_id(reference, "ADJ#")
         if adjustment_id is None:
             return [("Error", "Invalid adjustment reference")]
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                ia.id,
-                ia.created_at,
-                COALESCE(ia.adjustment_type, ''),
-                COALESCE(ia.qty, 0),
-                COALESCE(ia.old_qty, 0),
-                COALESCE(ia.new_qty, 0),
-                COALESCE(ia.reason, ''),
-                COALESCE(a.username, ''),
-                COALESCE(b.batch_no, '')
-            FROM inventory_adjustment ia
-            LEFT JOIN auth a ON a.id = ia.adjusted_by
-            LEFT JOIN batch b ON b.id = ia.batch_id
-            WHERE ia.id = ?
-            LIMIT 1
-        """)
-        query.addBindValue(adjustment_id)
-
-        if query.exec() and query.next():
-            return [
-                ("Adjustment ID", query.value(0)),
-                ("Date", query.value(1)),
-                ("Type", query.value(2)),
-                ("Qty Change", query.value(3)),
-                ("Old Qty", query.value(4)),
-                ("New Qty", query.value(5)),
-                ("Reason", query.value(6)),
-                ("Adjusted By", query.value(7)),
-                ("Batch", query.value(8)),
-            ]
-
+        rows = report_service.ReportService().get_adjustment_reference_details(adjustment_id)
+        if rows:
+            return rows
         return [("Not Found", f"No adjustment record for {reference}")]
 
 
@@ -3370,33 +3214,9 @@ class MainReportsPage(QWidget):
         purchase_item_id = self.parse_reference_id(reference, "PI#")
         if purchase_item_id is None:
             return [("Error", "Invalid purchase item reference")]
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                pi.id,
-                pi.creation_date,
-                COALESCE(p.display_name, ''),
-                COALESCE(pi.qty, 0),
-                COALESCE(pi.rate, 0),
-                COALESCE(pi.total, 0)
-            FROM purchaseitem pi
-            LEFT JOIN product p ON p.id = pi.product
-            WHERE pi.id = ?
-            LIMIT 1
-        """)
-        query.addBindValue(purchase_item_id)
-
-        if query.exec() and query.next():
-            return [
-                ("Purchase Item ID", query.value(0)),
-                ("Date", query.value(1)),
-                ("Product", query.value(2)),
-                ("Qty", query.value(3)),
-                ("Rate", query.value(4)),
-                ("Total", query.value(5)),
-            ]
-
+        rows = report_service.ReportService().get_purchase_item_reference_details(purchase_item_id)
+        if rows:
+            return rows
         return [("Not Found", f"No purchase item record for {reference}")]
 
     def fetch_purchase_reference_details(self, purchase_id):
@@ -3404,38 +3224,9 @@ class MainReportsPage(QWidget):
             purchase_id = int(purchase_id)
         except Exception:
             return [("Error", "Invalid purchase reference")]
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                p.id,
-                p.creation_date,
-                COALESCE(s.name, ''),
-                COALESCE(r.name, ''),
-                COALESCE(p.sellerinvoice, ''),
-                COALESCE(p.total, 0),
-                COALESCE(p.paid, 0),
-                COALESCE(p.remaining, 0)
-            FROM purchase p
-            LEFT JOIN supplier s ON s.id = p.supplier
-            LEFT JOIN rep r ON r.id = p.rep
-            WHERE p.id = ?
-            LIMIT 1
-        """)
-        query.addBindValue(purchase_id)
-
-        if query.exec() and query.next():
-            return [
-                ("Purchase ID", query.value(0)),
-                ("Date", query.value(1)),
-                ("Supplier", query.value(2)),
-                ("Rep", query.value(3)),
-                ("Seller Invoice", query.value(4)),
-                ("Total", query.value(5)),
-                ("Paid", query.value(6)),
-                ("Remaining", query.value(7)),
-            ]
-
+        rows = report_service.ReportService().get_purchase_reference_details(purchase_id)
+        if rows:
+            return rows
         return [("Not Found", f"No purchase record for ID {purchase_id}")]
 
     def fetch_po_reference_details(self, po_id):
@@ -3443,45 +3234,9 @@ class MainReportsPage(QWidget):
             po_id = int(po_id)
         except Exception:
             return [("Error", "Invalid PO reference")]
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                po.id,
-                COALESCE(po.po_number, ''),
-                COALESCE(po.po_date, ''),
-                COALESCE(s.name, ''),
-                COALESCE(po.status, ''),
-                COALESCE(po.total_value, 0),
-                COALESCE(po.expected_delivery_date, ''),
-                COALESCE((SELECT SUM(qty_ordered) FROM purchase_order_line WHERE po_id = po.id), 0),
-                COALESCE((
-                    SELECT SUM(grl.qty_received)
-                    FROM goods_receipt_line grl
-                    JOIN purchase_order_line pol ON pol.id = grl.po_line_id
-                    WHERE pol.po_id = po.id
-                ), 0)
-            FROM purchase_order po
-            LEFT JOIN supplier s ON s.id = po.supplier
-            WHERE po.id = ?
-            LIMIT 1
-        """)
-        query.addBindValue(po_id)
-
-        if query.exec() and query.next():
-            return [
-                ("PO ID", query.value(0)),
-                ("PO Number", query.value(1)),
-                ("PO Date", query.value(2)),
-                ("Supplier", query.value(3)),
-                ("Status", query.value(4)),
-                ("Total Value", query.value(5)),
-                ("Expected Delivery", query.value(6)),
-                ("Ordered Qty", query.value(7)),
-                ("Received Qty", query.value(8)),
-                ("Remaining Qty", max(float(query.value(7) or 0) - float(query.value(8) or 0), 0.0)),
-            ]
-
+        rows = report_service.ReportService().get_po_reference_details(po_id)
+        if rows:
+            return rows
         return [("Not Found", f"No purchase order found for ID {po_id}")]
 
     def fetch_grn_reference_details(self, grn_id):
@@ -3489,36 +3244,9 @@ class MainReportsPage(QWidget):
             grn_id = int(grn_id)
         except Exception:
             return [("Error", "Invalid GRN reference")]
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                gr.id,
-                COALESCE(gr.grn_number, ''),
-                COALESCE(gr.grn_date, ''),
-                COALESCE(po.po_number, ''),
-                COALESCE(s.name, ''),
-                COALESCE(gr.status, ''),
-                COALESCE(gr.total_value, 0)
-            FROM goods_receipt gr
-            LEFT JOIN purchase_order po ON po.id = gr.po_id
-            LEFT JOIN supplier s ON s.id = po.supplier
-            WHERE gr.id = ?
-            LIMIT 1
-        """)
-        query.addBindValue(grn_id)
-
-        if query.exec() and query.next():
-            return [
-                ("GRN ID", query.value(0)),
-                ("GRN Number", query.value(1)),
-                ("GRN Date", query.value(2)),
-                ("PO Number", query.value(3)),
-                ("Supplier", query.value(4)),
-                ("Status", query.value(5)),
-                ("Total Value", query.value(6)),
-            ]
-
+        rows = report_service.ReportService().get_grn_reference_details(grn_id)
+        if rows:
+            return rows
         return [("Not Found", f"No GRN found for ID {grn_id}")]
 
     def fetch_customer_transaction_reference_details(self, txn_id):
@@ -3526,37 +3254,9 @@ class MainReportsPage(QWidget):
             txn_id = int(txn_id)
         except Exception:
             return [("Error", "Invalid receipt reference")]
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                ct.id,
-                ct.creation_date,
-                COALESCE(c.name, ''),
-                COALESCE(ct.transaction_type, ''),
-                COALESCE(ct.ref, 0),
-                COALESCE(ct.received, 0),
-                COALESCE(ct.payment_method, ''),
-                COALESCE(ct.payment_reference, '')
-            FROM customer_transaction ct
-            LEFT JOIN customer c ON c.id = ct.customer
-            WHERE ct.id = ?
-            LIMIT 1
-        """)
-        query.addBindValue(txn_id)
-
-        if query.exec() and query.next():
-            return [
-                ("Receipt ID", query.value(0)),
-                ("Date", query.value(1)),
-                ("Customer", query.value(2)),
-                ("Transaction Type", query.value(3)),
-                ("Reference", query.value(4)),
-                ("Amount Received", query.value(5)),
-                ("Payment Method", query.value(6)),
-                ("Payment Reference", query.value(7)),
-            ]
-
+        rows = report_service.ReportService().get_customer_transaction_reference_details(txn_id)
+        if rows:
+            return rows
         return [("Not Found", f"No receipt found for ID {txn_id}")]
 
     def fetch_price_change_reference_details(self, change_id):
@@ -3564,35 +3264,9 @@ class MainReportsPage(QWidget):
             change_id = int(change_id)
         except Exception:
             return [("Error", "Invalid price change reference")]
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                pc.id,
-                pc.created_at,
-                COALESCE(p.display_name, ''),
-                COALESCE(pc.previous_price, 0),
-                COALESCE(pc.new_price, 0),
-                COALESCE(pc.source, ''),
-                COALESCE(pc.username, '')
-            FROM price_changes pc
-            LEFT JOIN product p ON p.id = pc.product_id
-            WHERE pc.id = ?
-            LIMIT 1
-        """)
-        query.addBindValue(change_id)
-
-        if query.exec() and query.next():
-            return [
-                ("Change ID", query.value(0)),
-                ("Date", query.value(1)),
-                ("Product", query.value(2)),
-                ("Previous Price", query.value(3)),
-                ("New Price", query.value(4)),
-                ("Source", query.value(5)),
-                ("Username", query.value(6)),
-            ]
-
+        rows = report_service.ReportService().get_price_change_reference_details(change_id)
+        if rows:
+            return rows
         return [("Not Found", f"No price change found for ID {change_id}")]
 
     def fetch_daily_session_reference_details(self, session_id):
@@ -3600,40 +3274,9 @@ class MainReportsPage(QWidget):
             session_id = int(session_id)
         except Exception:
             return [("Error", "Invalid session reference")]
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                id,
-                COALESCE(session_date, ''),
-                COALESCE(opening_cash, 0),
-                COALESCE(system_cash, 0),
-                COALESCE(actual_cash, 0),
-                COALESCE(withdrawal, 0),
-                COALESCE(cash_difference, 0),
-                COALESCE(opened_at, ''),
-                COALESCE(closed_at, ''),
-                COALESCE(status, '')
-            FROM daily_session
-            WHERE id = ?
-            LIMIT 1
-        """)
-        query.addBindValue(session_id)
-
-        if query.exec() and query.next():
-            return [
-                ("Session ID", query.value(0)),
-                ("Session Date", query.value(1)),
-                ("Opening Cash", query.value(2)),
-                ("System Cash", query.value(3)),
-                ("Actual Cash", query.value(4)),
-                ("Withdrawal", query.value(5)),
-                ("Cash Difference", query.value(6)),
-                ("Opened At", query.value(7)),
-                ("Closed At", query.value(8)),
-                ("Status", query.value(9)),
-            ]
-
+        rows = report_service.ReportService().get_daily_session_reference_details(session_id)
+        if rows:
+            return rows
         return [("Not Found", f"No daily session found for ID {session_id}")]
 
 
@@ -3641,37 +3284,9 @@ class MainReportsPage(QWidget):
         batch_id = self.parse_reference_id(reference, "BATCH#")
         if batch_id is None:
             return [("Error", "Invalid batch reference")]
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                b.id,
-                COALESCE(b.batch_no, ''),
-                COALESCE(p.display_name, ''),
-                COALESCE(b.expiry_date, ''),
-                COALESCE(b.total_received, 0),
-                COALESCE(b.quantity_remaining, 0),
-                COALESCE(b.received_at, ''),
-                COALESCE(b.source, '')
-            FROM batch b
-            LEFT JOIN product p ON p.id = b.product_id
-            WHERE b.id = ?
-            LIMIT 1
-        """)
-        query.addBindValue(batch_id)
-
-        if query.exec() and query.next():
-            return [
-                ("Batch ID", query.value(0)),
-                ("Batch No", query.value(1)),
-                ("Product", query.value(2)),
-                ("Expiry", query.value(3)),
-                ("Total Received", query.value(4)),
-                ("Remaining", query.value(5)),
-                ("Received At", query.value(6)),
-                ("Source", query.value(7)),
-            ]
-
+        rows = report_service.ReportService().get_batch_reference_details(batch_id)
+        if rows:
+            return rows
         return [("Not Found", f"No batch record for {reference}")]
 
 
@@ -5441,106 +5056,13 @@ class MainReportsPage(QWidget):
 
 
     def get_hourly_sales_data(self):
-        
-        
-        from zoneinfo import ZoneInfo
-        from datetime import datetime
-
-        
-        local_offset = datetime.now().astimezone().utcoffset()
-        offset_hours = int(local_offset.total_seconds() // 3600)
-        offset_str = f"{offset_hours:+d} hours"  # e.g. '+5 hours' or '-4 hours'
-
-        print("Local offset:", offset_str)
-
-        # Get today's date
-        today = datetime.now().strftime('%Y-%m-%d')
-
-        # Initialize hourly sales dictionary
-        hourly_sales = {i: 0 for i in range(24)}
-
-        query = QSqlQuery()
-        
-        query.prepare("""
-            SELECT 
-                strftime('%H', datetime(creation_date, :offset)) AS hour,
-                COALESCE(SUM(total), 0) AS total_sales
-            FROM sales
-            WHERE 
-                date(datetime(creation_date, :offset)) = date(:today)
-            GROUP BY hour
-            ORDER BY hour
-        """)
-
-        query.bindValue(":offset", offset_str)
-        query.bindValue(":today", today)
-
-        print("Today = ", today)
-
-        if query.exec():
-            while query.next():
-                hour = int(query.value(0))  # '09' → 9
-                total = float(query.value(1))
-                hourly_sales[hour] = total
-                print(f"Hour: {hour}, Total: {total}")
-        else:
-            print("Query failed:", query.lastError().text())
-
-        return hourly_sales
+        return report_service.ReportService().get_hourly_sales_data()
 
 
 
     
     def get_monthly_sales_data(self):
-        
-        monthly_sales = {day: 0 for day in range(1, 32)}
-
-        query = QSqlQuery()
-        # query.prepare("""
-        #     SELECT
-        #         day::int,
-        #         COALESCE(SUM(total), 0) AS total_sales
-        #     FROM
-        #         generate_series(1, 31) AS day
-        #     LEFT JOIN
-        #         sales ON EXTRACT(DAY FROM creation_date) = day
-        #             AND date_trunc('month', creation_date) = date_trunc('month', CURRENT_DATE)
-        #     GROUP BY day
-        #     ORDER BY day;
-        # """)
-        
-        query.prepare("""
-            WITH RECURSIVE days(day) AS (
-                SELECT 1
-                UNION ALL
-                SELECT day + 1 FROM days WHERE day < 31
-            )
-            SELECT
-                days.day,
-                COALESCE(SUM(s.total), 0) AS total_sales
-            FROM
-                days
-            LEFT JOIN
-                sales s
-                ON CAST(STRFTIME('%d', s.creation_date) AS INTEGER) = days.day
-                AND STRFTIME('%Y-%m', s.creation_date) = STRFTIME('%Y-%m', 'now')
-            GROUP BY
-                days.day
-            ORDER BY
-                days.day;
-        """)
-
-
-        if query.exec():
-            while query.next():
-                day = int(query.value(0))
-                total = float(query.value(1))
-                monthly_sales[day] = total
-        else:
-            print("Query failed:", query.lastError().text())
-
-        # Return a list for days 1 to 31
-        return [monthly_sales[day] for day in range(1, 32)]
+        return report_service.ReportService().get_monthly_sales_data()
 
 
 
@@ -5608,7 +5130,6 @@ class MainReportsPage(QWidget):
     def show_near_expiry_dialog(self):
         from PySide6.QtWidgets import QDialog, QTableWidget, QTableWidgetItem, QLabel, QPushButton
         from PySide6.QtCore import Qt
-        from PySide6.QtSql import QSqlQuery
         from PySide6.QtGui import QColor
 
         dialog = QDialog(self)
@@ -5629,43 +5150,10 @@ class MainReportsPage(QWidget):
         table.horizontalHeader().setStretchLastSection(True)
         content_layout.addWidget(table)
 
-        query = QSqlQuery()
-
-        sql = """
-            WITH parsed AS (
-                SELECT
-                    p.display_name,
-                    b.batch_no,
-                    b.expiry_date,
-                    b.quantity_remaining,
-                    CASE
-                        WHEN b.expiry_date LIKE '____-__-__' THEN date(b.expiry_date)
-                        WHEN b.expiry_date LIKE '__-__-____'
-                            THEN date(substr(b.expiry_date, 7, 4) || '-' || substr(b.expiry_date, 4, 2) || '-' || substr(b.expiry_date, 1, 2))
-                        ELSE NULL
-                    END AS expiry_norm
-                FROM batch b
-                JOIN product p ON p.id = b.product_id
-                WHERE
-                    b.quantity_remaining > 0
-                    AND p.status = 'used'
-                    AND b.expiry_date IS NOT NULL
-            )
-            SELECT
-                display_name,
-                batch_no,
-                expiry_date,
-                CAST(julianday(expiry_norm) - julianday('now') AS INTEGER) AS days_left,
-                quantity_remaining
-            FROM parsed
-            WHERE
-                expiry_norm IS NOT NULL
-                AND expiry_norm <= DATE('now', '+60 days')
-            ORDER BY expiry_norm ASC
-        """
-
-        if not query.exec(sql):
-            print("Near expiry query failed:", query.lastError().text())
+        try:
+            rows = report_service.ReportService().get_near_expiry_rows(days=60)
+        except Exception as exc:
+            print(str(exc))
             footer_layout.addStretch()
             close_btn = QPushButton("Close")
             close_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -5676,20 +5164,17 @@ class MainReportsPage(QWidget):
             dialog.exec()
             return
 
-        rows = []
-        while query.next():
-            rows.append([
-                query.value(0),  # product
-                query.value(1),  # batch
-                query.value(2),  # expiry
-                query.value(3),  # days_left
-                query.value(4),  # qty
-            ])
-
         table.setRowCount(len(rows))
 
         for row_index, row_data in enumerate(rows):
-            for col_index, value in enumerate(row_data):
+            values = [
+                row_data["product_name"],
+                row_data["batch_no"],
+                row_data["expiry_date"],
+                row_data["days_left"],
+                row_data["qty_remaining"],
+            ]
+            for col_index, value in enumerate(values):
                 text = "" if value is None else str(value)
                 item = QTableWidgetItem(text)
                 item.setFlags(item.flags() ^ Qt.ItemIsEditable)
@@ -5720,7 +5205,6 @@ class MainReportsPage(QWidget):
     def show_low_stock_dialog(self):
         from PySide6.QtWidgets import QDialog, QTableWidget, QTableWidgetItem, QLabel, QPushButton
         from PySide6.QtCore import Qt
-        from PySide6.QtSql import QSqlQuery
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Low Stock Products")
@@ -5741,27 +5225,10 @@ class MainReportsPage(QWidget):
         table.horizontalHeader().setStretchLastSection(True)
         content_layout.addWidget(table)
 
-        query = QSqlQuery()
-
-        sql = """
-            SELECT 
-                p.display_name,
-                IFNULL(SUM(b.quantity_remaining), 0) AS total_stock
-            FROM product p
-            LEFT JOIN batch b ON b.product_id = p.id
-            LEFT JOIN (
-                SELECT product_id, MAX(COALESCE(reorder_level, 0)) AS reorder_level
-                FROM price_pack
-                GROUP BY product_id
-            ) pp ON pp.product_id = p.id
-            WHERE p.status = 'used'
-            GROUP BY p.id
-            HAVING IFNULL(SUM(b.quantity_remaining), 0) <= MAX(COALESCE(pp.reorder_level, 0))
-            ORDER BY p.display_name ASC
-        """
-
-        if not query.exec(sql):
-            print("Low stock query failed:", query.lastError().text())
+        try:
+            rows = report_service.ReportService().get_low_stock_rows()
+        except Exception as exc:
+            print(str(exc))
             footer_layout.addStretch()
             close_btn = QPushButton("Close")
             close_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -5772,17 +5239,11 @@ class MainReportsPage(QWidget):
             dialog.exec()
             return
 
-        rows = []
-        while query.next():
-            rows.append([
-                query.value(0),
-                query.value(1)
-            ])
-
         table.setRowCount(len(rows))
 
         for row_index, row_data in enumerate(rows):
-            for col_index, value in enumerate(row_data):
+            values = [row_data["product_name"], row_data["total_stock"]]
+            for col_index, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
                 item.setFlags(item.flags() ^ Qt.ItemIsEditable)
                 table.setItem(row_index, col_index, item)
@@ -5912,11 +5373,7 @@ class MainReportsPage(QWidget):
         return combo
 
     def get_business_name(self):
-        query = QSqlQuery()
-        query.prepare("SELECT businessname FROM business WHERE id = 1")
-        if query.exec() and query.next():
-            return str(query.value(0) or "ProCure Medics")
-        return "ProCure Medics"
+        return report_service.ReportService().get_business_name()
 
     def build_report_text(self, title, meta_lines=None, sections=None):
         business_name = self.get_business_name()
@@ -6135,58 +5592,11 @@ class MainReportsPage(QWidget):
         return card
 
     def get_opening_stock_cost_review_rows(self):
-        query = QSqlQuery()
-        if not query.exec(
-            """
-            WITH sold_rollup AS (
-                SELECT
-                    sb.batch_id,
-                    COALESCE(SUM(sb.qty_taken), 0) AS sold_qty,
-                    COALESCE(SUM(CASE WHEN sb.unit_cost IS NULL THEN sb.qty_taken ELSE 0 END), 0) AS unknown_sold_qty
-                FROM sold_batch sb
-                GROUP BY sb.batch_id
-            )
-            SELECT
-                b.id,
-                COALESCE(p.display_name, ''),
-                COALESCE(b.batch_no, ''),
-                COALESCE(b.expiry_date, ''),
-                COALESCE(b.total_received, 0),
-                COALESCE(b.quantity_remaining, 0),
-                COALESCE(sr.sold_qty, 0),
-                COALESCE(sr.unknown_sold_qty, 0),
-                b.unit_cost,
-                COALESCE(b.received_at, '')
-            FROM batch b
-            JOIN product p ON p.id = b.product_id
-            LEFT JOIN sold_rollup sr ON sr.batch_id = b.id
-            WHERE LOWER(COALESCE(b.source, '')) = 'opening'
-            ORDER BY
-                CASE WHEN b.unit_cost IS NULL THEN 0 ELSE 1 END,
-                p.display_name ASC,
-                b.received_at ASC,
-                b.id ASC
-            """
-        ):
-            AppMessageBox.critical(self, "Load Failed", f"Could not load opening stock batches: {query.lastError().text()}")
+        try:
+            return report_service.ReportService().get_opening_stock_cost_review_rows()
+        except Exception as exc:
+            AppMessageBox.critical(self, "Load Failed", str(exc))
             return []
-
-        rows = []
-        while query.next():
-            unit_cost_value = query.value(8)
-            rows.append({
-                "batch_id": int(query.value(0) or 0),
-                "product_name": str(query.value(1) or ""),
-                "batch_no": str(query.value(2) or ""),
-                "expiry_date": str(query.value(3) or ""),
-                "added_qty": float(query.value(4) or 0.0),
-                "remaining_qty": float(query.value(5) or 0.0),
-                "sold_qty": float(query.value(6) or 0.0),
-                "unknown_sold_qty": float(query.value(7) or 0.0),
-                "unit_cost": float(unit_cost_value) if unit_cost_value is not None else None,
-                "received_at": str(query.value(9) or ""),
-            })
-        return rows
 
     def show_opening_stock_cost_review_dialog(self):
         dialog = QDialog(self)
@@ -6330,60 +5740,15 @@ class MainReportsPage(QWidget):
                 AppMessageBox.information(dialog, "No Changes", "Enter or change at least one opening batch cost to save.")
                 return
 
-            tx = QSqlQuery()
-            if not tx.exec("BEGIN IMMEDIATE"):
-                AppMessageBox.critical(dialog, "Save Failed", f"Could not start save transaction: {tx.lastError().text()}")
-                return
-
             try:
-                updated_batches = 0
-                updated_sold_rows = 0
-
-                for batch_id, new_cost in updates:
-                    batch_update = QSqlQuery()
-                    batch_update.prepare("UPDATE batch SET unit_cost = ? WHERE id = ?")
-                    batch_update.addBindValue(new_cost)
-                    batch_update.addBindValue(batch_id)
-                    if not batch_update.exec():
-                        raise Exception(batch_update.lastError().text())
-                    updated_batches += 1
-
-                    sold_count_query = QSqlQuery()
-                    sold_count_query.prepare("SELECT COUNT(*) FROM sold_batch WHERE batch_id = ?")
-                    sold_count_query.addBindValue(batch_id)
-                    sold_rows_for_batch = 0
-                    if sold_count_query.exec() and sold_count_query.next():
-                        sold_rows_for_batch = int(sold_count_query.value(0) or 0)
-
-                    sold_update = QSqlQuery()
-                    sold_update.prepare(
-                        """
-                        UPDATE sold_batch
-                        SET unit_cost = ?,
-                            line_cost = ROUND(COALESCE(qty_taken, 0) * ?, 2)
-                        WHERE batch_id = ?
-                        """
-                    )
-                    sold_update.addBindValue(new_cost)
-                    sold_update.addBindValue(new_cost)
-                    sold_update.addBindValue(batch_id)
-                    if not sold_update.exec():
-                        raise Exception(sold_update.lastError().text())
-                    updated_sold_rows += sold_rows_for_batch
-
-                commit_query = QSqlQuery()
-                if not commit_query.exec("COMMIT"):
-                    raise Exception(commit_query.lastError().text())
-
+                result = report_service.ReportService().save_opening_stock_cost_updates(updates)
                 refresh_table()
                 AppMessageBox.success(
                     dialog,
                     "Saved",
-                    f"Updated {updated_batches} opening batch cost(s) and refreshed {updated_sold_rows} sold-batch allocation row(s).",
+                    f"Updated {result['updated_batches']} opening batch cost(s) and refreshed {result['updated_sold_rows']} sold-batch allocation row(s).",
                 )
             except Exception as exc:
-                rollback_query = QSqlQuery()
-                rollback_query.exec("ROLLBACK")
                 AppMessageBox.critical(dialog, "Save Failed", f"Could not save opening stock costs: {exc}")
 
         refresh_btn = QPushButton("Refresh")

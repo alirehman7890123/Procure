@@ -16,6 +16,27 @@ from utilities.activity_logger import log_activity
 from utilities.permissions import Permissions
 from utilities.app_messagebox import AppMessageBox
 from utilities.product_search_widget import ProductSearchBox
+from services.purchase_posting_service import (
+    build_purchase_header_payload,
+    build_supplier_transaction_payload,
+    compute_purchase_settlement,
+)
+from services.purchase_items_service import (
+    build_batch_payload,
+    compute_purchase_distribution_factor,
+    normalize_purchase_item_row,
+    parse_expiry_to_db_date,
+)
+from services.purchase_transaction_service import (
+    fetch_product_pack_size,
+    fetch_supplier_balances,
+    insert_batch_record,
+    insert_purchase_header,
+    insert_purchase_item,
+    insert_supplier_transaction,
+    mark_product_used,
+    update_supplier_balances,
+)
 
 
 
@@ -1745,25 +1766,14 @@ class AddPurchaseWidget(QWidget):
         # ------------------------------------------------------------
         # 7) Same writeoff / payable / receivable logic as your code
         # ------------------------------------------------------------
-        writeoff = 0.0
-        payable = 0.0
-        receivable = 0.0
+        due_date = self.compute_due_date() if remaining > 0 and not self.writeoff_check.isChecked() else None
+        settlement = compute_purchase_settlement(
+            remaining=remaining,
+            writeoff_enabled=self.writeoff_check.isChecked(),
+            due_date=due_date,
+        )
 
-        if remaining > 0.0:
-            if self.writeoff_check.isChecked():
-                writeoff = remaining
-            else:
-                payable = remaining
-
-        elif remaining < 0.0:
-            receivable = abs(remaining)
-
-        # ------------------------------------------------------------
-        # 8) Get session_id
-        # ------------------------------------------------------------
-        due_date = self.compute_due_date() if payable > 0 else None
-
-        if payable > 0 and due_date is None:
+        if settlement["payable"] > 0 and due_date is None:
             print("No due date selected for payable purchase. It will be tracked in No Due Date bucket.")
 
         session_id = get_active_session_id(strict=True)
@@ -1789,10 +1799,10 @@ class AddPurchaseWidget(QWidget):
             "total": total,                 # useful for calculations
             "paid": paid,
             "remaining": remaining,
-            "writeoff": writeoff,
-            "payable": payable,
-            "receivable": receivable,
-            "due_date": due_date,
+            "writeoff": settlement["writeoff"],
+            "payable": settlement["payable"],
+            "receivable": settlement["receivable"],
+            "due_date": settlement["due_date"],
             "session_id": session_id,
             "header_net_amount": header_net_amount,
         }
@@ -1800,93 +1810,31 @@ class AddPurchaseWidget(QWidget):
         
     
     def _save_purchase_header(self, data):
-        normalized = {
-            "supplier": self._int_or_default(data.get("supplier"), 0),
-            "rep": self._int_or_default(data.get("rep"), 0) if data.get("rep") not in (None, "") else None,
-            "sellerinvoice": self._text_or_default(data.get("sellerinvoice"), ""),
-            "subtotal": self._float_or_default(data.get("subtotal"), 0.0),
-            "discount": self._float_or_default(data.get("discount"), 0.0),
-            "tax_236g": self._float_or_default(data.get("tax_236g"), 0.0),
-            "tax_236h": self._float_or_default(data.get("tax_236h"), 0.0),
-            "sales_tax": self._float_or_default(data.get("sales_tax"), 0.0),
-            "netamount": self._float_or_default(data.get("netamount"), 0.0),
-            "cn_adjustment": self._float_or_default(data.get("cn_adjustment"), 0.0),
-            "total": self._float_or_default(data.get("total"), 0.0),
-            "paid": self._float_or_default(data.get("paid"), 0.0),
-            "remaining": self._float_or_default(data.get("remaining"), 0.0),
-            "writeoff": self._float_or_default(data.get("writeoff"), 0.0),
-            "payable": self._float_or_default(data.get("payable"), 0.0),
-            "receivable": self._float_or_default(data.get("receivable"), 0.0),
-            "due_date": self._text_or_none(data.get("due_date")),
-            "session_id": self._int_or_default(data.get("session_id"), 0),
-        }
+        normalized = build_purchase_header_payload(
+            supplier=self._int_or_default(data.get("supplier"), 0),
+            rep=self._int_or_default(data.get("rep"), 0) if data.get("rep") not in (None, "") else None,
+            sellerinvoice=self._text_or_default(data.get("sellerinvoice"), ""),
+            subtotal=self._float_or_default(data.get("subtotal"), 0.0),
+            discount=self._float_or_default(data.get("discount"), 0.0),
+            taxable=self._float_or_default(data.get("taxable"), 0.0),
+            tax_236g=self._float_or_default(data.get("tax_236g"), 0.0),
+            tax_236h=self._float_or_default(data.get("tax_236h"), 0.0),
+            sales_tax=self._float_or_default(data.get("sales_tax"), 0.0),
+            netamount=self._float_or_default(data.get("netamount"), 0.0),
+            cn_adjustment=self._float_or_default(data.get("cn_adjustment"), 0.0),
+            total=self._float_or_default(data.get("total"), 0.0),
+            paid=self._float_or_default(data.get("paid"), 0.0),
+            remaining=self._float_or_default(data.get("remaining"), 0.0),
+            session_id=self._int_or_default(data.get("session_id"), 0),
+            settlement={
+                "writeoff": self._float_or_default(data.get("writeoff"), 0.0),
+                "payable": self._float_or_default(data.get("payable"), 0.0),
+                "receivable": self._float_or_default(data.get("receivable"), 0.0),
+                "due_date": self._text_or_none(data.get("due_date")),
+            },
+        )
 
-        query = QSqlQuery()
-        query.prepare("""
-            INSERT INTO purchase (
-                supplier,
-                rep,
-                sellerinvoice,
-                subtotal,
-                discount,
-                tax_236g,
-                tax_236h,
-                salestax,
-                netamount,
-                cn_adjustment,
-                total,
-                paid,
-                remaining,
-                writeoff,
-                payable,
-                receivable,
-                due_date,
-                session_id
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """)
-
-        # ------------------------------------------------------------
-        # 3) Bind values in the same sequence as query columns
-        # ------------------------------------------------------------
-        query.addBindValue(normalized["supplier"])
-        query.addBindValue(normalized["rep"])
-        query.addBindValue(normalized["sellerinvoice"])
-        query.addBindValue(normalized["subtotal"])
-        query.addBindValue(normalized["discount"])
-        query.addBindValue(normalized["tax_236g"])
-        query.addBindValue(normalized["tax_236h"])
-        query.addBindValue(normalized["sales_tax"])
-        query.addBindValue(normalized["netamount"])
-        query.addBindValue(normalized["cn_adjustment"])
-        query.addBindValue(normalized["total"])
-        query.addBindValue(normalized["paid"])
-        query.addBindValue(normalized["remaining"])
-        query.addBindValue(normalized["writeoff"])
-        query.addBindValue(normalized["payable"])
-        query.addBindValue(normalized["receivable"])
-        query.addBindValue(normalized["due_date"])
-        query.addBindValue(normalized["session_id"])
-
-        # ------------------------------------------------------------
-        # 4) Execute insert
-        # ------------------------------------------------------------
-        if not query.exec():
-            raise Exception(f"Failed to save purchase header: {query.lastError().text()}")
-
-        # ------------------------------------------------------------
-        # 5) Read inserted purchase ID
-        # ------------------------------------------------------------
-        purchase_id = query.lastInsertId()
-
-        if purchase_id is None:
-            raise Exception("Purchase header saved, but could not retrieve purchase ID.")
-
-        # Some drivers return QVariant-like values, so force int if needed
-        try:
-            purchase_id = int(purchase_id)
-        except (TypeError, ValueError):
-            raise Exception("Purchase header saved, but returned purchase ID was invalid.")
+        purchase_id = insert_purchase_header(normalized)
 
         print("Purchase header saved successfully.")
         print("Purchase ID:", purchase_id)
@@ -1910,6 +1858,7 @@ class AddPurchaseWidget(QWidget):
             raise Exception("Purchase table is empty. Cannot save purchase without items.")
 
         saved_rows = 0
+        distribution = self._collect_purchase_distribution_context()
 
         # ------------------------------------------------------------
         # 2) Loop through each row
@@ -1962,14 +1911,7 @@ class AddPurchaseWidget(QWidget):
             batch = batch_edit.text().strip()
             expiry = expiry_edit.text().strip()
             if expiry:
-                parsed = self.parse_expiry_month_year(expiry)
-                if parsed is None:
-                    parsed = QDate.fromString(expiry, "yyyy-MM-dd")
-                if not parsed.isValid():
-                    parsed = QDate.fromString(expiry, "dd-MM-yyyy")
-                if not parsed.isValid():
-                    parsed = QDate.fromString(expiry, "dd MMM yyyy")
-                expiry = parsed.toString("yyyy-MM-dd") if parsed.isValid() else ""
+                expiry = parse_expiry_to_db_date(expiry)
 
             qty = qty_edit.text().strip()
             bonus = bonus_edit.text().strip()
@@ -2024,206 +1966,25 @@ class AddPurchaseWidget(QWidget):
             # --------------------------------------------------------
             # 8) Convert numeric values
             # --------------------------------------------------------
-            qty = self._float_or_default(qty, 0.0)
-            bonus = self._float_or_default(bonus, 0.0)
-            rate = self._float_or_default(rate, 0.0)
-            item_discount = self._float_or_default(item_discount, 0.0)
-            item_tax = self._float_or_default(item_tax, 0.0)
-            item_total = self._float_or_default(item_total, 0.0)
-
-            # --------------------------------------------------------
-            # 9) Business validation
-            # --------------------------------------------------------
-            if qty <= 0:
-                raise Exception(f"Quantity must be greater than zero in row {row + 1}.")
-
-            if bonus < 0:
-                raise Exception(f"Bonus cannot be negative in row {row + 1}.")
-
-            if rate < 0:
-                raise Exception(f"Rate cannot be negative in row {row + 1}.")
-
-            if item_discount < 0:
-                raise Exception(f"Discount cannot be negative in row {row + 1}.")
-
-            if item_tax < 0:
-                raise Exception(f"Tax cannot be negative in row {row + 1}.")
-
-
-
-        
-           
-            # --------------------------------------------------------
-            # 11) Insert into purchaseitem
-            # --------------------------------------------------------
-            # Calculate landing cost proportion for this line
-            # Landing Cost = Item Total * (Final Total with Fees / Line Subtotal)
-            
-            # Calculate line subtotal (sum of all item_total)
-            line_subtotal = 0.0
-            for check_row in range(row_count):
-                check_product_combo = self.table.cellWidget(check_row, 1)
-                if check_product_combo is not None and check_product_combo.currentData() is not None:
-                    check_total_edit = self.table.cellWidget(check_row, 9)
-                    if check_total_edit is not None:
-                        line_subtotal += max(0.0, self._float_or_default(check_total_edit.text(), 0.0))
-            
-            # Get header adjustments for landing cost distribution
-            header_discount = min(max(0.0, self._float_or_default(self.discount_entry.text(), 0.0)), line_subtotal)
-            header_tax_236g = max(0.0, self._float_or_default(self.tax_236g_entry.text(), 0.0))
-            header_tax_236h = max(0.0, self._float_or_default(self.tax_236h_entry.text(), 0.0))
-            header_sales_tax = max(0.0, self._float_or_default(self.sales_tax_entry.text(), 0.0))
-            cn_adjust = max(0.0, self._float_or_default(self.cn_adjustment_entry.text(), 0.0))
-            
-            # Calculate total with all header adjustments
-            header_adjustments = (-header_discount + header_tax_236g - header_tax_236h + header_sales_tax - cn_adjust)
-            total_with_fees = max(0.0, line_subtotal + header_adjustments)
-            
-            # Distribution factor for this line
-            if line_subtotal > 0:
-                distribution_factor = total_with_fees / line_subtotal
-            else:
-                distribution_factor = 1.0
-            
-            product = self._int_or_default(product, 0)
-            batch = self._text_or_none(batch)
-            expiry = self._text_or_none(expiry)
-            qty = self._float_or_default(qty, 0.0)
-            bonus = self._float_or_default(bonus, 0.0)
-            rate = self._float_or_default(rate, 0.0)
-            item_discount = self._float_or_default(item_discount, 0.0)
-            item_tax = self._float_or_default(item_tax, 0.0)
-            item_total = self._float_or_default(item_total, 0.0)
-            landing_cost = self._float_or_default(item_total * distribution_factor, 0.0)
-            
-            item_query = QSqlQuery()
-            item_query.prepare("""
-                INSERT INTO purchaseitem (
-                    purchase,
-                    product,
-                    qty,
-                    bonus,
-                    rate,
-                    discount,
-                    tax,
-                    total,
-                    landing_cost
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """)
-
-            item_query.addBindValue(purchase_id)
-            item_query.addBindValue(product)
-            item_query.addBindValue(qty)
-            item_query.addBindValue(bonus)
-            item_query.addBindValue(rate)
-            item_query.addBindValue(item_discount)
-            item_query.addBindValue(item_tax)
-            item_query.addBindValue(item_total)
-            item_query.addBindValue(landing_cost)
-
-            if not item_query.exec():
-                raise Exception(
-                    f"Failed to save purchase item in row {row + 1}: "
-                    f"{item_query.lastError().text()}"
-                )
-
-            purchase_item_id = item_query.lastInsertId()
-
-            if purchase_item_id is None:
-                raise Exception(f"Purchase item saved in row {row + 1}, but no ID was returned.")
-
             try:
-                purchase_item_id = int(purchase_item_id)
-            except (TypeError, ValueError):
-                raise Exception(f"Purchase item saved in row {row + 1}, but returned item ID was invalid.")
-
-            print("Purchase item saved with ID:", purchase_item_id)
-
-            # --------------------------------------------------------
-            # 12) Insert batch row
-            # --------------------------------------------------------
-            #
-            received = qty + bonus
-            
-             # get pack_size from price_pack
-            
-            size_query = QSqlQuery()
-            size_query.prepare("SELECT pack_size FROM price_pack WHERE product_id = ?")
-            size_query.addBindValue(product)
-            
-            if not size_query.exec() or not size_query.next():
-                raise Exception(f"Failed to fetch pack size for product ID {product}: {size_query.lastError().text()}")
-            
-            pack_size = size_query.value(0)
-            received_qty = received * pack_size if pack_size else qty
-
-            paid_qty = qty * pack_size if pack_size else qty
-            
-            batch_query = QSqlQuery()
-            batch_query.prepare("""
-                INSERT INTO batch (
-                    batch_no,
-                    expiry_date,
-                    
-                    product_id,
-                    purchaseitem_id,
-                    
-                    total_received,
-                    paid_qty,
-                    quantity_remaining,
-                    unit_cost,
-                    source
+                normalized_row = normalize_purchase_item_row(
+                    row_number=row + 1,
+                    product_id=self._int_or_default(product, 0),
+                    batch_text=batch,
+                    expiry_text=expiry,
+                    qty_text=qty,
+                    bonus_text=bonus,
+                    rate_text=rate,
+                    discount_text=item_discount,
+                    tax_text=item_tax,
+                    total_text=item_total,
+                    distribution_factor=distribution["distribution_factor"],
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """)
+            except ValueError as exc:
+                raise Exception(str(exc))
 
-            batch_query.addBindValue(batch)
-            batch_query.addBindValue(expiry)
-            
-            batch_query.addBindValue(product)
-            batch_query.addBindValue(purchase_item_id if purchase_item_id else None)
-            
-            unit_cost_per_unit = (
-                round(landing_cost / received_qty, 6)
-                if received_qty and received_qty > 0
-                else landing_cost
-            )
-
-            batch_query.addBindValue(self._float_or_default(received_qty, 0.0))
-            batch_query.addBindValue(self._float_or_default(paid_qty, 0.0))
-            batch_query.addBindValue(self._float_or_default(received_qty, 0.0))
-            batch_query.addBindValue(self._float_or_default(unit_cost_per_unit, 0.0))
-            batch_query.addBindValue('PURCHASE')
-            
-            print("Batch query lastError before exec:", batch_query.lastError().text())
-            print("Product:", product)
-            print("Purchase Item ID:", purchase_item_id)
-            print("Received:", received)
-            print("Qty:", qty)
-            print("Rate:", rate)
-            
-            if not batch_query.exec():
-                raise Exception(
-                    f"Failed to save batch in row {row + 1}: "
-                    f"{batch_query.lastError().text()}"
-                )
-
-            print(f"Batch saved successfully for row {row + 1}")
-
-            # Mark product as used once stock is successfully saved for it.
-            status_query = QSqlQuery()
-            status_query.prepare("""
-                UPDATE product
-                SET status = 'used'
-                WHERE id = ?
-            """)
-            status_query.addBindValue(product)
-            if not status_query.exec():
-                raise Exception(
-                    f"Failed to update product status in row {row + 1}: "
-                    f"{status_query.lastError().text()}"
-                )
+            purchase_item_id = self._persist_purchase_row(purchase_id, normalized_row, row + 1)
+            self._persist_purchase_batch(normalized_row, purchase_item_id, row + 1)
 
             saved_rows += 1
 
@@ -2247,7 +2008,6 @@ class AddPurchaseWidget(QWidget):
         session_id = self._int_or_default(data.get("session_id"), 0)
 
         paid = self._float_or_default(data.get("paid"), 0.0)
-        writeoff = self._float_or_default(data.get("writeoff"), 0.0)
         payable = self._float_or_default(data.get("payable"), 0.0)
         receivable = self._float_or_default(data.get("receivable"), 0.0)
         total = self._float_or_default(data.get("total"), 0.0)
@@ -2255,106 +2015,107 @@ class AddPurchaseWidget(QWidget):
         # ------------------------------------------------------------
         # 1) Get supplier balances BEFORE transaction
         # ------------------------------------------------------------
-        query = QSqlQuery()
-        query.prepare("SELECT payable, receiveable FROM supplier WHERE id = ?")
-        query.addBindValue(supplier)
-
-        if not query.exec() or not query.next():
-            raise Exception("Failed to fetch supplier balances.")
-
-        payable_before = float(query.value(0) or 0)
-        receiveable_before = float(query.value(1) or 0)
+        balances = fetch_supplier_balances(supplier)
+        payable_before = balances["payable_before"]
+        receiveable_before = balances["receiveable_before"]
 
         # ------------------------------------------------------------
         # 2) Calculate purchase transaction values
         # ------------------------------------------------------------
-        transaction_type = "PURCHASE"
-        ref = purchase_id
-        return_ref = None
-
-        due_amount = total
-        remaining_due = payable
-        payable_after = payable_before + payable
-
-        receiveable_now = receivable
-        received = paid
-        remaining_now = receivable
-        receiveable_after = receiveable_before + receivable
-
-
-        # ------------------------------------------------------------
-        # 4) Insert supplier transaction
-        # ------------------------------------------------------------
-        query = QSqlQuery()
-        query.prepare("""
-            INSERT INTO supplier_transaction 
-            (
-                supplier, transaction_type, ref, return_ref,
-                payable_before, due_amount, paid, remaining_due, payable_after,
-                receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
-                rep, session_id,
-                payment_method, bank_name, account_no, transaction_mode,
-                wallet_provider, wallet_no, payment_reference
-            ) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """)
-
-        query.addBindValue(supplier)
-        query.addBindValue(transaction_type)
-        query.addBindValue(ref)
-        query.addBindValue(return_ref)
-
-        query.addBindValue(payable_before)
-        query.addBindValue(due_amount)
-        query.addBindValue(paid)
-        query.addBindValue(remaining_due)
-        query.addBindValue(payable_after)
-
-        query.addBindValue(receiveable_before)
-        query.addBindValue(receiveable_now)
-        query.addBindValue(received)
-        query.addBindValue(remaining_now)
-        query.addBindValue(receiveable_after)
-
-        query.addBindValue(rep)
-        query.addBindValue(session_id)
-        
         payment = self._normalize_payment_data(self.payment_handler.payment_data.copy())
-        
+        payload = build_supplier_transaction_payload(
+            purchase_id=purchase_id,
+            supplier_id=supplier,
+            rep_id=rep,
+            session_id=session_id,
+            total=total,
+            paid=paid,
+            settlement={
+                "payable": payable,
+                "receivable": receivable,
+            },
+            payable_before=payable_before,
+            receiveable_before=receiveable_before,
+            payment=payment,
+        )
+
         print(payment)
-        
 
-        query.addBindValue(payment["payment_method"])
-        query.addBindValue(payment["bank_name"])
-        query.addBindValue(payment["account_no"])
-        query.addBindValue(payment["transaction_mode"])
-        query.addBindValue(payment["wallet_provider"])
-        query.addBindValue(payment["wallet_no"])
-        query.addBindValue(payment["payment_reference"])
-
-        
-
-        if not query.exec():
-            raise Exception(f"Failed to save supplier transaction: {query.lastError().text()}")
+        insert_supplier_transaction(payload)
 
         # ------------------------------------------------------------
         # 5) Update supplier table balances
         # ------------------------------------------------------------
-        update_query = QSqlQuery()
-        update_query.prepare("""
-            UPDATE supplier
-            SET payable = ?, receiveable = ?
-            WHERE id = ?
-        """)
-
-        update_query.addBindValue(payable_after)
-        update_query.addBindValue(receiveable_after)
-        update_query.addBindValue(supplier)
-
-        if not update_query.exec():
-            raise Exception(f"Failed to update supplier balances: {update_query.lastError().text()}")
+        update_supplier_balances(
+            supplier,
+            payable_after=payload["payable_after"],
+            receiveable_after=payload["receiveable_after"],
+        )
 
         print("Supplier transaction saved successfully.")    
+
+    def _collect_purchase_distribution_context(self):
+        row_count = self.table.rowCount()
+        line_subtotal = 0.0
+
+        for row in range(row_count):
+            product_combo = self.table.cellWidget(row, 1)
+            if product_combo is None or product_combo.currentData() is None:
+                continue
+            total_edit = self.table.cellWidget(row, 9)
+            if total_edit is None:
+                continue
+            line_subtotal += max(0.0, self._float_or_default(total_edit.text(), 0.0))
+
+        return compute_purchase_distribution_factor(
+            line_subtotal=line_subtotal,
+            header_discount=self._float_or_default(self.discount_entry.text(), 0.0),
+            header_tax_236g=self._float_or_default(self.tax_236g_entry.text(), 0.0),
+            header_tax_236h=self._float_or_default(self.tax_236h_entry.text(), 0.0),
+            header_sales_tax=self._float_or_default(self.sales_tax_entry.text(), 0.0),
+            cn_adjustment=self._float_or_default(self.cn_adjustment_entry.text(), 0.0),
+        )
+
+    def _persist_purchase_row(self, purchase_id, normalized_row, row_number):
+        try:
+            purchase_item_id = insert_purchase_item(purchase_id, normalized_row)
+        except Exception as exc:
+            raise Exception(f"Failed to save purchase item in row {row_number}: {exc}")
+
+        print("Purchase item saved with ID:", purchase_item_id)
+        return purchase_item_id
+
+    def _persist_purchase_batch(self, normalized_row, purchase_item_id, row_number):
+        pack_size = fetch_product_pack_size(normalized_row["product"])
+        batch_payload = build_batch_payload(
+            product_id=normalized_row["product"],
+            purchase_item_id=purchase_item_id,
+            qty=normalized_row["qty"],
+            bonus=normalized_row["bonus"],
+            pack_size=pack_size,
+            landing_cost=normalized_row["landing_cost"],
+            batch=normalized_row["batch"],
+            expiry=normalized_row["expiry"],
+        )
+
+        print("Batch payload:", batch_payload)
+        print("Product:", normalized_row["product"])
+        print("Purchase Item ID:", purchase_item_id)
+        print("Received:", normalized_row["qty"] + normalized_row["bonus"])
+        print("Qty:", normalized_row["qty"])
+        print("Rate:", normalized_row["rate"])
+
+        try:
+            insert_batch_record(batch_payload)
+        except Exception as exc:
+            raise Exception(f"Failed to save batch in row {row_number}: {exc}")
+
+        print(f"Batch saved successfully for row {row_number}")
+
+        try:
+            mark_product_used(normalized_row["product"])
+        except Exception as exc:
+            raise Exception(f"Failed to update product status in row {row_number}: {exc}")
             
             
     

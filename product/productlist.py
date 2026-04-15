@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QHeaderView,QDialog, QLineEdit,QComboBox, QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QTableWidget, QTableWidgetItem, QMessageBox, QSpinBox, QAbstractItemView, QApplication, QCheckBox, QCompleter
 from PySide6.QtCore import QFile, Qt, Signal, QTimer, QStringListModel
-from PySide6.QtSql import QSqlQuery, QSqlDatabase
+from PySide6.QtSql import QSqlDatabase
 from functools import partial
 from PySide6.QtGui import QColor
 from utilities.product_search_widget import ProductSearchBox
@@ -14,6 +14,30 @@ from utilities.stylus import load_stylesheets
 from utilities.activity_logger import log_activity
 from utilities.permissions import Permissions
 from utilities.app_messagebox import AppMessageBox
+from services.stock_adjustment_service import (
+    apply_stock_adjustments,
+    build_stock_adjustment_log_note,
+    fetch_adjustable_products,
+    fetch_adjustment_batches_for_product,
+    normalize_stock_adjustment_row,
+)
+from services.product_catalog_service import (
+    build_product_stock_filter_clause,
+    fetch_expired_product_rows,
+    fetch_low_stock_rows,
+    fetch_product_by_barcode,
+    fetch_product_listing_page,
+    fetch_used_product_count,
+    search_products,
+)
+from services.product_admin_service import (
+    fetch_manufacturer_lookup,
+    insert_price_change_log,
+    resolve_auth_user_id,
+    resolve_price_change_product,
+    search_price_change_products,
+    update_product_default_pack_price,
+)
 
 
 def resource_path(relative_path: str) -> str:
@@ -223,16 +247,11 @@ class ProductListWidget(QWidget):
         self.setStyleSheet(load_stylesheets())
 
     def _get_manufacturer_lookup(self):
-        lookup = {}
-        query = QSqlQuery()
-        if query.exec("SELECT id, name FROM manufacturer"):
-            while query.next():
-                try:
-                    key = str(int(query.value(0)))
-                except Exception:
-                    continue
-                lookup[key] = str(query.value(1) or "")
-        return lookup
+        try:
+            return fetch_manufacturer_lookup()
+        except Exception as exc:
+            print("Manufacturer lookup failed:", exc)
+            return {}
 
     def open_master_catalog_dialog(self):
         csv_path = resource_path("master_products.csv")
@@ -346,69 +365,30 @@ class ProductListWidget(QWidget):
     def view_low_stock(self):
         
         print("view low stock clicked")
+        try:
+            rows = fetch_low_stock_rows()
+        except Exception as exc:
+            AppMessageBox.critical(self, "Error", str(exc))
+            return
 
-        # Implement the logic to view low stock products
-        low_stock_query = QSqlQuery()
-        low_stock_query.exec("""
-                SELECT 
-                    p.id,
-                    p.display_name,
-                    p.code, p.generic_name, p.brand,
-                    COALESCE(SUM(b.quantity_remaining), 0) AS total_stock
-                FROM product p
-                LEFT JOIN batch b ON b.product_id = p.id
-                LEFT JOIN (
-                    SELECT product_id, MAX(COALESCE(reorder_level, 0)) AS reorder_level
-                    FROM price_pack
-                    GROUP BY product_id
-                ) pp ON pp.product_id = p.id
-                WHERE p.status = 'used'
-                GROUP BY p.id, p.display_name, p.code, p.generic_name, p.brand
-                HAVING COALESCE(SUM(b.quantity_remaining), 0) <= MAX(COALESCE(pp.reorder_level, 0));
-            """)
-
-
-        # Show the results in a new dialog or table
-        self.show_query_results(low_stock_query)
+        self.show_query_results(rows)
         
         
         
     def view_expired_products(self):
         
         print("view expired products clicked")
+        try:
+            rows = fetch_expired_product_rows()
+        except Exception as exc:
+            AppMessageBox.critical(self, "Error", str(exc))
+            return
 
-        # Implement the logic to view expired products
-        expired_query = QSqlQuery()
-        expired_query.exec("""
-            SELECT DISTINCT
-                p.id,
-                p.display_name,
-                p.code,
-                p.generic_name,
-                p.brand
-            FROM product p
-            JOIN batch b ON b.product_id = p.id
-            WHERE
-                p.status = 'used'
-                AND b.quantity_remaining > 0
-                AND b.expiry_date IS NOT NULL
-                AND (
-                    CASE
-                        WHEN b.expiry_date LIKE '____-__-__' THEN date(b.expiry_date)
-                        WHEN b.expiry_date LIKE '__-__-____'
-                            THEN date(substr(b.expiry_date, 7, 4) || '-' || substr(b.expiry_date, 4, 2) || '-' || substr(b.expiry_date, 1, 2))
-                        ELSE NULL
-                    END
-                ) < date('now', 'localtime')
-            ORDER BY p.display_name ASC
-        """)
-
-        # Show the results in a new dialog or table
-        self.show_query_results(expired_query)
+        self.show_query_results(rows)
 
     
     
-    def show_query_results(self, query):
+    def show_query_results(self, rows):
         # Create a dialog to show the results
         dialog = QDialog(self)
         dialog.setWindowTitle("Query Results")
@@ -432,10 +412,17 @@ class ProductListWidget(QWidget):
         results_table.setRowCount(0)
         row = 0
 
-        while query.next():
+        for record in rows:
             results_table.insertRow(row)
-            for col in range(5):  # Adjust based on expected columns
-                item = QTableWidgetItem(str(query.value(col)))
+            values = [
+                record.get("id", ""),
+                record.get("name", ""),
+                record.get("code", ""),
+                record.get("generic", ""),
+                record.get("brand", ""),
+            ]
+            for col, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
                 results_table.setItem(row, col, item)
             row += 1
 
@@ -450,47 +437,48 @@ class ProductListWidget(QWidget):
 
     def show_products_info(self):
         
-        # Fetch total products
-        total_query = QSqlQuery()
-        total_query.exec("SELECT COUNT(*) FROM product WHERE status = 'used'")
-        if total_query.next():
-            total_products = total_query.value(0)
-            self.total_products_value.setText(str(total_products))
-        else:
-            self.total_products_value.setText("0")
-
-
-        # Fetch out of stock products
-        low_stock_query = QSqlQuery()
-        low_stock_query.exec("""
-            SELECT COUNT(*) AS out_of_stock_count
-            FROM (
-                SELECT p.id
-                FROM product p
-                LEFT JOIN batch b ON b.product_id = p.id
-                LEFT JOIN (
-                    SELECT product_id, MAX(COALESCE(reorder_level, 0)) AS reorder_level
-                    FROM price_pack
-                    GROUP BY product_id
-                ) pp ON pp.product_id = p.id
-                WHERE p.status = 'used'
-                GROUP BY p.id
-                HAVING COALESCE(SUM(b.quantity_remaining), 0) <= MAX(COALESCE(pp.reorder_level, 0))
-            ) t;
-
-
-        """)
+        try:
+            total_products = fetch_used_product_count()
+        except Exception:
+            total_products = 0
+        self.total_products_value.setText(str(total_products))
 
 
     def get_stock_filter_clause(self):
-        stock_filter = self.stock_status.currentText()
-        if stock_filter == "Available":
-            return " AND p.status = 'used'"
-        if stock_filter == "In Stock":
-            return " AND p.status = 'used' AND COALESCE(bs.total_stock, 0) > 0"
-        if stock_filter == "Out of Stock":
-            return " AND p.status = 'used' AND COALESCE(bs.total_stock, 0) <= 0"
-        return ""
+        return build_product_stock_filter_clause(self.stock_status.currentText())
+
+    def _set_product_table_row(self, row_index, row_data, *, sequence_number):
+        product_id = int(row_data["product_id"])
+        display_name = str(row_data["display_name"] or "")
+        manufacturer_name = str(row_data["manufacturer_name"] or "")
+        total_stock = row_data["total_stock"] or 0
+
+        self.table.insertRow(row_index)
+        self.table.setItem(row_index, 0, QTableWidgetItem(str(sequence_number)))
+        self.table.setItem(row_index, 1, QTableWidgetItem(display_name))
+        self.table.setItem(row_index, 2, QTableWidgetItem(manufacturer_name))
+        self.table.setItem(row_index, 3, QTableWidgetItem(str(total_stock)))
+
+        detail = QPushButton("Details")
+        detail.setCursor(Qt.PointingHandCursor)
+        detail.setFixedSize(80, 28)
+        detail.setStyleSheet("""
+            QPushButton {
+                background-color: #f5f0f6;
+                color: #244A62;
+                border: 1px solid #d8c7da;
+                border-radius: 14px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #244A62;
+                color: white;
+                border: 1px solid #244A62;
+            }
+        """)
+        detail.clicked.connect(partial(self.detailpagesignal.emit, product_id))
+        self.table.setCellWidget(row_index, 4, detail)
 
 
     def on_unified_search_text_changed(self):
@@ -535,81 +523,24 @@ class ProductListWidget(QWidget):
                 self.load_products_into_table(page=1, page_size=self.page_size)
             return
 
-        from_clause = """
-            FROM product p
-            LEFT JOIN manufacturer m ON p.manufacturer_id = m.id
-            LEFT JOIN (
-                SELECT product_id, SUM(quantity_remaining) AS total_stock
-                FROM batch
-                GROUP BY product_id
-            ) bs ON p.id = bs.product_id
-        """
-
-        where_clause = "WHERE TRIM(CAST(p.code AS TEXT)) = ?"
-        where_clause += self.get_stock_filter_clause()
-
-        query = QSqlQuery()
-        query.prepare(f"""
-            SELECT
-                p.id,
-                p.display_name,
-                COALESCE(m.name, '') AS manufacturer_name,
-                COALESCE(bs.total_stock, 0) AS total_stock
-            {from_clause}
-            {where_clause}
-            LIMIT 1
-        """)
-        query.addBindValue(code_text)
-
-        if not query.exec():
-            print("Barcode search query failed:", query.lastError().text())
+        try:
+            record = fetch_product_by_barcode(
+                code_text,
+                stock_filter=self.stock_status.currentText(),
+            )
+        except Exception as exc:
+            print("Barcode search query failed:", exc)
             return
 
         self.table.setRowCount(0)
-        if not query.next():
+        if not record:
             AppMessageBox.information(self, "Not Found", f"No product found for barcode '{code_text}'.")
             self.total_products_value.setText("<b>0</b>")
             self.prev_button.setEnabled(False)
             self.next_button.setEnabled(False)
             return
 
-        product_id = int(query.value(0))
-        display_name = str(query.value(1) or "")
-        manufacturer_name = str(query.value(2) or "")
-        total_stock = query.value(3) or 0
-
-        self.table.insertRow(0)
-        self.table.setItem(0, 0, QTableWidgetItem("1"))
-        self.table.setItem(0, 1, QTableWidgetItem(display_name))
-        self.table.setItem(0, 2, QTableWidgetItem(manufacturer_name))
-        self.table.setItem(0, 3, QTableWidgetItem(str(total_stock)))
-
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setAlignment(Qt.AlignCenter)
-
-        detail = QPushButton("Details")
-        detail.setCursor(Qt.PointingHandCursor)
-        detail.setFixedSize(80, 28)
-        detail.setStyleSheet("""
-            QPushButton {
-                background-color: #f5f0f6;
-                color: #244A62;
-                border: 1px solid #d8c7da;
-                border-radius: 14px;
-                font-size: 12px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background-color: #244A62;
-                color: white;
-                border: 1px solid #244A62;
-            }
-        """)
-        layout.addWidget(detail)
-        detail.clicked.connect(partial(self.detailpagesignal.emit, product_id))
-        self.table.setCellWidget(0, 4, detail)
+        self._set_product_table_row(0, record, sequence_number=1)
 
         self.total_products_value.setText("<b>1</b>")
         self.prev_button.setEnabled(False)
@@ -677,200 +608,27 @@ class ProductListWidget(QWidget):
             return
 
         category = self.search_category.currentText()
-        pattern = f"%{text}%"
-        prefix_pattern = f"{text}%"
-        offset = (page - 1) * page_size
-
         self.table.setRowCount(0)
-
-        # common FROM + JOIN part
-        from_clause = """
-            FROM product p
-            LEFT JOIN manufacturer m
-                ON p.manufacturer_id = m.id
-            LEFT JOIN (
-                SELECT product_id, SUM(quantity_remaining) AS total_stock
-                FROM batch
-                GROUP BY product_id
-            ) bs
-                ON p.id = bs.product_id
-        """
-
-        where_clause = "WHERE 1=1"
-        where_clause += self.get_stock_filter_clause()
-
-        bindings = []
-        order_bindings = []
-        order_clause = "ORDER BY p.id DESC"
-
-        if category == "Product":
-            where_clause += " AND p.display_name LIKE ?"
-            bindings.append(pattern)
-            order_clause = """
-                ORDER BY
-                    CASE
-                        WHEN UPPER(p.display_name) = UPPER(?) THEN 0
-                        WHEN UPPER(p.display_name) LIKE UPPER(?) THEN 1
-                        ELSE 2
-                    END,
-                    p.display_name ASC,
-                    p.id DESC
-            """
-            order_bindings.extend([text, prefix_pattern])
-
-        elif category == "Brand":
-            where_clause += " AND COALESCE(m.name, '') LIKE ?"
-            bindings.append(pattern)
-            order_clause = """
-                ORDER BY
-                    CASE
-                        WHEN UPPER(COALESCE(m.name, '')) = UPPER(?) THEN 0
-                        WHEN UPPER(COALESCE(m.name, '')) LIKE UPPER(?) THEN 1
-                        ELSE 2
-                    END,
-                    COALESCE(m.name, '') ASC,
-                    p.display_name ASC,
-                    p.id DESC
-            """
-            order_bindings.extend([text, prefix_pattern])
-
-        elif category == "All":
-            where_clause += """
-                AND (
-                    p.display_name LIKE ?
-                    OR COALESCE(m.name, '') LIKE ?
-                )
-            """
-            bindings.extend([pattern, pattern])
-            order_clause = """
-                ORDER BY
-                    CASE
-                        WHEN UPPER(p.display_name) = UPPER(?) THEN 0
-                        WHEN UPPER(p.display_name) LIKE UPPER(?) THEN 1
-                        WHEN UPPER(COALESCE(m.name, '')) = UPPER(?) THEN 2
-                        WHEN UPPER(COALESCE(m.name, '')) LIKE UPPER(?) THEN 3
-                        ELSE 4
-                    END,
-                    p.display_name ASC,
-                    p.id DESC
-            """
-            order_bindings.extend([text, prefix_pattern, text, prefix_pattern])
-
-        else:
-            where_clause += " AND p.display_name LIKE ?"
-            bindings.append(pattern)
-            order_clause = """
-                ORDER BY
-                    CASE
-                        WHEN UPPER(p.display_name) = UPPER(?) THEN 0
-                        WHEN UPPER(p.display_name) LIKE UPPER(?) THEN 1
-                        ELSE 2
-                    END,
-                    p.display_name ASC,
-                    p.id DESC
-            """
-            order_bindings.extend([text, prefix_pattern])
-
-        # 1) count only filtered rows
-        count_query = QSqlQuery()
-        count_sql = f"""
-            SELECT COUNT(*)
-            {from_clause}
-            {where_clause}
-        """
-        count_query.prepare(count_sql)
-
-        for value in bindings:
-            count_query.addBindValue(value)
-
-        total_records = 0
-        if count_query.exec() and count_query.next():
-            total_records = int(count_query.value(0))
-        else:
-            print("Count query failed:", count_query.lastError().text())
+        offset = (page - 1) * page_size
+        try:
+            result = search_products(
+                text=text,
+                category=category,
+                stock_filter=self.stock_status.currentText(),
+                page=page,
+                page_size=page_size,
+            )
+        except Exception as exc:
+            print("Search query failed:", exc)
             return
 
-        # 2) load only current page
-        data_query = QSqlQuery()
-        data_sql = f"""
-            SELECT
-                p.id,
-                p.display_name,
-                COALESCE(m.name, '') AS manufacturer_name,
-                COALESCE(bs.total_stock, 0) AS total_stock
-            {from_clause}
-            {where_clause}
-            {order_clause}
-            LIMIT ? OFFSET ?
-        """
-        data_query.prepare(data_sql)
-
-        for value in bindings:
-            data_query.addBindValue(value)
-        for value in order_bindings:
-            data_query.addBindValue(value)
-
-        data_query.addBindValue(page_size)
-        data_query.addBindValue(offset)
-
-        if not data_query.exec():
-            print("Search query failed:", data_query.lastError().text())
-            return
-
-        row = 0
-        while data_query.next():
-            self.table.insertRow(row)
-
-            product_id = int(data_query.value(0))
-            display_name = str(data_query.value(1) or "")
-            manufacturer_name = str(data_query.value(2) or "")
-            total_stock = data_query.value(3) or 0
-
-            self.table.setItem(row, 0, QTableWidgetItem(str(offset + row + 1)))
-            self.table.setItem(row, 1, QTableWidgetItem(display_name))
-            self.table.setItem(row, 2, QTableWidgetItem(manufacturer_name))
-            self.table.setItem(row, 3, QTableWidgetItem(str(total_stock)))
-
-            container = QWidget()
-            layout = QHBoxLayout(container)
-            layout.setContentsMargins(10, 10, 10, 10)
-            layout.setAlignment(Qt.AlignCenter)
-
-            container = QWidget()
-
-            layout = QHBoxLayout(container)
-            layout.setContentsMargins(10, 10, 10, 10)
-            layout.setAlignment(Qt.AlignCenter)
-
-            detail = QPushButton("Details")
-            detail.setCursor(Qt.PointingHandCursor)
-            detail.setFixedSize(80, 28)
-
-            detail.setStyleSheet("""
-                QPushButton {
-                    background-color: #f5f0f6;
-                    color: #244A62;
-                    border: 1px solid #d8c7da;
-                    border-radius: 14px;
-                    font-size: 12px;
-                    font-weight: 600;
-                }
-                QPushButton:hover {
-                    background-color: #244A62;
-                    color: white;
-                    border: 1px solid #244A62;
-                }
-            """)
-
-            layout.addWidget(detail)
-
-
-            detail.clicked.connect(partial(self.detailpagesignal.emit, product_id))
-            
-            self.table.setCellWidget(row, 4, detail)
-
-
-            row += 1
+        total_records = result["total_records"]
+        for row_index, row_data in enumerate(result["rows"]):
+            self._set_product_table_row(
+                row_index,
+                row_data,
+                sequence_number=offset + row_index + 1,
+            )
 
         self.total_products_value.setText(f"<b>{total_records}</b>")
 
@@ -888,102 +646,25 @@ class ProductListWidget(QWidget):
         self.page_size = page_size
         self.current_search_text = ""
 
-        stock_where = "WHERE 1=1"
-        stock_where += self.get_stock_filter_clause()
-
-        from_clause = """
-            FROM product p
-            LEFT JOIN manufacturer m ON p.manufacturer_id = m.id
-            LEFT JOIN (
-                SELECT product_id, SUM(quantity_remaining) AS total_stock
-                FROM batch
-                GROUP BY product_id
-            ) bs ON p.id = bs.product_id
-        """
-
-        # total count
-        count_query = QSqlQuery()
-        if not count_query.exec(f"SELECT COUNT(*) {from_clause} {stock_where}"):
-            print("Count error:", count_query.lastError().text())
+        try:
+            result = fetch_product_listing_page(
+                stock_filter=self.stock_status.currentText(),
+                page=page,
+                page_size=page_size,
+            )
+        except Exception as exc:
+            print("Load error:", exc)
             return
-
-        total_records = 0
-        if count_query.next():
-            total_records = int(count_query.value(0))
 
         offset = (page - 1) * page_size
-
-        query = QSqlQuery()
-        query.prepare(f"""
-            SELECT 
-                p.id,
-                p.display_name,
-                COALESCE(m.name, '') AS manufacturer_name,
-                COALESCE(bs.total_stock, 0) AS total_stock
-            {from_clause}
-            {stock_where}
-            ORDER BY p.id DESC
-            LIMIT ? OFFSET ?
-        """)
-        query.addBindValue(page_size)
-        query.addBindValue(offset)
-
-        if not query.exec():
-            print("Load error:", query.lastError().text())
-            return
-
         self.table.setRowCount(0)
-        row = 0
-
-        while query.next():
-            self.table.insertRow(row)
-
-            product_id = int(query.value(0))
-            display_name = str(query.value(1) or "")
-            manufacturer_name = str(query.value(2) or "")
-            total_stock = query.value(3) or 0
-
-            self.table.setItem(row, 0, QTableWidgetItem(str(offset + row + 1)))
-            self.table.setItem(row, 1, QTableWidgetItem(display_name))
-            self.table.setItem(row, 2, QTableWidgetItem(manufacturer_name))
-            self.table.setItem(row, 3, QTableWidgetItem(str(total_stock)))
-            
-            
-           
-            container = QWidget()
-
-            layout = QHBoxLayout(container)
-            layout.setContentsMargins(10, 10, 10, 10)
-            layout.setAlignment(Qt.AlignCenter)
-
-            detail = QPushButton("Details")
-            detail.setCursor(Qt.PointingHandCursor)
-            detail.setFixedSize(80, 28)
-
-            detail.setStyleSheet("""
-                QPushButton {
-                    background-color: #f5f0f6;
-                    color: #244A62;
-                    border: 1px solid #d8c7da;
-                    border-radius: 14px;
-                    font-size: 12px;
-                    font-weight: 600;
-                }
-                QPushButton:hover {
-                    background-color: #244A62;
-                    color: white;
-                    border: 1px solid #244A62;
-                }
-            """)
-
-            layout.addWidget(detail)
-
-            detail.clicked.connect(partial(self.detailpagesignal.emit, product_id))
-            
-            self.table.setCellWidget(row, 4, detail)
-
-            row += 1
-            
+        total_records = result["total_records"]
+        for row_index, row_data in enumerate(result["rows"]):
+            self._set_product_table_row(
+                row_index,
+                row_data,
+                sequence_number=offset + row_index + 1,
+            )
 
         self.total_products_value.setText(f"<b>{total_records}</b>")
 
@@ -1103,36 +784,21 @@ class InventoryAdjustmentDialog(QDialog):
 
     def get_current_user_id(self):
         username = QApplication.instance().property("username")
-        if not username:
-            return None
-
-        query = QSqlQuery()
-        query.prepare("SELECT id FROM auth WHERE username = ? LIMIT 1")
-        query.addBindValue(username)
-        if query.exec() and query.next():
-            return int(query.value(0))
-        return None
+        return resolve_auth_user_id(username)
 
     def populate_product_selector(self):
         self.product_selector.blockSignals(True)
         self.product_selector.clear()
         self.product_selector.addItem("Select a product...", None)
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT id, display_name
-            FROM product
-            WHERE status = 'used'
-            ORDER BY display_name ASC
-        """)
-
-        if not query.exec():
-            AppMessageBox.critical(self, "Error", f"Failed to load products: {query.lastError().text()}")
+        try:
+            product_rows = fetch_adjustable_products()
+        except Exception as exc:
+            AppMessageBox.critical(self, "Error", str(exc))
             self.product_selector.blockSignals(False)
             return
 
-        while query.next():
-            self.product_selector.addItem(str(query.value(1) or ""), int(query.value(0)))
+        for row in product_rows:
+            self.product_selector.addItem(row["display_name"], row["product_id"])
 
         self.product_selector.blockSignals(False)
 
@@ -1148,41 +814,21 @@ class InventoryAdjustmentDialog(QDialog):
             return
 
         include_sold_out = self.show_sold_out_checkbox.isChecked()
-
-        sql = """
-            SELECT
-                id,
-                COALESCE(batch_no, ''),
-                COALESCE(expiry_date, ''),
-                COALESCE(quantity_remaining, 0)
-            FROM batch
-            WHERE product_id = ?
-        """
-
-        if not include_sold_out:
-            sql += "\n              AND COALESCE(quantity_remaining, 0) > 0"
-
-        sql += """
-            ORDER BY received_at ASC, id ASC
-        """
-
-        query = QSqlQuery()
-        query.prepare(sql)
-        query.addBindValue(product_id)
-
-        if not query.exec():
-            AppMessageBox.critical(self, "Error", f"Failed to load batches: {query.lastError().text()}")
+        try:
+            batch_snapshot = fetch_adjustment_batches_for_product(
+                product_id,
+                include_sold_out=include_sold_out,
+            )
+        except Exception as exc:
+            AppMessageBox.critical(self, "Error", str(exc))
             return
 
         row = 0
-        total_stock = 0
-        while query.next():
-            batch_id = int(query.value(0))
-            batch_no = str(query.value(1) or "")
-            expiry_date = str(query.value(2) or "")
-            system_qty = int(query.value(3) or 0)
-
-            total_stock += system_qty
+        for batch_row in batch_snapshot["rows"]:
+            batch_id = batch_row["batch_id"]
+            batch_no = batch_row["batch_no"]
+            expiry_date = batch_row["expiry_date"]
+            system_qty = batch_row["system_qty"]
             self.batch_table.insertRow(row)
 
             id_item = QTableWidgetItem(str(batch_id))
@@ -1222,7 +868,7 @@ class InventoryAdjustmentDialog(QDialog):
 
             row += 1
 
-        self.stock_summary.setText(f"System Stock: {total_stock}")
+        self.stock_summary.setText(f"System Stock: {batch_snapshot['total_stock']}")
 
     def update_row_delta(self):
         for row in range(self.batch_table.rowCount()):
@@ -1262,36 +908,27 @@ class InventoryAdjustmentDialog(QDialog):
             old_qty = int(current_item.text() or 0)
             new_qty = int(actual_widget.value())
 
-            if new_qty == old_qty:
-                continue
-
             batch_no_item = self.batch_table.item(row, 1)
             batch_no = batch_no_item.text().strip() if batch_no_item else ""
 
             reason = reason_widget.currentText().strip()
-            if reason == "Select reason...":
-                AppMessageBox.warning(
-                    self,
-                    "Validation Error",
-                    f"Reason is required for changed row {row + 1}."
+            note = note_widget.text().strip()
+            try:
+                normalized_row = normalize_stock_adjustment_row(
+                    row_number=row + 1,
+                    batch_id=batch_id,
+                    batch_no=batch_no,
+                    old_qty=old_qty,
+                    new_qty=new_qty,
+                    reason=reason,
+                    note=note,
                 )
+            except ValueError as exc:
+                AppMessageBox.warning(self, "Validation Error", str(exc))
                 return
 
-            note = note_widget.text().strip()
-            delta = new_qty - old_qty
-            adjustment_type = "addition" if delta > 0 else "deduction"
-            qty = abs(delta)
-
-            changed_rows.append({
-                "batch_id": batch_id,
-                "batch_no": batch_no,
-                "old_qty": old_qty,
-                "new_qty": new_qty,
-                "qty": qty,
-                "adjustment_type": adjustment_type,
-                "reason": reason,
-                "note": note,
-            })
+            if normalized_row is not None:
+                changed_rows.append(normalized_row)
 
         if not changed_rows:
             AppMessageBox.information(self, "No Changes", "No modified rows found.")
@@ -1302,41 +939,12 @@ class InventoryAdjustmentDialog(QDialog):
             AppMessageBox.critical(self, "Database Error", "Failed to start inventory adjustment transaction.")
             return
 
-        insert_query = QSqlQuery(db)
-        update_query = QSqlQuery(db)
-
-        for row_data in changed_rows:
-            insert_query.prepare("""
-                INSERT INTO inventory_adjustment (
-                    batch_id, qty, adjustment_type, old_qty, new_qty, reason, note, adjusted_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """)
-            insert_query.addBindValue(row_data["batch_id"])
-            insert_query.addBindValue(row_data["qty"])
-            insert_query.addBindValue(row_data["adjustment_type"])
-            insert_query.addBindValue(row_data["old_qty"])
-            insert_query.addBindValue(row_data["new_qty"])
-            insert_query.addBindValue(row_data["reason"])
-            insert_query.addBindValue(row_data["note"])
-            insert_query.addBindValue(self.current_user_id)
-
-            if not insert_query.exec():
-                db.rollback()
-                AppMessageBox.critical(self, "Save Failed", f"Failed to insert adjustment: {insert_query.lastError().text()}")
-                return
-
-            update_query.prepare("""
-                UPDATE batch
-                SET quantity_remaining = ?
-                WHERE id = ?
-            """)
-            update_query.addBindValue(row_data["new_qty"])
-            update_query.addBindValue(row_data["batch_id"])
-
-            if not update_query.exec():
-                db.rollback()
-                AppMessageBox.critical(self, "Save Failed", f"Failed to update batch stock: {update_query.lastError().text()}")
-                return
+        try:
+            apply_stock_adjustments(changed_rows, self.current_user_id)
+        except Exception as exc:
+            db.rollback()
+            AppMessageBox.critical(self, "Save Failed", str(exc))
+            return
 
         if not db.commit():
             db.rollback()
@@ -1348,18 +956,12 @@ class InventoryAdjustmentDialog(QDialog):
         # Audit log — one row per adjusted batch (non-blocking)
         product_name = self.product_selector.currentText()
         for row_data in changed_rows:
-            direction = "increased" if row_data["adjustment_type"] == "addition" else "decreased"
-            batch_label = row_data["batch_no"] or str(row_data["batch_id"])
             log_activity(
                 category="stock",
                 action="stock_adjusted",
                 entity_type="batch",
                 entity_id=row_data["batch_id"],
-                note=(
-                    f"Stock was {direction} for {product_name}, batch {batch_label}. "
-                    f"Quantity changed from {row_data['old_qty']} to {row_data['new_qty']}. "
-                    f"Reason: {row_data['reason']}."
-                ),
+                note=build_stock_adjustment_log_note(product_name, row_data),
                 previous_value=str(row_data["old_qty"]),
                 new_value=str(row_data["new_qty"])
             )
@@ -1528,38 +1130,16 @@ class PriceChangeDialog(QDialog):
 
     def _product_selector_query(self, search_text: str) -> list:
         """Custom query for price-change product selector: searches by name OR code."""
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                p.id,
-                COALESCE(p.display_name, '') AS display_name,
-                COALESCE(CAST(p.code AS TEXT), '') AS code,
-                COALESCE((
-                    SELECT pp.pack_price
-                    FROM price_pack pp
-                    WHERE pp.product_id = p.id
-                    ORDER BY pp.is_default DESC, pp.id ASC
-                    LIMIT 1
-                ), 0) AS current_price
-            FROM product p
-            WHERE
-                p.display_name LIKE ?
-                OR TRIM(CAST(p.code AS TEXT)) LIKE ?
-            ORDER BY p.display_name ASC
-            LIMIT 10
-        """)
-        query.addBindValue(f"%{search_text}%")
-        query.addBindValue(f"%{search_text}%")
         results = []
-        if query.exec():
-            while query.next():
-                label = f"{str(query.value(1) or '')} [{str(query.value(2) or '')}]"
-                results.append((label, {
-                    "product_id": int(query.value(0) or 0),
-                    "product_name": str(query.value(1) or ""),
-                    "code": str(query.value(2) or ""),
-                    "current_price": float(query.value(3) or 0.0),
-                }))
+        try:
+            product_rows = search_price_change_products(search_text)
+        except Exception as exc:
+            print("Price change selector query failed:", exc)
+            return results
+
+        for row in product_rows:
+            label = f"{row['product_name']} [{row['code']}]"
+            results.append((label, row))
         return results
 
     def on_product_selector_item_selected(self, text):
@@ -1594,45 +1174,19 @@ class PriceChangeDialog(QDialog):
                 if selected:
                     return selected
 
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                p.id,
-                COALESCE(p.display_name, '') AS display_name,
-                COALESCE(CAST(p.code AS TEXT), '') AS code,
-                COALESCE((
-                    SELECT pp.pack_price
-                    FROM price_pack pp
-                    WHERE pp.product_id = p.id
-                    ORDER BY pp.is_default DESC, pp.id ASC
-                    LIMIT 1
-                ), 0) AS current_price
-            FROM product p
-            WHERE
-                UPPER(TRIM(p.display_name)) = UPPER(TRIM(?))
-                OR TRIM(CAST(p.code AS TEXT)) = ?
-            ORDER BY p.display_name ASC
-            LIMIT 1
-        """)
-        query.addBindValue(entered_text)
-        query.addBindValue(entered_text)
-
-        if not query.exec():
-            AppMessageBox.critical(self, "Error", f"Failed to search product: {query.lastError().text()}")
+        try:
+            selected = resolve_price_change_product(entered_text)
+        except Exception as exc:
+            AppMessageBox.critical(self, "Error", str(exc))
             self.clear_product_selector()
             return None
 
-        if not query.next():
+        if not selected:
             AppMessageBox.information(self, "Not Found", f"No product found for '{entered_text}'.")
             self.clear_product_selector()
             return None
 
-        return {
-            "product_id": int(query.value(0) or 0),
-            "product_name": str(query.value(1) or ""),
-            "code": str(query.value(2) or ""),
-            "current_price": float(query.value(3) or 0.0),
-        }
+        return selected
 
     def add_selected_product_row(self):
         selected = self.resolve_selected_product()
@@ -1785,48 +1339,22 @@ class PriceChangeDialog(QDialog):
                 if abs(new_price - previous_price) <= 0.000001:
                     continue
 
-                update_query = QSqlQuery()
-                update_query.prepare("""
-                    UPDATE price_pack
-                    SET pack_price = ?
-                    WHERE id = (
-                        SELECT id
-                        FROM price_pack
-                        WHERE product_id = ?
-                        ORDER BY is_default DESC, id ASC
-                        LIMIT 1
-                    )
-                """)
-                update_query.addBindValue(new_price)
-                update_query.addBindValue(product_id)
+                try:
+                    update_product_default_pack_price(product_id, new_price)
+                except Exception as exc:
+                    raise Exception(f"Failed to update {product_name}: {exc}")
 
-                if not update_query.exec():
-                    raise Exception(f"Failed to update {product_name}: {update_query.lastError().text()}")
-
-                if update_query.numRowsAffected() == 0:
-                    raise Exception(f"No default price row found for {product_name}.")
-
-                change_query = QSqlQuery()
-                change_query.prepare("""
-                    INSERT INTO price_changes (
+                try:
+                    insert_price_change_log(
                         product_id,
                         previous_price,
                         new_price,
-                        source,
-                        user_id,
-                        username
+                        source="price_change_dialog",
+                        user_id=current_user_id,
+                        username=current_username,
                     )
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """)
-                change_query.addBindValue(product_id)
-                change_query.addBindValue(previous_price)
-                change_query.addBindValue(new_price)
-                change_query.addBindValue("price_change_dialog")
-                change_query.addBindValue(current_user_id)
-                change_query.addBindValue(current_username)
-
-                if not change_query.exec():
-                    raise Exception(f"Failed to log price change for {product_name}: {change_query.lastError().text()}")
+                except Exception as exc:
+                    raise Exception(f"Failed to log price change for {product_name}: {exc}")
 
                 log_activity(
                     category="price",
