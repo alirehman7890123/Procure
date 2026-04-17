@@ -5626,6 +5626,21 @@ class MainReportsPage(QWidget):
         dialog.setWindowTitle("Opening Stock Cost Review")
         dialog.resize(1080, 640)
 
+        def to_optional_float(value):
+            if value is None:
+                return None
+            if isinstance(value, (int, float)):
+                return float(value)
+
+            text = str(value).strip().replace(",", "")
+            if not text or text in {"-", ".", "-.", "+", "+"}:
+                return None
+
+            try:
+                return float(text)
+            except (TypeError, ValueError):
+                return None
+
         header_layout, content_layout, footer_layout = self.build_report_dialog_shell(dialog)
 
         heading = QLabel("Opening Stock Cost Review")
@@ -5749,7 +5764,7 @@ class MainReportsPage(QWidget):
                     validation_errors.append(f"Batch #{batch_id}: cost cannot be negative.")
                     continue
 
-                old_cost = float(previous_cost) if previous_cost is not None else None
+                old_cost = to_optional_float(previous_cost)
                 if old_cost is not None and abs(old_cost - new_cost) < 0.000001:
                     continue
 

@@ -215,9 +215,9 @@ QPushButton#HeaderControlButton {
     border-radius: 8px;
     font-weight: 700;
     font-family: 'montserrat';
-    font-size: 11px;
-    padding: 3px 8px;
-    min-height: 22px;
+    font-size: 10px;
+    padding: 2px 6px;
+    min-height: 20px;
 }
 
 QPushButton#HeaderControlButton:hover {

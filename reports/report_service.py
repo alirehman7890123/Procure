@@ -6,6 +6,33 @@ from services.accounting_settings_service import load_opening_inventory_value
 
 
 class ReportService:
+    @staticmethod
+    def _to_float(value, default=0.0):
+        if value is None:
+            return default
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        text = str(value).strip()
+        if not text:
+            return default
+
+        text = text.replace(",", "")
+        if text in {"-", ".", "-.", "+", "+"}:
+            return default
+
+        try:
+            return float(text)
+        except (TypeError, ValueError):
+            return default
+
+    @classmethod
+    def _to_optional_float(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return cls._to_float(value, default=None)
 
     def _duration_where(self, column_expr, duration="today"):
         duration = (duration or "today").lower()
@@ -2036,11 +2063,11 @@ class ReportService:
                     "product_name": str(query.value(1) or ""),
                     "batch_no": str(query.value(2) or ""),
                     "expiry_date": str(query.value(3) or ""),
-                    "added_qty": float(query.value(4) or 0.0),
-                    "remaining_qty": float(query.value(5) or 0.0),
-                    "sold_qty": float(query.value(6) or 0.0),
-                    "unknown_sold_qty": float(query.value(7) or 0.0),
-                    "unit_cost": float(unit_cost_value) if unit_cost_value is not None else None,
+                    "added_qty": self._to_float(query.value(4), 0.0),
+                    "remaining_qty": self._to_float(query.value(5), 0.0),
+                    "sold_qty": self._to_float(query.value(6), 0.0),
+                    "unknown_sold_qty": self._to_float(query.value(7), 0.0),
+                    "unit_cost": self._to_optional_float(unit_cost_value),
                     "received_at": str(query.value(9) or ""),
                 }
             )

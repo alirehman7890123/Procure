@@ -255,8 +255,8 @@ class MainWindow(QMainWindow):
         self.ham_button = QPushButton()
         self.ham_button.setCursor(Qt.PointingHandCursor)
         self.ham_button.setObjectName("HeaderControlButton")
-        self.ham_button.setFixedSize(32, 32)
-        self.ham_button.setIconSize(QSize(18, 18))
+        self.ham_button.setFixedSize(30, 30)
+        self.ham_button.setIconSize(QSize(16, 16))
 
         self.ham_menu_icon = self._load_icon("res/rail_icons/ham.svg", "res/ham.png")
         self.ham_close_icon = self._load_icon("res/rail_icons/ham_close.svg")
@@ -284,8 +284,8 @@ class MainWindow(QMainWindow):
         self.back_nav_btn.setToolTip("Previous page")
         self.back_nav_btn.setCursor(Qt.PointingHandCursor)
         self.back_nav_btn.setObjectName("HeaderControlButton")
-        self.back_nav_btn.setFixedSize(32, 32)
-        self.back_nav_btn.setIconSize(QSize(14, 14))
+        self.back_nav_btn.setFixedSize(30, 30)
+        self.back_nav_btn.setIconSize(QSize(13, 13))
         self.back_nav_icon = self._load_icon("res/rail_icons/nav_back.svg")
         if not self._icon_can_render(self.back_nav_icon, QSize(14, 14)):
             self.back_nav_btn.setText("<")
@@ -297,8 +297,8 @@ class MainWindow(QMainWindow):
         self.forward_nav_btn.setToolTip("Next page")
         self.forward_nav_btn.setCursor(Qt.PointingHandCursor)
         self.forward_nav_btn.setObjectName("HeaderControlButton")
-        self.forward_nav_btn.setFixedSize(32, 32)
-        self.forward_nav_btn.setIconSize(QSize(14, 14))
+        self.forward_nav_btn.setFixedSize(30, 30)
+        self.forward_nav_btn.setIconSize(QSize(13, 13))
         self.forward_nav_icon = self._load_icon("res/rail_icons/nav_forward.svg")
         if not self._icon_can_render(self.forward_nav_icon, QSize(14, 14)):
             self.forward_nav_btn.setText(">")
@@ -317,18 +317,6 @@ class MainWindow(QMainWindow):
         
        
         header_layout.addStretch()
-        
-        logout_button = QPushButton("Logout")
-        logout_button.setObjectName("HeaderPrimaryButton")
-        logout_button.setFixedHeight(26)
-        logout_button.setMinimumWidth(66)
-        logout_button.setContentsMargins(0, 0, 20, 0)
-        logout_button.clicked.connect(self.logout)
-        
-        header_layout.addWidget(logout_button)
-        
-        
-        
         
         content_area_layout.addWidget(self.header_widget)
         
