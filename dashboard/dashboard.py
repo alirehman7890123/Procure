@@ -325,18 +325,21 @@ class DashboardWidget(QWidget):
         self.open_day_btn = QPushButton("Open Day")
         self.open_day_btn.setCursor(Qt.PointingHandCursor)
         self.open_day_btn.setObjectName("TopRightButton")
+        self.open_day_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.open_day_btn.clicked.connect(self.handle_open_session)
         meta_row.addWidget(self.open_day_btn)
 
         self.close_day_btn = QPushButton("Close Day")
         self.close_day_btn.setCursor(Qt.PointingHandCursor)
         self.close_day_btn.setObjectName("TopRightButton")
+        self.close_day_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.close_day_btn.clicked.connect(self.handle_close_session)
         meta_row.addWidget(self.close_day_btn)
 
         self.session_history_btn = QPushButton("History")
         self.session_history_btn.setCursor(Qt.PointingHandCursor)
         self.session_history_btn.setObjectName("TopRightButton")
+        self.session_history_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         meta_row.addWidget(self.session_history_btn)
 
         layout.addLayout(meta_row)

@@ -20,6 +20,18 @@ def clean_numeric_text(value):
     return text
 
 
+def normalize_expiry_text(value):
+    raw = "" if value is None else str(value).strip()
+    if not raw:
+        return ""
+
+    collapsed = raw.replace("_", "").replace(" ", "")
+    if not collapsed or collapsed in {"-", "--"}:
+        return ""
+
+    return raw
+
+
 def float_or_default(value, default=0.0):
     cleaned = clean_numeric_text(value)
     if not cleaned:
@@ -31,7 +43,7 @@ def float_or_default(value, default=0.0):
 
 
 def parse_expiry_to_db_date(text, today=None):
-    raw = str(text or "").strip()
+    raw = normalize_expiry_text(text)
     if not raw:
         return ""
 

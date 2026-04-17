@@ -118,24 +118,25 @@ class MainWindow(QMainWindow):
         
         # SIDE-BAR SCROLL
         self.sidebar_expanded_width = 248
-        self.sidebar_collapsed_width = 84
+        self.sidebar_collapsed_width = 60
         self.sidebar_scroll = QScrollArea()
         self.sidebar_scroll.setFixedWidth(self.sidebar_expanded_width)
         self.sidebar_scroll.setMinimumWidth(self.sidebar_expanded_width)
         self.sidebar_scroll.setMaximumWidth(self.sidebar_expanded_width)
+        self.sidebar_scroll.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         self.sidebar_scroll.setWidgetResizable(True)
         self.sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.sidebar_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
         self.sidebar_scroll.setStyleSheet(""" 
-                                    background-color: #151325;
+                                    background-color: #163B5C;
 
                                     QScrollArea {
-                                        background-color: #151325;
+                                        background-color: #163B5C;
                                         border: none;
                                     }
                                     QScrollArea > QWidget > QWidget {
-                                        background-color: #151325;
+                                        background-color: #163B5C;
                                     }
                                     QScrollBar:vertical,
                                     QScrollBar:horizontal {
@@ -157,14 +158,15 @@ class MainWindow(QMainWindow):
         self.sidebar_rail_scroll.setFixedWidth(self.sidebar_rail_width)
         self.sidebar_rail_scroll.setMinimumWidth(self.sidebar_rail_width)
         self.sidebar_rail_scroll.setMaximumWidth(self.sidebar_rail_width)
+        self.sidebar_rail_scroll.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         self.sidebar_rail_scroll.setWidgetResizable(True)
         self.sidebar_rail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.sidebar_rail_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.sidebar_rail_scroll.setStyleSheet("""
-                                    background-color: #151325;
+                                    background-color: #163B5C;
 
                                     QScrollArea {
-                                        background-color: #151325;
+                                        background-color: #163B5C;
                                         border: none;
                                     }
                                     QScrollBar:vertical,
@@ -196,8 +198,8 @@ class MainWindow(QMainWindow):
         self.sidebar_panel.setObjectName("SidebarPanel")
         self.sidebar_panel.setStyleSheet("""
             QWidget#SidebarPanel {
-                background-color: #151325;
-                border: 1px solid #221F35;
+                background-color: #163B5C;
+                border: 1px solid #244A62;
                 border-radius: 0px;
             }
         """)
@@ -219,7 +221,9 @@ class MainWindow(QMainWindow):
         
         # CONTENT AREA WIDGET
         content_area_widget = QWidget()
-        content_area_widget.setStyleSheet("background-color: #fff;") 
+        self.content_area_widget = content_area_widget
+        content_area_widget.setStyleSheet("background-color: #fff;")
+        content_area_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         content_area_layout = QVBoxLayout()
         self.reset_widget_size(content_area_layout, content_area_widget)
@@ -235,14 +239,14 @@ class MainWindow(QMainWindow):
 
         self.reset_widget_size(header_layout, self.header_widget)
         
-        self.header_widget.setFixedHeight(44)
+        self.header_widget.setFixedHeight(58)
         header_layout.setContentsMargins(16,4,16,4)
         header_layout.setSpacing(6)
         header_layout.setAlignment(Qt.AlignVCenter)
 
         self.header_widget.setLayout(header_layout)
         self.header_widget.setStyleSheet("""
-            background-color: #2F5D7C;
+            background-color: #163B5C;
             color: #F4F8FB;
             border-bottom: 1px solid #244A62;
         """)
@@ -334,6 +338,7 @@ class MainWindow(QMainWindow):
         # MAIN CONTENT SCROLL
         main_content_scroll = QScrollArea()
         main_content_scroll.setWidgetResizable(True)
+        main_content_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         
         # MAIN CONTENT
@@ -368,40 +373,10 @@ class MainWindow(QMainWindow):
         self.sidebar_header_layout.setContentsMargins(4, 2, 4, 2)
         self.sidebar_header_layout.setSpacing(8)
 
-        self.sidebar_brand_mark = QLabel("C")
+        self.sidebar_brand_mark = QLabel("")
         self.sidebar_brand_mark.setAlignment(Qt.AlignCenter)
-        self.sidebar_brand_mark.setFixedSize(28, 28)
-        self.sidebar_brand_mark.setStyleSheet("""
-            background-color: #231F36;
-            color: #F8F6F1;
-            border-radius: 14px;
-            font-family: montserrat;
-            font-size: 13px;
-            font-weight: 800;
-        """)
-
-        self.sidebar_brand_text_wrap = QWidget()
-        self.sidebar_brand_text_layout = QVBoxLayout(self.sidebar_brand_text_wrap)
-        self.sidebar_brand_text_layout.setContentsMargins(0, 0, 0, 0)
-        self.sidebar_brand_text_layout.setSpacing(0)
-
-        self.sidebar_brand_title = QLabel("ProCure")
-        self.sidebar_brand_title.setStyleSheet("""
-            color: #F8F6F1;
-            font-family: montserrat;
-            font-size: 13px;
-            font-weight: 700;
-        """)
-        self.sidebar_brand_subtitle = QLabel("Workspace")
-        self.sidebar_brand_subtitle.setStyleSheet("""
-            color: #8E88A8;
-            font-family: montserrat;
-            font-size: 10px;
-            font-weight: 600;
-        """)
-
-        self.sidebar_brand_text_layout.addWidget(self.sidebar_brand_title)
-        self.sidebar_brand_text_layout.addWidget(self.sidebar_brand_subtitle)
+        self.sidebar_brand_mark.setFixedSize(136, 32)
+        self._apply_sidebar_brand_logo()
 
         self.sidebar_toggle_button = QPushButton()
         self.sidebar_toggle_button.setObjectName("HeaderControlButton")
@@ -411,51 +386,22 @@ class MainWindow(QMainWindow):
         self.sidebar_toggle_button.clicked.connect(self.collapse_sidebar_from_header)
 
         self.sidebar_header_layout.addWidget(self.sidebar_brand_mark)
-        self.sidebar_header_layout.addWidget(self.sidebar_brand_text_wrap, 1)
+        self.sidebar_header_spacer = QWidget()
+        self.sidebar_header_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.sidebar_header_layout.addWidget(self.sidebar_header_spacer, 1)
         self.sidebar_header_layout.addWidget(self.sidebar_toggle_button, 0, Qt.AlignRight)
         self.sidebar_panel_layout.addWidget(self.sidebar_header)
 
+        self.sidebar_search_edit = None
         self.sidebar_search_wrap = QWidget()
         self.sidebar_search_wrap.setObjectName("SidebarSearchWrap")
+        self.sidebar_search_wrap.setFixedHeight(44)
         self.sidebar_search_wrap.setStyleSheet("""
             QWidget#SidebarSearchWrap {
-                background-color: #201C32;
-                border: 1px solid #27233B;
-                border-radius: 14px;
-            }
-        """)
-        self.sidebar_search_layout = QHBoxLayout(self.sidebar_search_wrap)
-        self.sidebar_search_layout.setContentsMargins(12, 8, 12, 8)
-        self.sidebar_search_layout.setSpacing(8)
-
-        self.sidebar_search_icon = QLabel("⌕")
-        self.sidebar_search_icon.setAlignment(Qt.AlignCenter)
-        self.sidebar_search_icon.setFixedWidth(14)
-        self.sidebar_search_icon.setStyleSheet("""
-            color: #9892B1;
-            font-size: 13px;
-            font-weight: 700;
-        """)
-
-        self.sidebar_search_edit = QLineEdit()
-        self.sidebar_search_edit.setPlaceholderText("Search")
-        self.sidebar_search_edit.setFrame(False)
-        self.sidebar_search_edit.setStyleSheet("""
-            QLineEdit {
-                background: transparent;
+                background-color: transparent;
                 border: none;
-                color: #F8F6F1;
-                font-family: montserrat;
-                font-size: 12px;
-                padding: 0;
-            }
-            QLineEdit::placeholder {
-                color: #7F789B;
             }
         """)
-
-        self.sidebar_search_layout.addWidget(self.sidebar_search_icon)
-        self.sidebar_search_layout.addWidget(self.sidebar_search_edit, 1)
         self.sidebar_panel_layout.addWidget(self.sidebar_search_wrap)
 
         self.sidebar_nav_wrap = QWidget()
@@ -472,7 +418,7 @@ class MainWindow(QMainWindow):
         self.purchase_button = SideBarButton('Purchase Invoice')
         self.po_button = SideBarButton('Purchase Orders')
         self.grn_button = SideBarButton('Goods Receipt')
-        self.sales_button = SideBarButton('Sales')
+        self.sales_button = SideBarButton('Sales Invoice')
         self.customer_button = SideBarButton('Customers')
         self.product_button = SideBarButton('Product')
         self.employee_button = SideBarButton('Employees')
@@ -530,8 +476,8 @@ class MainWindow(QMainWindow):
         self.sidebar_footer.setObjectName("SidebarFooter")
         self.sidebar_footer.setStyleSheet("""
             QWidget#SidebarFooter {
-                background-color: #1C1830;
-                border: 1px solid #28233F;
+                background-color: #163B5C;
+                border: 1px solid #244A62;
                 border-radius: 16px;
             }
         """)
@@ -655,7 +601,8 @@ class MainWindow(QMainWindow):
 
         self._configure_main_sidebar_icons()
         self._refresh_sidebar_profile()
-        self.sidebar_search_edit.textChanged.connect(self._filter_sidebar_buttons)
+        if self.sidebar_search_edit is not None:
+            self.sidebar_search_edit.textChanged.connect(self._filter_sidebar_buttons)
         self.refresh_theme()
 
         self.rail_nav_buttons = []
@@ -805,12 +752,15 @@ class MainWindow(QMainWindow):
         self.make_all_focusable(self)
 
         
-        self.layout.addWidget(self.sidebar_scroll)
-        self.layout.addWidget(content_area_widget)
+        self.layout.addWidget(self.sidebar_scroll, 0)
+        self.layout.addWidget(content_area_widget, 1)
+        self.layout.setStretch(0, 0)
+        self.layout.setStretch(1, 1)
 
         self.register_nested_history_tracking()
         self.main_content_layout.currentChanged.connect(self.on_main_page_changed)
         QTimer.singleShot(0, self.initialize_navigation_history)
+        QTimer.singleShot(0, self._sync_shell_layout)
         
         
         
@@ -826,13 +776,20 @@ class MainWindow(QMainWindow):
 
     def refresh_theme(self):
         palette = get_theme_palette()
-        sidebar_bg = palette["sidebar_bg"]
-        sidebar_border = palette["sidebar_border"]
         primary = palette["primary_main"]
         primary_hover = palette["primary_hover"]
         active_text = palette["sidebar_active_text"]
+        sidebar_bg = primary
+        sidebar_border = primary_hover
+        self._current_sidebar_bg = sidebar_bg
+        self._current_sidebar_border = sidebar_border
 
         self.setStyleSheet(load_stylesheets())
+        self.header_widget.setStyleSheet(f"""
+            background-color: {primary};
+            color: #F4F8FB;
+            border-bottom: 1px solid {sidebar_border};
+        """)
 
         self.sidebar_scroll.setStyleSheet(f""" 
                                     background-color: {sidebar_bg};
@@ -859,13 +816,7 @@ class MainWindow(QMainWindow):
                 border-radius: 0px;
             }}
         """)
-        self.sidebar_brand_mark.setStyleSheet(f"""
-            background-color: {primary};
-            color: #FFFFFF;
-            border-radius: 14px;
-            font-weight: 800;
-            font-size: 13px;
-        """)
+        self._apply_sidebar_brand_logo()
         self.sidebar_search_wrap.setStyleSheet(f"""
             QWidget#SidebarSearchWrap {{
                 background-color: {primary_hover};
@@ -879,6 +830,13 @@ class MainWindow(QMainWindow):
             border-radius: 17px;
             font-weight: 800;
             font-size: 12px;
+        """)
+        self.sidebar_footer.setStyleSheet(f"""
+            QWidget#SidebarFooter {{
+                background-color: {sidebar_bg};
+                border: 1px solid {sidebar_border};
+                border-radius: 16px;
+            }}
         """)
         self.sidebar_footer_action.setStyleSheet(f"""
             QPushButton {{
@@ -906,9 +864,8 @@ class MainWindow(QMainWindow):
     def apply_demo_restrictions(self):
         if not self.demo_mode:
             return
-
-        demo_tooltip = "Reports are unavailable in the 15-day demo."
-        self.reports_button.setEnabled(False)
+        demo_tooltip = "Demo mode: Reports can be viewed, but export and print actions are limited."
+        self.reports_button.setEnabled(True)
         self.reports_button.setToolTip(demo_tooltip)
 
         
@@ -1125,13 +1082,6 @@ class MainWindow(QMainWindow):
     
         
     def set_reports(self, widget, layout):
-        if self.demo_mode:
-            AppMessageBox.warning(
-                self,
-                "Demo Restriction",
-                "Reports are disabled in the 15-day demo. Install a full license to unlock them.",
-            )
-            return
         if not self._require_any_permission(("reports.view",), "Reports"):
             return
         self.navigate_to_page(widget, layout)
@@ -1139,14 +1089,20 @@ class MainWindow(QMainWindow):
     def navigate_to_page(self, widget, layout):
         if layout is not self.main_content_layout:
             layout.setCurrentWidget(widget)
+            self._sync_shell_layout()
+            QTimer.singleShot(0, self._sync_shell_layout)
             return
 
         if self.main_content_layout.currentWidget() is widget:
             self._set_active_sidebar_by_widget(widget)
+            self._sync_shell_layout()
+            QTimer.singleShot(0, self._sync_shell_layout)
             return
 
         self.main_content_layout.setCurrentWidget(widget)
         self._set_active_sidebar_by_widget(widget)
+        self._sync_shell_layout()
+        QTimer.singleShot(0, self._sync_shell_layout)
 
     def initialize_navigation_history(self):
         current_state = self.capture_navigation_state()
@@ -1172,6 +1128,8 @@ class MainWindow(QMainWindow):
         self._set_active_sidebar_by_widget(widget)
 
         self.record_history_state(self.capture_navigation_state(widget))
+        self._sync_shell_layout()
+        QTimer.singleShot(0, self._sync_shell_layout)
 
     def register_nested_history_tracking(self):
         history_widgets = [
@@ -1210,6 +1168,8 @@ class MainWindow(QMainWindow):
             return
 
         self.record_history_state(self.capture_navigation_state(owner))
+        self._sync_shell_layout()
+        QTimer.singleShot(0, self._sync_shell_layout)
 
     def capture_navigation_state(self, main_widget=None):
         if main_widget is None:
@@ -1261,6 +1221,8 @@ class MainWindow(QMainWindow):
 
         self._set_active_sidebar_by_widget(main_widget)
         self.update_nav_buttons()
+        self._sync_shell_layout()
+        QTimer.singleShot(0, self._sync_shell_layout)
 
     def update_nav_buttons(self):
         can_go_back = self.current_index > 0
@@ -1332,36 +1294,24 @@ class MainWindow(QMainWindow):
     def expand_sidebar(self):
         self.sidebar_collapsed = False
         self._set_sidebar_collapsed(False)
-        self.sidebar_scroll.setFixedWidth(self.sidebar_expanded_width)
-        self.sidebar_scroll.setMinimumWidth(self.sidebar_expanded_width)
-        self.sidebar_scroll.setMaximumWidth(self.sidebar_expanded_width)
+        self._set_sidebar_column_width(self.sidebar_expanded_width)
         self.sidebar_scroll.show()
-        self.sidebar_scroll.raise_()
 
         if not self.ham_close_icon.isNull():
             self.ham_button.setIcon(self.ham_close_icon)
-
-        self.layout.invalidate()
-        self.layout.activate()
-        self.widget.updateGeometry()
-        self.widget.update()
+        self._sync_shell_layout()
+        QTimer.singleShot(0, self._sync_shell_layout)
 
     def collapse_sidebar(self):
         self.sidebar_collapsed = True
         self._set_sidebar_collapsed(True)
-        self.sidebar_scroll.setFixedWidth(self.sidebar_collapsed_width)
-        self.sidebar_scroll.setMinimumWidth(self.sidebar_collapsed_width)
-        self.sidebar_scroll.setMaximumWidth(self.sidebar_collapsed_width)
+        self._set_sidebar_column_width(self.sidebar_collapsed_width)
         self.sidebar_scroll.show()
-        self.sidebar_scroll.raise_()
 
         if not self.ham_menu_icon.isNull():
             self.ham_button.setIcon(self.ham_menu_icon)
-
-        self.layout.invalidate()
-        self.layout.activate()
-        self.widget.updateGeometry()
-        self.widget.update()
+        self._sync_shell_layout()
+        QTimer.singleShot(0, self._sync_shell_layout)
 
 
 
@@ -1405,23 +1355,26 @@ class MainWindow(QMainWindow):
         for widget in (
             getattr(self, "sidebar_search_wrap", None),
             getattr(self, "sidebar_brand_mark", None),
-            getattr(self, "sidebar_brand_text_wrap", None),
             getattr(self, "sidebar_profile_text_wrap", None),
         ):
             if widget is not None:
                 widget.setVisible(not collapsed)
 
         if hasattr(self, "sidebar_brand_mark"):
-            self.sidebar_brand_mark.setMinimumWidth(0 if collapsed else 28)
-            self.sidebar_brand_mark.setMaximumWidth(0 if collapsed else 28)
-
-        if hasattr(self, "sidebar_brand_text_wrap"):
-            self.sidebar_brand_text_wrap.setMinimumWidth(0)
-            self.sidebar_brand_text_wrap.setMaximumWidth(0 if collapsed else 16777215)
+            self.sidebar_brand_mark.setMinimumWidth(0 if collapsed else 136)
+            self.sidebar_brand_mark.setMaximumWidth(0 if collapsed else 136)
 
         if hasattr(self, "sidebar_panel_layout"):
-            margins = (10, 10, 10, 10) if collapsed else (14, 14, 14, 14)
+            margins = (4, 10, 4, 10) if collapsed else (14, 14, 14, 14)
             self.sidebar_panel_layout.setContentsMargins(*margins)
+
+        if hasattr(self, "sidebar_nav_layout"):
+            self.sidebar_nav_layout.setAlignment(
+                (Qt.AlignTop | Qt.AlignHCenter) if collapsed else Qt.AlignTop
+            )
+
+        if hasattr(self, "sidebar_header_spacer"):
+            self.sidebar_header_spacer.setVisible(not collapsed)
 
         if hasattr(self, "sidebar_header_layout"):
             self.sidebar_header_layout.setSpacing(0 if collapsed else 8)
@@ -1443,8 +1396,8 @@ class MainWindow(QMainWindow):
                     border-radius: 16px;
                 }
             """ % (
-                "#151325" if collapsed else "#1C1830",
-                "#151325" if collapsed else "#28233F",
+                getattr(self, "_current_sidebar_bg", "#7B5AA6"),
+                getattr(self, "_current_sidebar_border", "#684A8C"),
             ))
 
         if hasattr(self, "sidebar_avatar"):
@@ -1455,6 +1408,32 @@ class MainWindow(QMainWindow):
             self.sidebar_toggle_button.setIcon(toggle_icon)
         if hasattr(self, "ham_button") and not toggle_icon.isNull():
             self.ham_button.setIcon(toggle_icon)
+
+    def _apply_sidebar_brand_logo(self):
+        if not hasattr(self, "sidebar_brand_mark"):
+            return
+
+        pixmap = QPixmap(resource_path("res/logo.png"))
+        if pixmap.isNull():
+            self.sidebar_brand_mark.setPixmap(QPixmap())
+            self.sidebar_brand_mark.setText("P")
+            self.sidebar_brand_mark.setStyleSheet("""
+                background-color: #163B5C;
+                color: #FFFFFF;
+                border-radius: 14px;
+                font-family: montserrat;
+                font-size: 13px;
+                font-weight: 800;
+            """)
+            return
+
+        scaled = pixmap.scaled(130, 28, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.sidebar_brand_mark.setText("")
+        self.sidebar_brand_mark.setPixmap(scaled)
+        self.sidebar_brand_mark.setStyleSheet("""
+            background-color: transparent;
+            border: none;
+        """)
 
     def _set_rail_button_active(self, btn, active=False):
         if btn is None:
@@ -1669,6 +1648,43 @@ class MainWindow(QMainWindow):
         widget.setMinimumSize(0, 0)
         widget.setMaximumSize(16777215, 16777215)
         widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def _set_sidebar_column_width(self, width):
+        width = int(max(0, width or 0))
+        self.sidebar_scroll.setFixedWidth(width)
+        self.sidebar_scroll.setMinimumWidth(width)
+        self.sidebar_scroll.setMaximumWidth(width)
+
+    def _sync_shell_layout(self):
+        target_width = self.sidebar_collapsed_width if self.sidebar_collapsed else self.sidebar_expanded_width
+        self._set_sidebar_column_width(target_width)
+        self.sidebar_scroll.show()
+
+        if hasattr(self, "content_area_widget"):
+            self.content_area_widget.setMinimumWidth(0)
+            self.content_area_widget.updateGeometry()
+
+        if hasattr(self, "main_content_widget"):
+            self.main_content_widget.setMinimumWidth(0)
+            self.main_content_widget.updateGeometry()
+
+        current = self.main_content_layout.currentWidget() if hasattr(self, "main_content_layout") else None
+        if current is not None:
+            current.updateGeometry()
+
+        self.layout.invalidate()
+        self.layout.activate()
+        self.widget.updateGeometry()
+        self.widget.update()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._sync_shell_layout()
+        QTimer.singleShot(0, self._sync_shell_layout)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_shell_layout()
 
 
 

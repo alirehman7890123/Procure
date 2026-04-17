@@ -11,6 +11,7 @@ import html
 from utilities.stylus import load_stylesheets
 from reports import report_service
 from utilities.app_messagebox import AppMessageBox
+from utilities.license_core import get_current_license_payload, is_demo_license
 
 
 class MainReportsPage(QWidget):
@@ -18,6 +19,8 @@ class MainReportsPage(QWidget):
     def __init__(self, parent=None):
 
         super().__init__(parent)
+        self.license_payload = get_current_license_payload()
+        self.demo_mode = is_demo_license(self.license_payload)
         
         
         # main vertical layout
@@ -66,6 +69,28 @@ class MainReportsPage(QWidget):
 
         self.layout.addWidget(line)
         self.layout.addSpacing(6)
+
+        if self.demo_mode:
+            demo_banner = QFrame()
+            demo_banner.setStyleSheet("""
+                QFrame {
+                    background-color: #FFF7E6;
+                    border: 1px solid #E7B65C;
+                    border-radius: 10px;
+                }
+            """)
+            demo_banner_layout = QHBoxLayout(demo_banner)
+            demo_banner_layout.setContentsMargins(12, 8, 12, 8)
+            demo_banner_layout.setSpacing(8)
+
+            demo_label = QLabel(
+                "Demo Mode: Reports can be explored fully, but export and print actions are disabled until a full license is installed."
+            )
+            demo_label.setWordWrap(True)
+            demo_label.setStyleSheet("color: #8A5A12; font-size: 11px; font-weight: 600; padding-left: 0;")
+            demo_banner_layout.addWidget(demo_label)
+            self.layout.addWidget(demo_banner)
+            self.layout.addSpacing(4)
 
         report_catalog = self.create_report_category_cards()
         self.layout.addWidget(report_catalog)
@@ -794,13 +819,18 @@ class MainReportsPage(QWidget):
             state["duration_key"] = duration_key
             period_label.setText(f"Selected: {self.get_duration_label(duration_key)}")
 
-            revenue_known, total_cogs, gross_profit, revenue_unknown, gross_margin_pct, coverage_pct = (
-                report_service.ReportService().get_detailed_revenue(duration_key)
-            )
-            total_expenses, expense_count = report_service.ReportService().get_expense_summary(duration_key)
-            total_revenue = revenue_known + revenue_unknown
-            net_profit = gross_profit - total_expenses
-            net_margin_pct = (net_profit / total_revenue * 100.0) if total_revenue > 0 else 0.0
+            snapshot = report_service.ReportService().get_profit_loss_snapshot(duration_key)
+            revenue_known = snapshot["revenue_known"]
+            total_cogs = snapshot["total_cogs"]
+            gross_profit = snapshot["gross_profit"]
+            revenue_unknown = snapshot["revenue_unknown"]
+            gross_margin_pct = snapshot["gross_margin_pct"]
+            coverage_pct = snapshot["coverage_pct"]
+            total_expenses = snapshot["total_expenses"]
+            expense_count = snapshot["expense_count"]
+            total_revenue = snapshot["total_revenue"]
+            net_profit = snapshot["net_profit"]
+            net_margin_pct = snapshot["net_margin_pct"]
 
             total_revenue_value.setText(f"{total_revenue:,.2f}")
             known_revenue_value.setText(f"{revenue_known:,.2f}")
@@ -820,9 +850,8 @@ class MainReportsPage(QWidget):
             set_statement_value("Gross Margin %", f"{gross_margin_pct:.2f}%")
             set_statement_value("Net Margin %", f"{net_margin_pct:.2f}%")
 
-            note_labels[0].setText("Known Gross Profit uses only sale lines where all consumed stock had a known cost.")
-            note_labels[1].setText("Revenue With Unknown Cost is excluded from profit until opening stock or batch cost is assigned.")
-            note_labels[2].setText(f"Current view includes {expense_count} expense record(s) for this period.")
+            for label_widget, note_text in zip(note_labels, snapshot["notes"]):
+                label_widget.setText(note_text)
 
             state["export_text"] = self.build_report_text(
                 "Profit & Loss",
@@ -865,20 +894,17 @@ class MainReportsPage(QWidget):
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGridLayout, QPushButton
 
         service = report_service.ReportService()
-        inventory = service.get_current_inventory_snapshot()
-        session_cash = service.get_latest_session_cash_position()
-        opening_estimate = service.get_opening_estimate_amount()
-        supplier_payable, supplier_receiveable = service.get_supplier_balances()
-        customer_receivable, customer_payable = service.get_customer_balances()
-
-        known_current_assets = (
-            float(session_cash.get("cash_value", 0.0) or 0.0)
-            + float(customer_receivable or 0.0)
-            + float(supplier_receiveable or 0.0)
-            + float(inventory.get("known_inventory_value", 0.0) or 0.0)
-        )
-        current_liabilities = float(supplier_payable or 0.0) + float(customer_payable or 0.0)
-        working_capital = known_current_assets - current_liabilities
+        snapshot = service.get_balance_sheet_snapshot()
+        inventory = snapshot["inventory"]
+        session_cash = snapshot["session_cash"]
+        opening_estimate = snapshot["opening_estimate_amount"]
+        supplier_payable = snapshot["supplier_payable"]
+        supplier_receiveable = snapshot["supplier_receiveable"]
+        customer_receivable = snapshot["customer_receivable"]
+        customer_payable = snapshot["customer_payable"]
+        known_current_assets = snapshot["known_current_assets"]
+        current_liabilities = snapshot["current_liabilities"]
+        working_capital = snapshot["working_capital"]
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Balance Sheet")
@@ -1082,39 +1108,11 @@ class MainReportsPage(QWidget):
         from PySide6.QtGui import QColor
 
         service = report_service.ReportService()
-        inventory = service.get_current_inventory_snapshot()
-        session_cash = service.get_latest_session_cash_position()
-        supplier_payable, supplier_receiveable = service.get_supplier_balances()
-        customer_receivable, customer_payable = service.get_customer_balances()
-
-        rows = []
-
-        def add_row(account, debit=0.0, credit=0.0, note=""):
-            rows.append({
-                "account": account,
-                "debit": float(debit or 0.0),
-                "credit": float(credit or 0.0),
-                "note": note,
-            })
-
-        add_row("Cash on Hand", debit=session_cash.get("cash_value", 0.0), note=session_cash.get("label", "Latest session cash"))
-        add_row("Inventory at Known Cost", debit=inventory.get("known_inventory_value", 0.0), note="Only stock with known unit cost is included.")
-        add_row("Customer Receivables", debit=customer_receivable, note="Amounts receivable from customers.")
-        add_row("Supplier Receivables / Advances", debit=supplier_receiveable, note="Advances or balances due back from suppliers.")
-        add_row("Supplier Payables", credit=supplier_payable, note="Outstanding supplier obligations.")
-        add_row("Customer Payables / Advances", credit=customer_payable, note="Customer credit balances or amounts payable.")
-
-        total_debit = sum(r["debit"] for r in rows)
-        total_credit = sum(r["credit"] for r in rows)
-        balancing = total_debit - total_credit
-
-        if balancing > 0:
-            add_row("Unclassified Equity / Capital", credit=balancing, note="Balancing figure for capital, retained earnings, and other accounts not yet modeled.")
-        elif balancing < 0:
-            add_row("Unclassified Equity / Capital", debit=abs(balancing), note="Balancing figure for capital, retained earnings, and other accounts not yet modeled.")
-
-        total_debit = sum(r["debit"] for r in rows)
-        total_credit = sum(r["credit"] for r in rows)
+        snapshot = service.get_trial_balance_snapshot()
+        inventory = snapshot["inventory"]
+        rows = snapshot["rows"]
+        total_debit = snapshot["total_debit"]
+        total_credit = snapshot["total_credit"]
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Trial Balance")
@@ -1414,9 +1412,10 @@ class MainReportsPage(QWidget):
             state["duration_key"] = duration_key
             period_label.setText(f"Selected: {self.get_duration_label(duration_key)}")
 
-            cash_flow = service.get_cash_flow_summary(duration_key)
-            session_cash = service.get_latest_session_cash_position()
-            session_label = session_cash.get("label", "Latest Session Cash")
+            snapshot = service.get_cash_flow_snapshot(duration_key)
+            cash_flow = snapshot["cash_flow"]
+            session_cash = snapshot["session_cash"]
+            session_label = snapshot["session_label"]
 
             inflow_customer_value.setText(f"{float(cash_flow.get('customer_received', 0.0) or 0.0):,.2f}")
             inflow_supplier_value.setText(f"{float(cash_flow.get('supplier_received', 0.0) or 0.0):,.2f}")
@@ -1431,11 +1430,8 @@ class MainReportsPage(QWidget):
             session_cash_value.setText(f"{float(session_cash.get('cash_value', 0.0) or 0.0):,.2f}")
             session_cash_label_widget.setText(session_label)
 
-            note_labels[0].setText(
-                f"Customer cash rows: {int(cash_flow.get('customer_rows', 0) or 0)} | Supplier cash rows: {int(cash_flow.get('supplier_rows', 0) or 0)} | Cash expense rows: {int(cash_flow.get('expense_rows', 0) or 0)}"
-            )
-            note_labels[1].setText("This report tracks cash-method activity only. Bank, wallet, and other non-cash methods are outside this cash movement view.")
-            note_labels[2].setText("Session cash is shown as a current operational reference, not as a period opening/closing reconciliation statement.")
+            for label_widget, note_text in zip(note_labels, snapshot["notes"]):
+                label_widget.setText(note_text)
 
             state["export_text"] = self.build_report_text(
                 "Cash Flow",
@@ -2671,13 +2667,9 @@ class MainReportsPage(QWidget):
         
         card_layout.addLayout(second_line_layout)
         
-        # insert data
-        
-        opening_cost = report_service.ReportService().get_opening_estimate_amount()
-        self.estimate_cost.setText(f"{opening_cost:,.2f}")
-        
-        purchased_cost = report_service.ReportService().get_total_purchase_amount()
-        self.known_stock_cost_data.setText(f"{purchased_cost:.2f}")
+        snapshot = report_service.ReportService().get_inventory_overview_snapshot()
+        self.estimate_cost.setText(f"{float(snapshot.get('opening_estimate_amount', 0.0) or 0.0):,.2f}")
+        self.known_stock_cost_data.setText(f"{float(snapshot.get('known_stock_cost_amount', 0.0) or 0.0):.2f}")
 
         action_row = QHBoxLayout()
         action_row.setContentsMargins(0, 4, 0, 0)
@@ -2770,11 +2762,11 @@ class MainReportsPage(QWidget):
         card_layout.addLayout(fifth_line_layout)
         
         
-        # insert data
-        count = report_service.ReportService().get_stock_count_alerts()
+        snapshot = report_service.ReportService().get_inventory_overview_snapshot()
+        count = snapshot.get("stock_alerts", {})
 
-        near_expiry = count['near_expiry_batches']
-        low_stock = count['low_stock_products']
+        near_expiry = count.get('near_expiry_batches', 0)
+        low_stock = count.get('low_stock_products', 0)
         
         self.expiry_count.setText(f"{near_expiry:.2f}")
         self.low_stock_count.setText(f"{low_stock:.2f}")
@@ -4474,11 +4466,15 @@ class MainReportsPage(QWidget):
 
         outer_layout.addLayout(footer_row)
 
-        revenue_known, total_cogs, gross_profit, revenue_unknown, gross_margin_pct, coverage_pct = report_service.ReportService().get_detailed_revenue("today")
-        total_expenses, _ = report_service.ReportService().get_expense_summary("today")
-        net_profit = gross_profit - total_expenses
-        total_revenue = revenue_known + revenue_unknown
-        net_margin_pct = (net_profit / total_revenue * 100.0) if total_revenue > 0 else 0.0
+        snapshot = report_service.ReportService().get_profit_loss_snapshot("today")
+        revenue_known = snapshot["revenue_known"]
+        total_cogs = snapshot["total_cogs"]
+        gross_profit = snapshot["gross_profit"]
+        revenue_unknown = snapshot["revenue_unknown"]
+        gross_margin_pct = snapshot["gross_margin_pct"]
+        coverage_pct = snapshot["coverage_pct"]
+        net_profit = snapshot["net_profit"]
+        net_margin_pct = snapshot["net_margin_pct"]
 
         self.known_revenue_data.setText(f"{revenue_known:.2f}")
         self.cogs_data.setText(f"{total_cogs:.2f}")
@@ -5079,9 +5075,10 @@ class MainReportsPage(QWidget):
         duration_key = duration_map.get(index, "today")
         self.current_duration_key = duration_key
 
-        total_sales, total_invoices = report_service.ReportService().get_sales_summary(duration_key)
-        total_purchase, invoice_count = report_service.ReportService().get_purchase_summary(duration_key)
-        total_expenses, num_records = report_service.ReportService().get_expense_summary(duration_key)
+        overview_snapshot = report_service.ReportService().get_overview_totals_snapshot(duration_key)
+        total_sales = overview_snapshot["total_sales"]
+        total_purchase = overview_snapshot["total_purchase"]
+        total_expenses = overview_snapshot["total_expenses"]
         self.set_overview_totals(
             f"{total_sales:.2f}",
             f"{total_purchase:.2f}",
@@ -5103,12 +5100,15 @@ class MainReportsPage(QWidget):
                 "coverage_data",
             )
         ):
-            revenue_known, total_cogs, gross_profit, revenue_unknown, gross_margin_pct, coverage_pct = (
-                report_service.ReportService().get_detailed_revenue(duration_key)
-            )
-            net_profit = gross_profit - total_expenses
-            total_revenue = revenue_known + revenue_unknown
-            net_margin_pct = (net_profit / total_revenue * 100.0) if total_revenue > 0 else 0.0
+            profit_snapshot = overview_snapshot["profit_snapshot"]
+            revenue_known = profit_snapshot["revenue_known"]
+            total_cogs = profit_snapshot["total_cogs"]
+            gross_profit = profit_snapshot["gross_profit"]
+            revenue_unknown = profit_snapshot["revenue_unknown"]
+            gross_margin_pct = profit_snapshot["gross_margin_pct"]
+            coverage_pct = profit_snapshot["coverage_pct"]
+            net_profit = profit_snapshot["net_profit"]
+            net_margin_pct = profit_snapshot["net_margin_pct"]
 
             self.known_revenue_data.setText(f"{revenue_known:.2f}")
             self.cogs_data.setText(f"{total_cogs:.2f}")
@@ -5408,6 +5408,14 @@ class MainReportsPage(QWidget):
     def export_report_text(self, default_name, title, content_text):
         from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+        if self.demo_mode:
+            AppMessageBox.information(
+                self,
+                "Demo Restriction",
+                "TXT export is disabled in demo mode. Install a full license to unlock report exports.",
+            )
+            return
+
         path, _ = QFileDialog.getSaveFileName(
             self,
             f"Export {title}",
@@ -5428,6 +5436,14 @@ class MainReportsPage(QWidget):
         from PySide6.QtWidgets import QFileDialog, QMessageBox
         from PySide6.QtGui import QTextDocument, QPageSize
         from PySide6.QtPrintSupport import QPrinter
+
+        if self.demo_mode:
+            AppMessageBox.information(
+                self,
+                "Demo Restriction",
+                "PDF export is disabled in demo mode. Install a full license to unlock report exports.",
+            )
+            return
 
         path, _ = QFileDialog.getSaveFileName(
             self,
@@ -5458,6 +5474,14 @@ class MainReportsPage(QWidget):
     def print_report_text(self, title, content_text):
         from PySide6.QtGui import QTextDocument
         from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+
+        if self.demo_mode:
+            AppMessageBox.information(
+                self,
+                "Demo Restriction",
+                "Printing is disabled in demo mode. Install a full license to unlock report printing.",
+            )
+            return
 
         document = QTextDocument()
         document.setDefaultStyleSheet(
@@ -5511,11 +5535,9 @@ class MainReportsPage(QWidget):
 
         layout.addLayout(grid)
 
-        opening_cost = report_service.ReportService().get_opening_estimate_amount()
-        self.estimate_cost.setText(f"{opening_cost:,.2f}")
-
-        purchased_cost = report_service.ReportService().get_total_purchase_amount()
-        self.known_stock_cost_data.setText(f"{purchased_cost:.2f}")
+        snapshot = report_service.ReportService().get_inventory_overview_snapshot()
+        self.estimate_cost.setText(f"{float(snapshot.get('opening_estimate_amount', 0.0) or 0.0):,.2f}")
+        self.known_stock_cost_data.setText(f"{float(snapshot.get('known_stock_cost_amount', 0.0) or 0.0):.2f}")
 
         action_row = QHBoxLayout()
         action_row.setContentsMargins(0, 4, 0, 0)
@@ -5585,9 +5607,10 @@ class MainReportsPage(QWidget):
 
         layout.addLayout(grid)
 
-        count = report_service.ReportService().get_stock_count_alerts()
-        self.expiry_count.setText(f"{count['near_expiry_batches']:.2f}")
-        self.low_stock_count.setText(f"{count['low_stock_products']:.2f}")
+        snapshot = report_service.ReportService().get_inventory_overview_snapshot()
+        count = snapshot.get("stock_alerts", {})
+        self.expiry_count.setText(f"{float(count.get('near_expiry_batches', 0) or 0):.2f}")
+        self.low_stock_count.setText(f"{float(count.get('low_stock_products', 0) or 0):.2f}")
 
         return card
 

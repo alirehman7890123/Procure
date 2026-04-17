@@ -411,27 +411,45 @@ class PurchaseDetailWidget(QWidget):
         print("Loading items into table")
         
         query = QSqlQuery()
+        self.table.setRowCount(0)  # Clear existing rows
+
+        row = 0
+
         query.prepare("""
             SELECT
-                medicine,
+                product,
                 qty,
                 bonus,
-                unitcost,
+                rate,
                 discount,
                 tax,
-                totalcost
+                total
             FROM purchaseitem
             WHERE purchase = ?
         """)
         query.addBindValue(id)
 
-        self.table.setRowCount(0)  # Clear existing rows
+        query_ok = query.exec()
 
-        row = 0
-        
-       
-        
-        if query.exec():
+        if not query_ok:
+            print("Current purchase item schema query failed, trying legacy columns:", query.lastError().text())
+            query = QSqlQuery()
+            query.prepare("""
+                SELECT
+                    medicine,
+                    qty,
+                    bonus,
+                    unitcost,
+                    discount,
+                    tax,
+                    totalcost
+                FROM purchaseitem
+                WHERE purchase = ?
+            """)
+            query.addBindValue(id)
+            query_ok = query.exec()
+
+        if query_ok:
             
             print("Loading items into table")
             
@@ -439,7 +457,8 @@ class PurchaseDetailWidget(QWidget):
                 
                 self.table.insertRow(row)
                 
-                med = int(query.value(0))
+                med_value = query.value(0)
+                med = int(med_value) if med_value not in (None, "") else None
                 quantity = str(query.value(1))
                 bonus = str(query.value(2))
                 rate = str(query.value(3))
@@ -451,20 +470,20 @@ class PurchaseDetailWidget(QWidget):
                 
                 total = str(query.value(6))
                 
-                query2 = QSqlQuery()
-                query2.prepare("SELECT display_name, brand FROM product WHERE id = ?")
-                query2.addBindValue(med)
-                
-                if query2.exec() and query2.next():
-                    
-                    name = query2.value(0)
-                    maker = query2.value(1)
-                    
+                name_text = "-"
+                maker_text = "-"
 
-                
-                            
-                name = QTableWidgetItem(name)
-                maker = QTableWidgetItem(maker)
+                if med is not None:
+                    query2 = QSqlQuery()
+                    query2.prepare("SELECT display_name, brand FROM product WHERE id = ?")
+                    query2.addBindValue(med)
+                    
+                    if query2.exec() and query2.next():
+                        name_text = str(query2.value(0) or "-")
+                        maker_text = str(query2.value(1) or "-")
+
+                name = QTableWidgetItem(name_text)
+                maker = QTableWidgetItem(maker_text)
                 quantity = QTableWidgetItem(quantity)
                 bonus = QTableWidgetItem(bonus)
                 rate = QTableWidgetItem(rate)
@@ -515,8 +534,6 @@ class MyTable(QTableWidget):
 
             
         
-
-
 
 
 

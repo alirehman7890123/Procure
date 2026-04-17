@@ -244,6 +244,9 @@ class AddProductWidget(QWidget):
 
     def parse_expiry_month_year(self, text):
         raw = str(text or "").strip()
+        collapsed = raw.replace("_", "").replace(" ", "")
+        if not collapsed or collapsed in {"-", "--"}:
+            return None
         if not raw:
             return None
 
@@ -910,7 +913,7 @@ class AddProductWidget(QWidget):
         data = self.name_input.itemData(index)
         print("Selected text is:", text, data)
 
-        # Existing product selected: autofill known details and focus quantity.
+        # Existing product selected: autofill known details and continue at batch entry.
         if data is not None:
             try:
                 product_id = int(data)
@@ -919,8 +922,8 @@ class AddProductWidget(QWidget):
 
             if product_id is not None:
                 self.autofill_existing_product_details(product_id)
-                self.quantity_input.setFocus()
-                self.quantity_input.selectAll()
+                self.batch_input.setFocus()
+                self.batch_input.selectAll()
 
     def on_name_index_activated(self, index):
         if index < 0:
@@ -1083,6 +1086,9 @@ class AddProductWidget(QWidget):
         # ---------- Expiry ----------
         expiry_date = None
         expiry_text = self.expiry_input.text().strip()
+        expiry_collapsed = expiry_text.replace("_", "").replace(" ", "")
+        if not expiry_collapsed or expiry_collapsed in {"-", "--"}:
+            expiry_text = ""
         if expiry_text:
             parsed_expiry = self.parse_expiry_month_year(expiry_text)
             if parsed_expiry is None:

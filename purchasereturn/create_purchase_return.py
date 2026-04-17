@@ -141,7 +141,7 @@ class AddPurchaseReturnWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)   
         
-        self.table.setMinimumWidth(1000)
+        self.table.setMinimumWidth(900)
         
         # Hide vertical header (row numbers)
         self.table.verticalHeader().setVisible(False)

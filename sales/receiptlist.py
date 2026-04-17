@@ -23,7 +23,7 @@ class ReceiptListWidget(QWidget):
 
         # Header
         header_layout = QHBoxLayout()
-        heading = QLabel("Invoice Information", objectName="SectionTitle")
+        heading = QLabel("Sales Invoices", objectName="SectionTitle")
         self.addinvoice = QPushButton("Add Invoice", objectName="TopRightButton")
         self.addinvoice.setCursor(Qt.PointingHandCursor)
         header_layout.setContentsMargins(0, 0, 0, 10)
@@ -103,7 +103,7 @@ class ReceiptListWidget(QWidget):
         self.table.verticalHeader().setFixedWidth(0)
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)
-        self.table.setMinimumWidth(1000)
+        self.table.setMinimumWidth(900)
 
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)

@@ -4,6 +4,7 @@ from PySide6.QtCore import QSize, Qt, QFile, QEvent, Signal
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from utilities.permissions import Permissions
 from utilities.stylus import load_stylesheets
+from utilities.app_theme import get_theme_palette
 
 
 
@@ -133,7 +134,8 @@ class BusinessWidget(QWidget):
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.FocusIn:
-            self.indicators[obj].setStyleSheet("background-color: #2F5D7C; border: none;")  # active blue
+            palette = get_theme_palette()
+            self.indicators[obj].setStyleSheet(f"background-color: {palette['primary_main']}; border: none;")
         elif event.type() == QEvent.FocusOut:
             self.indicators[obj].setStyleSheet("background-color: #ccc; border: none;")  # reset gray
         return super().eventFilter(obj, event)

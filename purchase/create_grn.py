@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QDate, QTimer
 from PySide6.QtSql import QSqlQuery, QSqlDatabase
 import re
+from PySide6.QtWidgets import QApplication
 
 from utilities.activity_logger import log_activity
 from utilities.payment_handler import PaymentMethodHandler
@@ -36,6 +37,11 @@ from services.purchase_transaction_service import (
     update_supplier_balances,
 )
 from services.purchase_posting_service import build_purchase_header_payload, build_supplier_transaction_payload
+from services.grn_draft_service import (
+    delete_grn_draft,
+    load_latest_grn_draft,
+    save_grn_draft,
+)
 
 
 class MyTable(QTableWidget):
@@ -97,7 +103,7 @@ class DiscountEditDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Line Discount")
         self.setModal(True)
-        self.setFixedWidth(332)
+        self.setMinimumWidth(332)
         self.setStyleSheet("""
             QDialog {
                 background: #FFFFFF;
@@ -179,6 +185,9 @@ class DiscountEditDialog(QDialog):
 
 def parse_expiry_month_year(text):
     raw = str(text or "").strip()
+    collapsed = raw.replace("_", "").replace(" ", "")
+    if not collapsed or collapsed in {"-", "--"}:
+        return None
     if not raw:
         return None
 
@@ -210,6 +219,13 @@ class CreateGRNWidget(QWidget):
         super().__init__(parent)
 
         self._line_refs = []
+        self.current_grn_draft_id = None
+        self._grn_draft_resume_checked = False
+        self._suspend_grn_draft_autosave = False
+        self._grn_draft_save_in_progress = False
+        self._grn_draft_timer = QTimer(self)
+        self._grn_draft_timer.setSingleShot(True)
+        self._grn_draft_timer.timeout.connect(self._save_grn_draft_snapshot)
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(10, 4, 10, 10)
@@ -318,7 +334,7 @@ class CreateGRNWidget(QWidget):
         self.items_table.verticalHeader().setVisible(False)
         self.items_table.setAlternatingRowColors(True)
         self.items_table.setMinimumWidth(900)
-        self.items_table.setFixedHeight(360)
+        self.items_table.setMinimumHeight(360)
         self.items_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.items_table.setStyleSheet("""
             QTableWidget::item { color: #333; border: none; }
@@ -486,6 +502,7 @@ class CreateGRNWidget(QWidget):
         self.paid_amount.textChanged.connect(self.calculate_payment)
         self.paid_amount.textChanged.connect(self.update_due_date_availability)
         self.writeoff_check.toggled.connect(self.update_due_date_availability)
+        self._setup_grn_draft_autosave()
 
         self.setStyleSheet(load_stylesheets())
 
@@ -623,6 +640,8 @@ class CreateGRNWidget(QWidget):
             self.payment_method.blockSignals(True)
             self.payment_method.setCurrentText("Cash")
             self.payment_method.blockSignals(False)
+            self.payment_handler.payment_data = {"payment_method": "Cash"}
+        self.schedule_grn_draft_save()
 
     def calculate_payment(self):
         total_value = self._read_money(self.total_with_fees_label)
@@ -656,6 +675,8 @@ class CreateGRNWidget(QWidget):
         return QDate.currentDate().addDays(days).toString("yyyy-MM-dd")
 
     def prepare_new_grn(self):
+        self._grn_draft_timer.stop()
+        self._suspend_grn_draft_autosave = True
         self.notes_edit.clear()
         self.grn_number_edit.clear()
         self.grn_date_edit.setDate(QDate.currentDate())
@@ -680,6 +701,258 @@ class CreateGRNWidget(QWidget):
         self.payment_method.blockSignals(False)
         self.payment_handler.handle_method_change("Cash")
         self.load_po_options()
+        self.current_grn_draft_id = None
+        self._grn_draft_resume_checked = False
+        self._suspend_grn_draft_autosave = False
+        QTimer.singleShot(0, self.prompt_resume_grn_draft)
+
+    def _setup_grn_draft_autosave(self):
+        self.po_combo.currentIndexChanged.connect(self.schedule_grn_draft_save)
+        self.rep_combo.currentIndexChanged.connect(self.schedule_grn_draft_save)
+        self.grn_number_edit.textChanged.connect(self.schedule_grn_draft_save)
+        self.grn_date_edit.dateChanged.connect(lambda *_: self.schedule_grn_draft_save())
+        self.notes_edit.textChanged.connect(self.schedule_grn_draft_save)
+        self.header_discount_edit.textChanged.connect(self.schedule_grn_draft_save)
+        self.tax_236g_edit.textChanged.connect(self.schedule_grn_draft_save)
+        self.tax_236h_edit.textChanged.connect(self.schedule_grn_draft_save)
+        self.sales_tax_edit.textChanged.connect(self.schedule_grn_draft_save)
+        self.cn_adjustment_edit.textChanged.connect(self.schedule_grn_draft_save)
+        self.payment_method.currentIndexChanged.connect(self.schedule_grn_draft_save)
+        self.paid_amount.textChanged.connect(self.schedule_grn_draft_save)
+        self.writeoff_check.toggled.connect(self.schedule_grn_draft_save)
+        self.due_date_combo.currentIndexChanged.connect(self.schedule_grn_draft_save)
+
+    def _current_grn_draft_user_id(self):
+        app = QApplication.instance()
+        if app is None:
+            return None
+        return app.property("user_id")
+
+    def _set_combo_current_data(self, combo, value):
+        if combo is None or value in (None, ""):
+            return False
+        for index in range(combo.count()):
+            if combo.itemData(index) == value:
+                combo.setCurrentIndex(index)
+                return True
+        return False
+
+    def _grn_draft_has_meaningful_content(self):
+        if self.po_combo.currentData() not in (None, ""):
+            return True
+        if self.notes_edit.text().strip():
+            return True
+        for row in range(self.items_table.rowCount()):
+            qty_widget = self.items_table.cellWidget(row, 6)
+            if qty_widget is not None and int(qty_widget.value()) > 0:
+                return True
+        return False
+
+    def _collect_grn_draft_header(self):
+        return {
+            "po_id": self.po_combo.currentData(),
+            "supplier_name": self.supplier_value.text().strip(),
+            "rep": self.rep_combo.currentData(),
+            "grn_number": self.grn_number_edit.text().strip(),
+            "grn_date": self.grn_date_edit.date().toString("yyyy-MM-dd"),
+            "notes": self.notes_edit.text().strip(),
+            "header_discount": self.header_discount_edit.text().strip(),
+            "tax_236g": self.tax_236g_edit.text().strip(),
+            "tax_236h": self.tax_236h_edit.text().strip(),
+            "sales_tax": self.sales_tax_edit.text().strip(),
+            "cn_adjustment": self.cn_adjustment_edit.text().strip(),
+            "paid": self.paid_amount.text().strip(),
+            "writeoff_enabled": self.writeoff_check.isChecked(),
+            "due_date_option": self.due_date_combo.currentText().strip(),
+            "payment_data": dict(self.payment_handler.payment_data or {}),
+            "user_id": self._current_grn_draft_user_id(),
+            "session_id": get_active_session_id(strict=False),
+        }
+
+    def _collect_grn_draft_rows(self):
+        rows = []
+        for row, line_ref in enumerate(self._line_refs):
+            batch_widget = self.items_table.cellWidget(row, 1)
+            expiry_widget = self.items_table.cellWidget(row, 2)
+            qty_widget = self.items_table.cellWidget(row, 6)
+            price_widget = self.items_table.cellWidget(row, 7)
+            discount_widget = self.items_table.cellWidget(row, 8)
+            tax_widget = self.items_table.cellWidget(row, 9)
+            if qty_widget is None or price_widget is None:
+                continue
+
+            rows.append(
+                {
+                    "po_line_id": line_ref.get("po_line_id"),
+                    "product_id": line_ref.get("product_id"),
+                    "product_name": self.items_table.item(row, 0).text().strip() if self.items_table.item(row, 0) else "",
+                    "batch_no": batch_widget.text().strip() if batch_widget else "",
+                    "expiry_date": expiry_widget.text().strip() if expiry_widget else "",
+                    "qty_received": int(qty_widget.value()),
+                    "unit_price": float(price_widget.value()),
+                    "discount_mode": str(discount_widget.property("discount_input_mode") or "percent") if discount_widget else "percent",
+                    "discount_value": float(discount_widget.property("discount_input_value") or 0.0) if discount_widget else 0.0,
+                    "tax": float(tax_widget.value()) if tax_widget else 0.0,
+                }
+            )
+        return rows
+
+    def schedule_grn_draft_save(self):
+        if self._suspend_grn_draft_autosave or self._grn_draft_save_in_progress:
+            return
+        self._grn_draft_timer.start(700)
+
+    def _save_grn_draft_snapshot(self):
+        if self._suspend_grn_draft_autosave or self._grn_draft_save_in_progress:
+            return
+        if not self._grn_draft_has_meaningful_content():
+            return
+        self._grn_draft_save_in_progress = True
+        try:
+            header = self._collect_grn_draft_header()
+            self.current_grn_draft_id = save_grn_draft(
+                header,
+                self._collect_grn_draft_rows(),
+                draft_id=self.current_grn_draft_id,
+            )
+            print(f"GRN draft autosaved successfully. Draft ID: {self.current_grn_draft_id}")
+        except Exception as exc:
+            print(f"GRN draft autosave failed: {exc}")
+        finally:
+            self._grn_draft_save_in_progress = False
+
+    def _discard_current_grn_draft(self):
+        if self.current_grn_draft_id in (None, ""):
+            return
+        try:
+            delete_grn_draft(self.current_grn_draft_id)
+        except Exception as exc:
+            print(f"Failed to delete GRN draft {self.current_grn_draft_id}: {exc}")
+            return
+        print(f"Deleted GRN draft {self.current_grn_draft_id}")
+        self.current_grn_draft_id = None
+
+    def _restore_grn_draft(self, draft_record):
+        header = dict((draft_record or {}).get("header") or {})
+        rows = list((draft_record or {}).get("rows") or [])
+
+        self._suspend_grn_draft_autosave = True
+        try:
+            self._grn_draft_timer.stop()
+            self.notes_edit.clear()
+            self.grn_number_edit.clear()
+            self.grn_date_edit.setDate(QDate.currentDate())
+            self.supplier_value.clear()
+            self.rep_combo.clear()
+            self.header_discount_edit.setText("0.00")
+            self.tax_236g_edit.setText("0.00")
+            self.tax_236h_edit.setText("0.00")
+            self.sales_tax_edit.setText("0.00")
+            self.cn_adjustment_edit.setText("0.00")
+            self.subtotal_label.setText("0.00")
+            self.taxable_label.setText("0.00")
+            self.net_amount_label.setText("0.00")
+            self.total_with_fees_label.setText("0.00")
+            self.paid_amount.setText("0.00")
+            self.remaining_amount.setText("0.00")
+            self.writeoff_check.setChecked(False)
+            self.due_date_combo.setCurrentText("None")
+            self.due_date_combo.setEnabled(False)
+            self.payment_method.blockSignals(True)
+            self.payment_method.setCurrentText("Cash")
+            self.payment_method.blockSignals(False)
+            self.payment_handler.handle_method_change("Cash")
+            self.load_po_options()
+            self.current_grn_draft_id = draft_record.get("id")
+
+            self._set_combo_current_data(self.po_combo, header.get("po_id"))
+            self.load_po_lines()
+            self._set_combo_current_data(self.rep_combo, header.get("rep"))
+            self.grn_number_edit.setText(str(header.get("grn_number") or ""))
+            grn_date = QDate.fromString(str(header.get("grn_date") or ""), "yyyy-MM-dd")
+            if grn_date.isValid():
+                self.grn_date_edit.setDate(grn_date)
+            self.notes_edit.setText(str(header.get("notes") or ""))
+            self.header_discount_edit.setText(str(header.get("header_discount") or "0.00"))
+            self.tax_236g_edit.setText(str(header.get("tax_236g") or "0.00"))
+            self.tax_236h_edit.setText(str(header.get("tax_236h") or "0.00"))
+            self.sales_tax_edit.setText(str(header.get("sales_tax") or "0.00"))
+            self.cn_adjustment_edit.setText(str(header.get("cn_adjustment") or "0.00"))
+            self.paid_amount.setText(str(header.get("paid") or "0.00"))
+            self.writeoff_check.setChecked(bool(header.get("writeoff_enabled")))
+            due_date_option = str(header.get("due_date_option") or "None")
+            due_index = self.due_date_combo.findText(due_date_option, Qt.MatchFixedString)
+            self.due_date_combo.setCurrentIndex(due_index if due_index >= 0 else 0)
+
+            payment_data = dict(header.get("payment_data") or {})
+            payment_method = str(payment_data.get("payment_method") or "Cash")
+            payment_index = self.payment_method.findText(payment_method, Qt.MatchFixedString)
+            self.payment_method.blockSignals(True)
+            self.payment_method.setCurrentIndex(payment_index if payment_index >= 0 else 0)
+            self.payment_method.blockSignals(False)
+            self.payment_handler.payment_data = dict(payment_data or {"payment_method": "Cash"})
+
+            rows_by_po_line = {int(row.get("po_line_id") or 0): row for row in rows if int(row.get("po_line_id") or 0) > 0}
+            for table_row, line_ref in enumerate(self._line_refs):
+                po_line_id = int(line_ref.get("po_line_id") or 0)
+                row = rows_by_po_line.get(po_line_id)
+                if not row:
+                    continue
+                batch_widget = self.items_table.cellWidget(table_row, 1)
+                expiry_widget = self.items_table.cellWidget(table_row, 2)
+                qty_widget = self.items_table.cellWidget(table_row, 6)
+                price_widget = self.items_table.cellWidget(table_row, 7)
+                discount_widget = self.items_table.cellWidget(table_row, 8)
+                tax_widget = self.items_table.cellWidget(table_row, 9)
+
+                if batch_widget:
+                    batch_widget.setText(str(row.get("batch_no") or ""))
+                if expiry_widget:
+                    expiry_widget.setText(str(row.get("expiry_date") or ""))
+                if qty_widget:
+                    qty_widget.setValue(int(row.get("qty_received") or 0))
+                if price_widget:
+                    price_widget.setValue(float(row.get("unit_price") or 0.0))
+                if discount_widget:
+                    discount_widget.setProperty("discount_input_mode", str(row.get("discount_mode") or "percent"))
+                    discount_widget.setProperty("discount_input_value", float(row.get("discount_value") or 0.0))
+                    self.update_discount_display(table_row)
+                if tax_widget:
+                    tax_widget.setValue(float(row.get("tax") or 0.0))
+
+            self.recalculate_totals()
+            self.recalculate_landing_costs()
+        finally:
+            self._suspend_grn_draft_autosave = False
+
+    def prompt_resume_grn_draft(self):
+        if self._grn_draft_resume_checked:
+            return
+        self._grn_draft_resume_checked = True
+        try:
+            draft_record = load_latest_grn_draft(
+                user_id=self._current_grn_draft_user_id(),
+                session_id=get_active_session_id(strict=False),
+            )
+        except Exception as exc:
+            print(f"Could not load GRN draft for recovery: {exc}")
+            return
+        if not draft_record:
+            return
+
+        _, accepted = AppMessageBox.confirm(
+            self,
+            "Resume Draft GRN",
+            "An unfinished GRN draft was found. Would you like to resume it?",
+            confirm_label="Resume Draft",
+            cancel_label="Discard Draft",
+            kind="question",
+        )
+        if accepted:
+            self._restore_grn_draft(draft_record)
+            return
+        self.current_grn_draft_id = draft_record.get("id")
+        self._discard_current_grn_draft()
 
     def load_po_options(self):
         self.po_combo.blockSignals(True)
@@ -934,9 +1207,9 @@ class CreateGRNWidget(QWidget):
 
         header_discount = min(header_discount, line_subtotal)
         taxable = max(0.0, line_subtotal - header_discount)
-        net_amount = max(0.0, taxable + tax_236g + sales_tax - tax_236h)
+        net_amount = max(0.0, taxable + tax_236h + sales_tax - tax_236g)
         # Keep landing-cost distribution aligned with purchase invoice behavior.
-        total_with_fees = max(0.0, line_subtotal - header_discount + tax_236g - tax_236h + sales_tax - cn_adjustment)
+        total_with_fees = max(0.0, line_subtotal - header_discount - tax_236g + tax_236h + sales_tax - cn_adjustment)
         
         # Update header displays
         self.subtotal_label.setText(f"{line_subtotal:.2f}")
@@ -959,6 +1232,7 @@ class CreateGRNWidget(QWidget):
                 line_total = max(0.0, self._read_money(item))
                 landing_cost = max(0.0, line_total * distribution_factor)
                 self._line_refs[row]["landing_cost"] = landing_cost
+        self.schedule_grn_draft_save()
 
 
     def create_stock_batches_from_receipts(self, receipt_rows, grn_number):
@@ -1469,6 +1743,8 @@ class CreateGRNWidget(QWidget):
 
             if not db.commit():
                 raise Exception("Could not commit GRN transaction.")
+
+            self._discard_current_grn_draft()
 
             try:
                 log_activity(

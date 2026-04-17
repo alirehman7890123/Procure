@@ -208,7 +208,7 @@ class ProductListWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)   
 
-        self.table.setMinimumWidth(1000)
+        self.table.setMinimumWidth(900)
         
         
         # Hide vertical header (row numbers)
@@ -1435,7 +1435,7 @@ class ImportDialog(QDialog):
         header = self.stocktable.horizontalHeader()
         header.setStretchLastSection(True)   
 
-        self.stocktable.setMinimumWidth(1000)
+        self.stocktable.setMinimumWidth(900)
         
         # Hide vertical header (row numbers)
         self.stocktable.verticalHeader().setVisible(False)

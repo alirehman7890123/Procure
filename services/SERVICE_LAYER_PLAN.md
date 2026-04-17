@@ -103,14 +103,18 @@ This project is ready to move core business logic out of UI widgets and into reu
 - `services/accounting_settings_service.py`
 - `services/product_catalog_service.py`
 - `services/product_admin_service.py`
+- `services/sales_detail_service.py`
 - `services/sales_return_service.py`
 - `services/sales_return_transaction_service.py`
 - `services/purchase_return_service.py`
 - `services/purchase_return_transaction_service.py`
+- `services/purchase_draft_service.py`
+- `services/grn_draft_service.py`
 
 ### Wired Screens
 
 - `sales/createsales.py`
+- `sales/salesdetail.py`
 - `purchase/addpurchase.py`
 - `purchase/create_grn.py`
 - `purchase/add_po.py`
@@ -145,14 +149,16 @@ This project is ready to move core business logic out of UI widgets and into reu
 - Sales service extraction: pricing defaults, posting math, item normalization, transaction persistence
 - Purchase service extraction: posting math, item normalization, transaction persistence
 - GRN service extraction: receipt posting, billing normalization, transaction helpers
+- Draft recovery extraction: Purchase Invoice and GRN now autosave recoverable draft state without posting stock, balances, or invoices early
 - Purchase Order service extraction: header/line normalization, low-stock helpers, persistence helpers
 - Inventory movement extraction: shared batch lookup/update, FIFO stock access, sold-batch helpers, and return-side stock restoration
 - Stock adjustment extraction: row normalization, adjustment posting, batch quantity updates, product/batch loading, and audit-note shaping
 - Product catalog extraction: low-stock/expired readers, barcode lookup, paginated browse listing, and search listing
 - Product admin extraction: manufacturer lookup, auth user resolution, and price-change product search/update helpers
+- Sales detail extraction: receipt header/item/business reads and invoice export context now live in a dedicated read service
 - Accounting settings extraction: shared `accounting_settings` reads/writes for sales policies, global promo/global tax, and theme settings
 - Return service extraction: settlement rules, row normalization, transaction persistence, stock reversal/update helpers
-- Reports cleanup in progress: batch reference details, opening-cost review, near-expiry, low-stock, outstanding-balance readers, chart helpers, business-name lookup, product option readers, and multiple reference-detail readers now delegate to `reports/report_service.py`
+- Reports cleanup in progress: batch reference details, opening-cost review, near-expiry, low-stock, outstanding-balance readers, chart helpers, business-name lookup, product option readers, inventory/balance-sheet/trial-balance/cash-flow/profitability snapshots, overview metric refresh helpers, and multiple reference-detail readers now delegate to `reports/report_service.py`
 - `reports/mainpage.py` no longer owns direct SQL blocks for the extracted reporting slices; its remaining work is mostly rendering and orchestration
 - Widget cleanup pass: major save flows now read more like orchestration than embedded business logic
 
@@ -177,7 +183,7 @@ This project is ready to move core business logic out of UI widgets and into reu
 - Continue shifting any remaining summary/read-model helpers into dedicated services before adding new report UI
 
 5. Reports service
-- Continue moving valuation, profit/loss, unknown-cost, reconciliation, and reference-detail logic out of report widgets
+- Continue moving valuation, profit/loss, unknown-cost, reconciliation, balance-sheet, trial-balance, cash-flow, overview-summary, and reference-detail logic out of report widgets
 
 6. Broader failure-path testing
 - Add more integration tests for invalid inputs, partial failures, repeated returns, and stock edge cases
@@ -188,6 +194,6 @@ This project is ready to move core business logic out of UI widgets and into reu
 
 - Keep thinning product, report, and stock-related widgets until they are mostly orchestration-only
 - Finish the remaining accounting-settings and inventory/audit straggler reads so shared services fully own those domains
-- Continue moving report-side summaries, chart feeds, and selector/read-model queries into `reports/report_service.py`
+- Continue moving report-side summaries, chart feeds, selector/read-model queries, and remaining financial snapshot providers into `reports/report_service.py`
 - Favor service-first additions for any new report screens or dashboard cards so `mainpage.py` stays thin
 - Use the broadened integration suite as the baseline before each major service-layer expansion

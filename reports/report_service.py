@@ -125,6 +125,178 @@ class ReportService:
             "total_units": 0.0,
         }
 
+    def get_inventory_overview_snapshot(self):
+        inventory = self.get_current_inventory_snapshot()
+        return {
+            "inventory": inventory,
+            "opening_estimate_amount": float(self.get_opening_estimate_amount() or 0.0),
+            "known_stock_cost_amount": float(self.get_total_purchase_amount() or 0.0),
+            "stock_alerts": self.get_stock_count_alerts(),
+        }
+
+    def get_balance_sheet_snapshot(self):
+        inventory = self.get_current_inventory_snapshot()
+        session_cash = self.get_latest_session_cash_position()
+        opening_estimate = float(self.get_opening_estimate_amount() or 0.0)
+        supplier_payable, supplier_receiveable = self.get_supplier_balances()
+        customer_receivable, customer_payable = self.get_customer_balances()
+
+        known_current_assets = (
+            float(session_cash.get("cash_value", 0.0) or 0.0)
+            + float(customer_receivable or 0.0)
+            + float(supplier_receiveable or 0.0)
+            + float(inventory.get("known_inventory_value", 0.0) or 0.0)
+        )
+        current_liabilities = float(supplier_payable or 0.0) + float(customer_payable or 0.0)
+
+        return {
+            "inventory": inventory,
+            "session_cash": session_cash,
+            "opening_estimate_amount": opening_estimate,
+            "supplier_payable": float(supplier_payable or 0.0),
+            "supplier_receiveable": float(supplier_receiveable or 0.0),
+            "customer_receivable": float(customer_receivable or 0.0),
+            "customer_payable": float(customer_payable or 0.0),
+            "known_current_assets": known_current_assets,
+            "current_liabilities": current_liabilities,
+            "working_capital": known_current_assets - current_liabilities,
+        }
+
+    def get_trial_balance_snapshot(self):
+        inventory = self.get_current_inventory_snapshot()
+        session_cash = self.get_latest_session_cash_position()
+        supplier_payable, supplier_receiveable = self.get_supplier_balances()
+        customer_receivable, customer_payable = self.get_customer_balances()
+
+        rows = [
+            {
+                "account": "Cash on Hand",
+                "debit": float(session_cash.get("cash_value", 0.0) or 0.0),
+                "credit": 0.0,
+                "note": session_cash.get("label", "Latest session cash"),
+            },
+            {
+                "account": "Inventory at Known Cost",
+                "debit": float(inventory.get("known_inventory_value", 0.0) or 0.0),
+                "credit": 0.0,
+                "note": "Only stock with known unit cost is included.",
+            },
+            {
+                "account": "Customer Receivables",
+                "debit": float(customer_receivable or 0.0),
+                "credit": 0.0,
+                "note": "Amounts receivable from customers.",
+            },
+            {
+                "account": "Supplier Receivables / Advances",
+                "debit": float(supplier_receiveable or 0.0),
+                "credit": 0.0,
+                "note": "Advances or balances due back from suppliers.",
+            },
+            {
+                "account": "Supplier Payables",
+                "debit": 0.0,
+                "credit": float(supplier_payable or 0.0),
+                "note": "Outstanding supplier obligations.",
+            },
+            {
+                "account": "Customer Payables / Advances",
+                "debit": 0.0,
+                "credit": float(customer_payable or 0.0),
+                "note": "Customer credit balances or amounts payable.",
+            },
+        ]
+
+        total_debit = sum(row["debit"] for row in rows)
+        total_credit = sum(row["credit"] for row in rows)
+        balancing = total_debit - total_credit
+
+        if balancing > 0:
+            rows.append({
+                "account": "Unclassified Equity / Capital",
+                "debit": 0.0,
+                "credit": balancing,
+                "note": "Balancing figure for capital, retained earnings, and other accounts not yet modeled.",
+            })
+        elif balancing < 0:
+            rows.append({
+                "account": "Unclassified Equity / Capital",
+                "debit": abs(balancing),
+                "credit": 0.0,
+                "note": "Balancing figure for capital, retained earnings, and other accounts not yet modeled.",
+            })
+
+        total_debit = sum(row["debit"] for row in rows)
+        total_credit = sum(row["credit"] for row in rows)
+
+        return {
+            "inventory": inventory,
+            "rows": rows,
+            "total_debit": total_debit,
+            "total_credit": total_credit,
+        }
+
+    def get_cash_flow_snapshot(self, duration="today"):
+        cash_flow = self.get_cash_flow_summary(duration)
+        session_cash = self.get_latest_session_cash_position()
+        session_label = session_cash.get("label", "Latest Session Cash")
+
+        return {
+            "duration": duration,
+            "cash_flow": cash_flow,
+            "session_cash": session_cash,
+            "session_label": session_label,
+            "notes": [
+                f"Customer cash rows: {int(cash_flow.get('customer_rows', 0) or 0)} | Supplier cash rows: {int(cash_flow.get('supplier_rows', 0) or 0)} | Cash expense rows: {int(cash_flow.get('expense_rows', 0) or 0)}",
+                "This report tracks cash-method activity only. Bank, wallet, and other non-cash methods are outside this cash movement view.",
+                "Session cash is shown as a current operational reference, not as a period opening/closing reconciliation statement.",
+            ],
+        }
+
+    def get_profit_loss_snapshot(self, duration="today"):
+        revenue_known, total_cogs, gross_profit, revenue_unknown, gross_margin_pct, coverage_pct = self.get_detailed_revenue(duration)
+        total_expenses, expense_count = self.get_expense_summary(duration)
+        total_revenue = revenue_known + revenue_unknown
+        net_profit = gross_profit - total_expenses
+        net_margin_pct = (net_profit / total_revenue * 100.0) if total_revenue > 0 else 0.0
+
+        return {
+            "duration": duration,
+            "revenue_known": revenue_known,
+            "total_cogs": total_cogs,
+            "gross_profit": gross_profit,
+            "revenue_unknown": revenue_unknown,
+            "gross_margin_pct": gross_margin_pct,
+            "coverage_pct": coverage_pct,
+            "total_expenses": total_expenses,
+            "expense_count": int(expense_count or 0),
+            "total_revenue": total_revenue,
+            "net_profit": net_profit,
+            "net_margin_pct": net_margin_pct,
+            "notes": [
+                "Known Gross Profit uses only sale lines where all consumed stock had a known cost.",
+                "Revenue With Unknown Cost is excluded from profit until opening stock or batch cost is assigned.",
+                f"Expense records in period: {int(expense_count or 0)}",
+            ],
+        }
+
+    def get_overview_totals_snapshot(self, duration="today"):
+        total_sales, total_invoices = self.get_sales_summary(duration)
+        total_purchase, purchase_invoices = self.get_purchase_summary(duration)
+        total_expenses, expense_records = self.get_expense_summary(duration)
+        profit_snapshot = self.get_profit_loss_snapshot(duration)
+
+        return {
+            "duration": duration,
+            "total_sales": float(total_sales or 0.0),
+            "total_sales_invoices": int(total_invoices or 0),
+            "total_purchase": float(total_purchase or 0.0),
+            "total_purchase_invoices": int(purchase_invoices or 0),
+            "total_expenses": float(total_expenses or 0.0),
+            "expense_records": int(expense_records or 0),
+            "profit_snapshot": profit_snapshot,
+        }
+
     def get_cash_flow_summary(self, duration="today"):
         duration = (duration or "today").lower()
         if duration == "today":

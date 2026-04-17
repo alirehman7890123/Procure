@@ -106,6 +106,7 @@ class CreateSalesWidget(QWidget):
         self.line_discount_manual_override = False
         self.line_tax_manual_override = False
         self.current_line_pricing_summary_text = "Line Pricing: Waiting for product selection"
+        self.minimum_margin_percent = 15.0
         self.pricing_details_dialog = None
         self.pricing_details_line_label = None
         self.pricing_details_header_label = None
@@ -408,11 +409,17 @@ class CreateSalesWidget(QWidget):
                 )
                 return
 
+            customer_id = query.lastInsertId()
+            try:
+                customer_id = int(customer_id)
+            except Exception:
+                customer_id = None
+
             AppMessageBox.information(dialog, "Success", "Customer added successfully.")
             dialog.accept()
 
             if hasattr(self, "populate_customers"):
-                self.populate_customers()
+                self.populate_customers(selected_customer_id=customer_id)
 
 
         save_btn.clicked.connect(save_customer)
@@ -443,11 +450,11 @@ class CreateSalesWidget(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         
-        visible_rows = 6
+        visible_rows = 11
         header_height = self.table.horizontalHeader().height()
 
         table_height = header_height + (self.row_height * visible_rows) + 2
-        self.table.setFixedHeight(table_height)
+        self.table.setMinimumHeight(table_height)
 
         return self.table 
         
@@ -719,6 +726,13 @@ class CreateSalesWidget(QWidget):
 
         grid.addLayout(action_box_layout, 0, 7)
 
+        self.line_margin_label = QLabel("Margin: waiting for product selection")
+        self.line_margin_label.setWordWrap(False)
+        self.line_margin_label.setStyleSheet(
+            "color: #5C7080; font-size: 10px; font-weight: 700; padding-left: 2px; margin: 0;"
+        )
+        grid.addWidget(self.line_margin_label, 1, 3, 1, 5)
+
         qty_filter = QtyValidationFilter(self, self.qty_edit, self.item)
         self.qty_edit.installEventFilter(qty_filter)
 
@@ -783,6 +797,11 @@ class CreateSalesWidget(QWidget):
         self.line_discount_manual_override = False
         self.line_tax_manual_override = False
         self.current_line_pricing_summary_text = "Line Pricing: Waiting for product selection"
+        if hasattr(self, "line_margin_label"):
+            self.line_margin_label.setText("Margin: waiting for product selection")
+            self.line_margin_label.setStyleSheet(
+                "color: #5C7080; font-size: 10px; font-weight: 700; padding-left: 2px; margin: 0;"
+            )
         self.refresh_pricing_details_dialog()
     
     
@@ -1196,6 +1215,7 @@ class CreateSalesWidget(QWidget):
             self.current_line_product_defaults.get("tax_apply_on_sale", True),
         )
         self.amount_edit.setText(f"{resolved['line_total']:.2f}")
+        self.update_current_line_margin_indicator()
         self.update_line_pricing_hint()
         
       
@@ -1343,7 +1363,9 @@ class CreateSalesWidget(QWidget):
             )
 
     def load_sales_discount_policy(self):
-        self.sales_discount_policy = load_sales_policy_settings()["discount_policy"]
+        settings = load_sales_policy_settings()
+        self.sales_discount_policy = settings["discount_policy"]
+        self.minimum_margin_percent = float(settings.get("minimum_margin_percent", self.minimum_margin_percent) or self.minimum_margin_percent)
         return self.sales_discount_policy
 
     def _line_discount_enabled_by_policy(self):
@@ -1369,6 +1391,74 @@ class CreateSalesWidget(QWidget):
 
     def _header_tax_enabled_by_policy(self):
         return self.sales_tax_policy in ("both", "header_only")
+
+    def _compute_margin_snapshot(self, cost_price, sale_price):
+        try:
+            cost = float(cost_price or 0.0)
+        except (TypeError, ValueError):
+            cost = 0.0
+
+        try:
+            sale = float(sale_price or 0.0)
+        except (TypeError, ValueError):
+            sale = 0.0
+
+        if sale <= 0:
+            return {
+                "cost_price": cost,
+                "sale_price": sale,
+                "profit_amount": 0.0,
+                "margin_percent": None,
+            }
+
+        profit_amount = sale - cost
+        margin_percent = (profit_amount / sale) * 100.0
+        return {
+            "cost_price": cost,
+            "sale_price": sale,
+            "profit_amount": profit_amount,
+            "margin_percent": margin_percent,
+        }
+
+    def update_current_line_margin_indicator(self):
+        if not hasattr(self, "line_margin_label"):
+            return
+
+        product_data = self.current_line_product_defaults or {}
+        cost_price = self._float_or_default(product_data.get("cost_price"), 0.0)
+        sale_price = self._float_or_default(self.rate_edit.text(), 0.0)
+
+        if cost_price <= 0:
+            self.line_margin_label.setText("Margin: no cost basis available")
+            self.line_margin_label.setStyleSheet(
+                "color: #6E7F8D; font-size: 10px; font-weight: 700; padding-left: 2px; margin: 0;"
+            )
+            return
+
+        margin = self._compute_margin_snapshot(cost_price, sale_price)
+        margin_percent = margin["margin_percent"]
+        profit_amount = margin["profit_amount"]
+
+        if margin_percent is None:
+            self.line_margin_label.setText(f"Cost: {cost_price:.2f} | Margin: waiting for price")
+            self.line_margin_label.setStyleSheet(
+                "color: #5C7080; font-size: 10px; font-weight: 700; padding-left: 2px; margin: 0;"
+            )
+            return
+
+        if margin_percent < self.minimum_margin_percent:
+            color = "#B33A3A"
+            status = f"Below {self.minimum_margin_percent:.0f}% target"
+        else:
+            color = "#356B43"
+            status = "Within target"
+
+        self.line_margin_label.setText(
+            f"Cost: {cost_price:.2f} | Profit: {profit_amount:.2f} | Margin: {margin_percent:.2f}% | {status}"
+        )
+        self.line_margin_label.setStyleSheet(
+            f"color: {color}; font-size: 10px; font-weight: 700; padding-left: 2px; margin: 0;"
+        )
 
     def _sales_tax_policy_label(self):
         mapping = {
@@ -1420,6 +1510,7 @@ class CreateSalesWidget(QWidget):
 
         self.discount.setText(f"{float(self.current_line_product_defaults.get('discount_percent', 0.0) or 0.0):.2f}")
         self.tax.setText(f"{float(self.current_line_product_defaults.get('tax_percent', 0.0) or 0.0):.2f}")
+        self.update_current_line_margin_indicator()
         self.update_line_pricing_hint()
         self.update_line_total()
 
@@ -1432,6 +1523,11 @@ class CreateSalesWidget(QWidget):
             self.tax.setText("0.00")
             self.line_discount_manual_override = False
             self.line_tax_manual_override = False
+            if hasattr(self, "line_margin_label"):
+                self.line_margin_label.setText("Margin: waiting for product selection")
+                self.line_margin_label.setStyleSheet(
+                    "color: #5C7080; font-size: 10px; font-weight: 700; padding-left: 2px; margin: 0;"
+                )
             self.update_line_pricing_hint()
             self.update_line_total()
             return
@@ -1818,7 +1914,7 @@ class CreateSalesWidget(QWidget):
 
 
 
-    def populate_customers(self):
+    def populate_customers(self, selected_customer_id=None):
     
         self.customer.clear()
         self.customer.addItem("Walk-in Customer", None)
@@ -1831,6 +1927,13 @@ class CreateSalesWidget(QWidget):
                 self.customer.addItem(name, customer_id)
         else:
             AppMessageBox.information(self, "Error", query.lastError().text())
+
+        target_index = 0
+        if selected_customer_id is not None:
+            found_index = self.customer.findData(selected_customer_id)
+            if found_index >= 0:
+                target_index = found_index
+        self.customer.setCurrentIndex(target_index)
 
         self.update_customer_credit_summary()
     
@@ -3496,6 +3599,7 @@ class CreateSalesWidget(QWidget):
         product_data = {
             "product_id": product["product_id"],
             "unit_price": product["unit_price"],
+            "cost_price": product.get("cost_price", 0.0),
             "discount_group_id": product.get("discount_group_id"),
             "discount_percent": product.get("discount_percent", 0.0),
             "discount_group_name": product.get("discount_group_name", ""),
@@ -3571,6 +3675,22 @@ class CreateSalesWidget(QWidget):
         query = QSqlQuery()
         query.prepare("""
             SELECT p.id, p.display_name, pp.unit_price
+                 , COALESCE((
+                    SELECT b.unit_cost
+                    FROM batch b
+                    WHERE b.product_id = p.id
+                      AND b.unit_cost IS NOT NULL
+                      AND b.unit_cost > 0
+                    ORDER BY b.id DESC
+                    LIMIT 1
+                 ), COALESCE((
+                    SELECT pi.rate
+                    FROM purchaseitem pi
+                    JOIN purchase pu ON pu.id = pi.purchase
+                    WHERE pi.product = p.id
+                    ORDER BY pu.id DESC, pi.id DESC
+                    LIMIT 1
+                 ), 0))
                  , COALESCE(dg.id, 0)
                  , COALESCE(dg.discount_percent, 0)
                  , COALESCE(dg.name, '')
@@ -3604,19 +3724,21 @@ class CreateSalesWidget(QWidget):
             product_id = query.value(0)
             name = str(query.value(1)).strip()
             unit_price = query.value(2) or 0.0
-            discount_group_id = int(query.value(3) or 0) or None
-            discount_percent = query.value(4) or 0.0
-            discount_group_name = str(query.value(5) or "").strip()
-            discount_fixed_amount = query.value(6) or 0.0
-            discount_apply_on_sale = bool(int(query.value(7) or 0))
-            tax_group_id = int(query.value(8) or 0) or None
-            tax_percent = query.value(9) or 0.0
-            tax_fixed_amount = query.value(10) or 0.0
-            tax_apply_on_sale = bool(int(query.value(11) or 0))
-            tax_group_name = str(query.value(12) or "").strip()
+            cost_price = query.value(3) or 0.0
+            discount_group_id = int(query.value(4) or 0) or None
+            discount_percent = query.value(5) or 0.0
+            discount_group_name = str(query.value(6) or "").strip()
+            discount_fixed_amount = query.value(7) or 0.0
+            discount_apply_on_sale = bool(int(query.value(8) or 0))
+            tax_group_id = int(query.value(9) or 0) or None
+            tax_percent = query.value(10) or 0.0
+            tax_fixed_amount = query.value(11) or 0.0
+            tax_apply_on_sale = bool(int(query.value(12) or 0))
+            tax_group_name = str(query.value(13) or "").strip()
             results.append((name, {
                 "product_id": product_id,
                 "unit_price": unit_price,
+                "cost_price": cost_price,
                 "discount_group_id": discount_group_id,
                 "discount_percent": discount_percent,
                 "discount_group_name": discount_group_name,
@@ -3671,6 +3793,7 @@ class CreateSalesWidget(QWidget):
         product_data = product_data or self.current_line_product_defaults or {}
         discount_name = str(product_data.get("discount_group_name") or "").strip()
         tax_name = str(product_data.get("tax_group_name") or "").strip()
+        cost_price = float(product_data.get("cost_price") or 0.0)
         discount_percent = float(product_data.get("discount_percent") or 0.0)
         discount_fixed_amount = float(product_data.get("discount_fixed_amount") or 0.0)
         discount_apply_on_sale = bool(product_data.get("discount_apply_on_sale", True))
@@ -3690,11 +3813,22 @@ class CreateSalesWidget(QWidget):
             f"{tax_name} ({tax_percent:.2f}% + {tax_fixed_amount:.2f}, {'Auto' if tax_apply_on_sale else 'Off'})"
             if tax_name else f"None ({tax_percent:.2f}% + {tax_fixed_amount:.2f})"
         )
+        margin_snapshot = self._compute_margin_snapshot(cost_price, self._float_or_default(self.rate_edit.text(), 0.0))
+        if cost_price <= 0:
+            margin_text = "Margin unavailable (no cost basis)"
+        elif margin_snapshot["margin_percent"] is None:
+            margin_text = f"Margin waiting for sale price | Cost {cost_price:.2f}"
+        else:
+            margin_text = (
+                f"Margin {margin_snapshot['margin_percent']:.2f}% "
+                f"(Profit {margin_snapshot['profit_amount']:.2f} on Cost {cost_price:.2f})"
+            )
 
         badge = "Manual Override Active" if has_manual_override else "Defaults Active"
         badge_color = "#B45309" if has_manual_override else "#2F5D7C"
         self.current_line_pricing_summary_text = (
-            f"Line Pricing [{badge}]: Discount {discount_text} [{discount_source}, Mode: {'Amt' if discount_mode == 'amount' else '%'}, Policy {self._sales_discount_policy_label()}] | "
+            f"Line Pricing [{badge}]: {margin_text} | "
+            f"Discount {discount_text} [{discount_source}, Mode: {'Amt' if discount_mode == 'amount' else '%'}, Policy {self._sales_discount_policy_label()}] | "
             f"Tax {tax_text} [{tax_source}, Policy {self._sales_tax_policy_label()}] | Product defaults drive the row, header defaults stay at invoice level"
         )
         if hasattr(self, "line_pricing_info_btn"):
@@ -3820,6 +3954,7 @@ class CreateSalesWidget(QWidget):
             "product_id": int(product_id),
             "display_name": str(query.value(0) or "").strip(),
             "unit_price": float(query.value(1) or 0.0),
+            "cost_price": 0.0,
             "discount_group_id": int(query.value(2) or 0) or None,
             "discount_percent": float(query.value(3) or 0.0),
             "discount_group_name": str(query.value(4) or "").strip(),

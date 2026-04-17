@@ -94,6 +94,8 @@ class DiscountSettingsWidget(QWidget):
 
         self.global_discount_combo = QComboBox()
         self.global_discount_enabled_check = QCheckBox("Enable global sales promo discount")
+        self.minimum_margin_edit = QLineEdit()
+        self.minimum_margin_edit.setPlaceholderText("15.00")
 
         grid.addWidget(QLabel("Name"), 0, 0)
         grid.addWidget(self.name_edit, 0, 1)
@@ -156,6 +158,8 @@ class DiscountSettingsWidget(QWidget):
         promo_grid.addWidget(QLabel("Promo Discount Group"), 0, 0)
         promo_grid.addWidget(self.global_discount_combo, 0, 1)
         promo_grid.addWidget(self.global_discount_enabled_check, 1, 0, 1, 2)
+        promo_grid.addWidget(QLabel("Minimum Margin %"), 2, 0)
+        promo_grid.addWidget(self.minimum_margin_edit, 2, 1)
         promo_grid.setColumnStretch(1, 1)
         promo_layout.addLayout(promo_grid)
 
@@ -272,6 +276,7 @@ class DiscountSettingsWidget(QWidget):
         enabled = bool(settings["enabled"])
         self.populate_global_discount_combo(selected_group_id)
         self.global_discount_enabled_check.setChecked(enabled)
+        self.minimum_margin_edit.setText(f"{float(settings.get('minimum_margin_percent', 15.0) or 15.0):.2f}")
 
     def save_sales_discount_settings(self, show_feedback=True):
         sales_discount_policy = self.sales_discount_policy_combo.currentData()
@@ -282,6 +287,7 @@ class DiscountSettingsWidget(QWidget):
                 policy=sales_discount_policy,
                 group_id=global_discount_group_id,
                 enabled=bool(global_discount_enabled),
+                minimum_margin_percent=self.minimum_margin_edit.text().strip(),
             )
         except ValueError as exc:
             AppMessageBox.warning(self, "Validation Error", str(exc))

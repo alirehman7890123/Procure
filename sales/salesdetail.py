@@ -9,6 +9,11 @@ from PySide6.QtGui import QPdfWriter, QPainter, QPageSize, QFont, QTextOption, Q
 from PySide6.QtCore import Qt, QRectF
 
 from utilities.stylus import load_stylesheets
+from services.sales_detail_service import (
+    fetch_sales_detail,
+    fetch_sales_detail_items,
+    fetch_sales_invoice_context,
+)
 
 
 
@@ -99,7 +104,7 @@ class SalesDetailWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)   
 
-        self.table.setMinimumWidth(1000)
+        self.table.setMinimumWidth(900)
         
         # Hide vertical header (row numbers)
         self.table.verticalHeader().setVisible(False)
@@ -192,111 +197,29 @@ class SalesDetailWidget(QWidget):
     def load_sales_data(self, id):
         
         print("Loading Sales ID:", id)
-        query = QSqlQuery()
-        query.prepare(
-            """
-            SELECT
-                customer,
-                salesman,
-                creation_date,
-                subtotal,
-                discount,
-                taxable,
-                tax,
-                net_amount,
-                additional_charges,
-                total,
-                received,
-                remaining,
-                writeoff,
-                due_date
-            FROM sales
-            WHERE id = ?
-            """
-        )
-        query.addBindValue(id)
-        
-        if query.exec() and query.next():
-            
-            customerid = query.value(0)
-            
-            print("Customer is ...... ", customerid)
-            
-            if customerid is None or customerid == '':
-                customerid = 0
-            
-            if customerid != 0:
-                
-                customerid = int(customerid)
-                customerquery = QSqlQuery()
-                customerquery.prepare("SELECT name FROM customer WHERE id = ?")
-                customerquery.addBindValue(customerid)
-                
-                if customerquery.exec() and customerquery.next():
-                    customer = customerquery.value(0)
-                else:
-                    print("Customer not found for ID:", customerid)
-                
-            else:
-                customer = 'Walk-in Customer'
-                
-            
-            salesmanid = int(query.value(1))
-            invoicedate = query.value(2)
-            
-            subtotal = float(query.value(3))
-            discount = float(query.value(4))
-            taxable = float(query.value(5))
-            tax = float(query.value(6))
-            
-            net_amount = float(query.value(7))
-            additional_charges = float(query.value(8))
-            total = float(query.value(9))
-            received = float(query.value(10))
-            remaining = float(query.value(11))
-            writeoff = float(query.value(12))
-            due_date = query.value(13)
-            
+        detail = fetch_sales_detail(id)
+        if not detail:
+            print("Sales not found for ID:", id)
+            return
 
+        self.orderid.setText(str(detail["sales_id"]))
+        self.customer.setText(detail["customer_name"])
+        self.salesman.setText(detail["salesman_name"])
+        self.orderdate.setText(detail["invoice_date"])
+        self.duedate.setText(detail["due_date"])
+        self.subtotal.setText(f"{detail['subtotal']:.2f}")
+        self.discount.setText(f"{detail['discount']:.2f}")
+        self.taxable.setText(f"{detail['taxable']:.2f}")
+        self.tax.setText(f"{detail['tax']:.2f}")
+        self.total.setText(f"{detail['net_amount']:.2f}")
+        self.roundoff.setText(f"{detail['additional_charges']:.2f}")
+        self.finalamount.setText(f"{detail['final_total']:.2f}")
+        self.received.setText(f"{detail['received']:.2f}")
+        self.remaining.setText(f"{detail['remaining']:.2f}")
+        self.writeoff.setText(f"{detail['writeoff']:.2f}")
 
-            if isinstance(invoicedate, QDate):  # or QDateTime
-                invoicedate = invoicedate.toString("dd-MM-yyyy")  # or "yyyy-MM-dd"
-            else:
-                invoicedate = str(invoicedate)
-                
-            
-            salesmanquery = QSqlQuery()
-            salesmanquery.prepare("SELECT firstname, lastname FROM auth WHERE id = ?")
-            salesmanquery.addBindValue(salesmanid)
-
-            if salesmanquery.exec() and salesmanquery.next():
-                firstname = salesmanquery.value(0)
-                lastname = salesmanquery.value(1)
-                
-                salesman = f"{firstname} {lastname}"
-            else:
-                print("Salesman not found for ID:", salesmanid)
-                
-            self.orderid.setText(str(id))
-            self.customer.setText(str(customer))
-            self.salesman.setText(str(salesman))
-            self.orderdate.setText(str(invoicedate))
-            self.duedate.setText(str(due_date or "No Due Date"))
-            self.subtotal.setText(f"{subtotal:.2f}")
-            self.discount.setText(f"{discount:.2f}")
-            self.taxable.setText(f"{taxable:.2f}")
-            self.tax.setText(f"{tax:.2f}")
-            self.total.setText(f"{net_amount:.2f}")
-            self.roundoff.setText(f"{additional_charges:.2f}")
-            self.finalamount.setText(f"{total:.2f}")
-            self.received.setText(f"{received:.2f}")
-            self.remaining.setText(f"{remaining:.2f}")
-            self.writeoff.setText(f"{writeoff:.2f}")
-        
-            print("Sales data loaded successfully for ID:", id)
-            
-            
-            self.load_items_into_table(id)
+        print("Sales data loaded successfully for ID:", id)
+        self.load_items_into_table(id)
             
             
 
@@ -308,60 +231,18 @@ class SalesDetailWidget(QWidget):
         self.invoice_id = sale_id
         print("Loading items into table")
 
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT product_id, qty_sold, unit_price, discount, discount_amount, tax, line_total
-            FROM salesitem 
-            WHERE sales_id = ?
-        """)
-        query.addBindValue(sale_id)
-
         self.table.setRowCount(0)  # Clear existing rows
-        row = 0
-
-        if query.exec():
-            while query.next():
-                self.table.insertRow(row)
-
-                product_id = int(query.value(0))
-                qty = str(query.value(1))
-                rate = str(query.value(2))
-                discount = str(query.value(3))
-                discount_amount = str(query.value(4))
-                tax = str(query.value(5))
-                total = str(query.value(6))
-
-                # Get product name
-                product_name = ""
-                query2 = QSqlQuery()
-                query2.prepare("SELECT display_name FROM product WHERE id = ?")
-                query2.addBindValue(product_id)
-
-                if query2.exec() and query2.next():
-                    product_name = query2.value(0)
-
-                # Table items
-                counter_item = QTableWidgetItem(str(row + 1))
-                product_item = QTableWidgetItem(product_name)
-                qty_item = QTableWidgetItem(qty)
-                rate_item = QTableWidgetItem(rate)
-                discount_item = QTableWidgetItem(discount)
-                tax_item = QTableWidgetItem(tax)
-                total_item = QTableWidgetItem(total)
-
-                # Set into table
-                self.table.setItem(row, 0, counter_item)
-                self.table.setItem(row, 1, product_item)
-                self.table.setItem(row, 2, qty_item)
-                self.table.setItem(row, 3, rate_item)
-                self.table.setItem(row, 4, discount_item)
-                self.table.setItem(row, 5, QTableWidgetItem(discount_amount))
-                self.table.setItem(row, 6, tax_item)
-                self.table.setItem(row, 7, total_item)
-
-                row += 1
-        else:
-            print("Query failed:", query.lastError().text())
+        rows = fetch_sales_detail_items(sale_id)
+        for row_index, item in enumerate(rows):
+            self.table.insertRow(row_index)
+            self.table.setItem(row_index, 0, QTableWidgetItem(str(row_index + 1)))
+            self.table.setItem(row_index, 1, QTableWidgetItem(item["product_name"]))
+            self.table.setItem(row_index, 2, QTableWidgetItem(str(item["qty"])))
+            self.table.setItem(row_index, 3, QTableWidgetItem(str(item["rate"])))
+            self.table.setItem(row_index, 4, QTableWidgetItem(str(item["discount_percent"])))
+            self.table.setItem(row_index, 5, QTableWidgetItem(str(item["discount_amount"])))
+            self.table.setItem(row_index, 6, QTableWidgetItem(str(item["tax_percent"])))
+            self.table.setItem(row_index, 7, QTableWidgetItem(str(item["line_total"])))
             
         
         
@@ -377,149 +258,36 @@ class SalesDetailWidget(QWidget):
         print("Exporting PDF")
         
         print("Sales id is: ", sales_id)
-        
-        # Loading Sales data 
-        
-        salesquery = QSqlQuery()
-        salesquery.prepare(
-            """
-            SELECT
-                customer,
-                salesman,
-                creation_date,
-                subtotal,
-                discount,
-                tax,
-                net_amount,
-                additional_charges,
-                total
-            FROM sales
-            WHERE id = ?
-            """
-        )
-        salesquery.addBindValue(sales_id)
-        
-        if salesquery.exec() and salesquery.next():
-            
-            customerid = salesquery.value(0)
-            
-            print("Customer is ...... ", customerid)
-            
-            if customerid is None or customerid == '':
-                customerid = 0
-            
-            if customerid != 0:
-                
-                customerid = int(customerid)
-                customerquery = QSqlQuery()
-                customerquery.prepare("SELECT name FROM customer WHERE id = ?")
-                customerquery.addBindValue(customerid)
-                
-                if customerquery.exec() and customerquery.next():
-                    customer = customerquery.value(0)
-                else:
-                    print("Customer not found for ID:", customerid)
-                
-            else:
-                customer = 'Walk-in Customer'
-                
-            
-            salesmanid = int(salesquery.value(1))
-            invoicedate = salesquery.value(2)
+        context = fetch_sales_invoice_context(sales_id)
+        if not context:
+            print("Sales invoice context not found for ID:", sales_id)
+            return
 
-            subtotal = float(salesquery.value(3))
-            salesdiscount = float(salesquery.value(4))
-            salestax = float(salesquery.value(5))
-            totalaftertax = float(salesquery.value(6))
-            roundoff = float(salesquery.value(7))
-            finaltotal = float(salesquery.value(8))
-
-
-            if isinstance(invoicedate, QDate):  # or QDateTime
-                invoicedate = invoicedate.toString("dd-MM-yyyy")  # or "yyyy-MM-dd"
-            else:
-                invoicedate = str(invoicedate)
-                
-            print("Invoice Date is: ", invoicedate)
-            salesmanquery = QSqlQuery()
-            salesmanquery.prepare("SELECT firstname, lastname FROM auth WHERE id = ?")
-            salesmanquery.addBindValue(salesmanid)
-
-            if salesmanquery.exec() and salesmanquery.next():
-                firstname = salesmanquery.value(0)
-                lastname = salesmanquery.value(1)
-                
-                salesman = f"{firstname} {lastname}"
-            else:
-                print("Salesman not found for ID:", salesmanid)
-                
-        else:
-            print("Sales Error..., ", salesquery.lastError().text())
-        
-        # Loading Sales Items data
-        
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT product_id, qty_sold, unit_price, discount, discount_amount, line_total
-            FROM salesitem 
-            WHERE sales_id = ?
-        """)
-        query.addBindValue(sales_id)
-        
-        items = []
-        
-        if query.exec():
-            
-            print("Query has been executed successfully")
-            
-            while query.next():
-                
-                product_id = int(query.value(0))
-                qty = query.value(1)
-                rate = query.value(2)
-                discount = query.value(3)
-                discount_amount = query.value(4)
-                price = rate - discount_amount
-                total = query.value(5)
-                
-                print("Rate is: ", rate)
-                print("Discount is; ", discount)
-                print("Discount Amount is: ", discount_amount)
-                print("Price is: ", price)
-                
-                
-
-                # Get product name
-                product_name = ""
-                query2 = QSqlQuery()
-                query2.prepare("SELECT display_name FROM product WHERE id = ?")
-                query2.addBindValue(product_id)
-
-                if query2.exec() and query2.next():
-                    product_name = query2.value(0)
-                else:
-                    print("Product not found for ID:", product_id)
-                    
-                items.append((product_name, qty, rate, discount, price, total))
-                print(items)
-
-
-
-        else:
-            print("Query failed:", query.lastError().text())
-
-        # get business information
-        
-        business_query = QSqlQuery()
-        business_query.prepare("SELECT businessname, address, contact FROM business WHERE id = 1")
-        business_query.exec()
-
-        if business_query.next():
-            business_name = business_query.value(0)
-            business_address = business_query.value(1)
-            business_contact = business_query.value(2)
-        else:
-            print("Business information not found.")
+        header = context["header"]
+        business = context["business"]
+        subtotal = header["subtotal"]
+        salesdiscount = header["discount"]
+        salestax = header["tax"]
+        totalaftertax = header["net_amount"]
+        roundoff = header["additional_charges"]
+        finaltotal = header["final_total"]
+        customer = header["customer_name"]
+        salesman = header["salesman_name"]
+        invoicedate = header["invoice_date"]
+        items = [
+            (
+                item["product_name"],
+                item["qty"],
+                item["rate"],
+                item["discount_percent"],
+                item["rate"] - item["discount_amount"],
+                item["line_total"],
+            )
+            for item in context["items"]
+        ]
+        business_name = business["business_name"]
+        business_address = business["business_address"]
+        business_contact = business["business_contact"]
 
         pdf = QPdfWriter(filename)
         pdf.setPageSize(QPageSize(QPageSize.A4))
@@ -739,4 +507,3 @@ class MyTable(QTableWidget):
 
             
         
-

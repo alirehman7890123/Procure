@@ -1,6 +1,6 @@
 import re
 
-from PySide6.QtWidgets import QWidget, QCompleter,QAbstractItemView, QVBoxLayout, QHBoxLayout, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget, QStyledItemDelegate
+from PySide6.QtWidgets import QWidget, QApplication, QCompleter,QAbstractItemView, QVBoxLayout, QHBoxLayout, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget, QStyledItemDelegate
 from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, QTimer, Signal, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtGui import QPalette, QColor, QKeyEvent
@@ -36,6 +36,11 @@ from services.purchase_transaction_service import (
     insert_supplier_transaction,
     mark_product_used,
     update_supplier_balances,
+)
+from services.purchase_draft_service import (
+    delete_purchase_draft,
+    load_latest_purchase_draft,
+    save_purchase_draft,
 )
 
 
@@ -94,6 +99,13 @@ class AddPurchaseWidget(QWidget):
         self.layout.setContentsMargins(10, 10, 10, 10)
         self.layout.setSpacing(10)
         self.layout.setAlignment(Qt.AlignTop)
+        self.current_purchase_draft_id = None
+        self._purchase_draft_resume_checked = False
+        self._suspend_purchase_draft_autosave = False
+        self._draft_save_in_progress = False
+        self._draft_autosave_timer = QTimer(self)
+        self._draft_autosave_timer.setSingleShot(True)
+        self._draft_autosave_timer.timeout.connect(self._save_purchase_draft_snapshot)
         
         
         # === Header Row ===
@@ -124,6 +136,7 @@ class AddPurchaseWidget(QWidget):
         
         self.populate_totals_section()
         self._install_select_all_focus_behavior()
+        self._setup_purchase_draft_autosave()
 
         
         
@@ -306,11 +319,17 @@ class AddPurchaseWidget(QWidget):
                 )
                 return
 
+            supplier_id = query.lastInsertId()
+            try:
+                supplier_id = int(supplier_id)
+            except Exception:
+                supplier_id = None
+
             AppMessageBox.information(dialog, "Success", "Supplier added successfully.")
             dialog.accept()
 
             if hasattr(self, "populate_suppliers"):
-                self.populate_suppliers()
+                self.populate_suppliers(selected_supplier_id=supplier_id)
 
 
         save_btn.clicked.connect(save_supplier)
@@ -407,11 +426,17 @@ class AddPurchaseWidget(QWidget):
                 )
                 return
 
+            rep_id = query.lastInsertId()
+            try:
+                rep_id = int(rep_id)
+            except Exception:
+                rep_id = None
+
             AppMessageBox.information(dialog, "Success", "Rep added successfully.")
             dialog.accept()
 
-            if hasattr(self, "load_reps"):
-                self.load_reps()
+            if hasattr(self, "populate_suppliers"):
+                self.populate_suppliers(selected_supplier_id=supplier_id, selected_rep_id=rep_id)
                 
                 
                 
@@ -556,7 +581,7 @@ class AddPurchaseWidget(QWidget):
         self.net_amount_entry.setReadOnly(True)
         
         payment_method_label = QLabel("Payment Method")
-        payment_method_label.setFixedWidth(300)
+        payment_method_label.setMinimumWidth(180)
         
         self.payment_handler = PaymentMethodHandler(self)
 
@@ -661,7 +686,7 @@ class AddPurchaseWidget(QWidget):
 
         addpurchase = QPushButton("Save Purchase Invoice", objectName="SaveButton")
         addpurchase.setCursor(Qt.PointingHandCursor)
-        addpurchase.setFixedWidth(220)
+        addpurchase.setMinimumWidth(220)
         save_row.addWidget(addpurchase)
         self.save_purchase_button = addpurchase
 
@@ -967,6 +992,9 @@ class AddPurchaseWidget(QWidget):
             self.payment_method.blockSignals(True)
             self.payment_method.setCurrentText("Cash")
             self.payment_method.blockSignals(False)
+            self.payment_handler.payment_data = self._normalize_payment_data({"payment_method": "Cash"})
+        
+        self.schedule_purchase_draft_save()
             
         
     
@@ -1015,6 +1043,245 @@ class AddPurchaseWidget(QWidget):
             if isinstance(obj, QLineEdit) and not obj.isReadOnly():
                 QTimer.singleShot(0, obj.selectAll)
         return super().eventFilter(obj, event)
+
+    def _setup_purchase_draft_autosave(self):
+        self.invoice_edit.textChanged.connect(self.schedule_purchase_draft_save)
+        self.supplier_edit.currentIndexChanged.connect(self.schedule_purchase_draft_save)
+        self.rep_edit.currentIndexChanged.connect(self.schedule_purchase_draft_save)
+        self.discount_entry.textChanged.connect(self.schedule_purchase_draft_save)
+        self.tax_236g_entry.textChanged.connect(self.schedule_purchase_draft_save)
+        self.tax_236h_entry.textChanged.connect(self.schedule_purchase_draft_save)
+        self.sales_tax_entry.textChanged.connect(self.schedule_purchase_draft_save)
+        self.cn_adjustment_entry.textChanged.connect(self.schedule_purchase_draft_save)
+        self.paid_amount.textChanged.connect(self.schedule_purchase_draft_save)
+        self.writeoff_check.toggled.connect(self.schedule_purchase_draft_save)
+        self.due_date_combo.currentIndexChanged.connect(self.schedule_purchase_draft_save)
+
+    def _current_purchase_draft_user_id(self):
+        app = QApplication.instance()
+        if app is None:
+            return None
+        return app.property("user_id")
+
+    def _set_combo_current_data(self, combo, value):
+        if combo is None:
+            return False
+        if value in (None, ""):
+            return False
+        for index in range(combo.count()):
+            if combo.itemData(index) == value:
+                combo.setCurrentIndex(index)
+                return True
+        return False
+
+    def _format_draft_text(self, value, decimals=2):
+        if value in (None, ""):
+            return ""
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        if decimals == 0:
+            return str(int(number))
+        return f"{number:.{decimals}f}"
+
+    def _draft_has_meaningful_content(self):
+        if self.table.rowCount() > 0:
+            return True
+        if self.invoice_edit.text().strip():
+            return True
+        if any(
+            str(widget.text()).strip()
+            for widget in [
+                self.discount_entry,
+                self.tax_236g_entry,
+                self.tax_236h_entry,
+                self.sales_tax_entry,
+                self.cn_adjustment_entry,
+                self.paid_amount,
+            ]
+            if widget is not None
+        ):
+            return True
+        return False
+
+    def _collect_purchase_draft_header(self):
+        return {
+            "supplier": self.supplier_edit.currentData(),
+            "rep": self.rep_edit.currentData(),
+            "sellerinvoice": self.invoice_edit.text().strip(),
+            "discount": self.discount_entry.text().strip(),
+            "tax_236g": self.tax_236g_entry.text().strip(),
+            "tax_236h": self.tax_236h_entry.text().strip(),
+            "sales_tax": self.sales_tax_entry.text().strip(),
+            "cn_adjustment": self.cn_adjustment_entry.text().strip(),
+            "paid": self.paid_amount.text().strip(),
+            "writeoff_enabled": self.writeoff_check.isChecked(),
+            "due_date_option": self.due_date_combo.currentText().strip(),
+            "user_id": self._current_purchase_draft_user_id(),
+            "session_id": get_active_session_id(strict=False),
+            "payment_data": self._normalize_payment_data(self.payment_handler.payment_data.copy()),
+        }
+
+    def _collect_purchase_draft_rows(self):
+        rows = []
+        for row in range(self.table.rowCount()):
+            product_combo = self.table.cellWidget(row, 1)
+            batch_edit = self.table.cellWidget(row, 2)
+            expiry_edit = self.table.cellWidget(row, 3)
+            qty_edit = self.table.cellWidget(row, 4)
+            bonus_edit = self.table.cellWidget(row, 5)
+            rate_edit = self.table.cellWidget(row, 6)
+            discount_edit = self.table.cellWidget(row, 7)
+            tax_edit = self.table.cellWidget(row, 8)
+            total_edit = self.table.cellWidget(row, 9)
+
+            if product_combo is None:
+                continue
+
+            rows.append(
+                {
+                    "product": product_combo.currentData(),
+                    "product_name": product_combo.currentText().strip(),
+                    "batch": batch_edit.text().strip() if batch_edit else "",
+                    "expiry": expiry_edit.text().strip() if expiry_edit else "",
+                    "qty": qty_edit.text().strip() if qty_edit else "",
+                    "bonus": bonus_edit.text().strip() if bonus_edit else "",
+                    "rate": rate_edit.text().strip() if rate_edit else "",
+                    "discount": discount_edit.text().strip() if discount_edit else "",
+                    "tax": tax_edit.text().strip() if tax_edit else "",
+                    "total": total_edit.text().strip() if total_edit else "",
+                }
+            )
+        return rows
+
+    def schedule_purchase_draft_save(self):
+        if self._suspend_purchase_draft_autosave or self._draft_save_in_progress:
+            return
+        self._draft_autosave_timer.start(700)
+
+    def _save_purchase_draft_snapshot(self):
+        if self._suspend_purchase_draft_autosave or self._draft_save_in_progress:
+            return
+
+        if not self._draft_has_meaningful_content():
+            return
+
+        self._draft_save_in_progress = True
+        try:
+            self.current_purchase_draft_id = save_purchase_draft(
+                self._collect_purchase_draft_header(),
+                self._collect_purchase_draft_rows(),
+                draft_id=self.current_purchase_draft_id,
+            )
+            print(f"Purchase draft autosaved successfully. Draft ID: {self.current_purchase_draft_id}")
+        except Exception as exc:
+            print(f"Purchase draft autosave failed: {exc}")
+        finally:
+            self._draft_save_in_progress = False
+
+    def _discard_current_purchase_draft(self):
+        if self.current_purchase_draft_id in (None, ""):
+            return
+        try:
+            delete_purchase_draft(self.current_purchase_draft_id)
+        except Exception as exc:
+            print(f"Failed to delete purchase draft {self.current_purchase_draft_id}: {exc}")
+            return
+        print(f"Deleted purchase draft {self.current_purchase_draft_id}")
+        self.current_purchase_draft_id = None
+
+    def _restore_purchase_draft(self, draft_record):
+        header = dict((draft_record or {}).get("header") or {})
+        rows = list((draft_record or {}).get("rows") or [])
+
+        self._suspend_purchase_draft_autosave = True
+        try:
+            self.clear_fields(reset_draft_state=False)
+            self.current_purchase_draft_id = (draft_record or {}).get("id")
+
+            self._set_combo_current_data(self.supplier_edit, header.get("supplier"))
+            self.populate_reps()
+            self._set_combo_current_data(self.rep_edit, header.get("rep"))
+
+            self.invoice_edit.setText(str(header.get("sellerinvoice") or ""))
+            self.discount_entry.setText(str(header.get("discount") or ""))
+            self.tax_236g_entry.setText(str(header.get("tax_236g") or ""))
+            self.tax_236h_entry.setText(str(header.get("tax_236h") or ""))
+            self.sales_tax_entry.setText(str(header.get("sales_tax") or ""))
+            self.cn_adjustment_entry.setText(str(header.get("cn_adjustment") or ""))
+            self.paid_amount.setText(str(header.get("paid") or ""))
+            self.writeoff_check.setChecked(bool(header.get("writeoff_enabled")))
+
+            due_date_option = str(header.get("due_date_option") or "None")
+            due_date_index = self.due_date_combo.findText(due_date_option, Qt.MatchFixedString)
+            self.due_date_combo.setCurrentIndex(due_date_index if due_date_index >= 0 else 0)
+
+            payment_data = dict(header.get("payment_data") or {})
+            payment_method = str(payment_data.get("payment_method") or "Cash")
+            payment_index = self.payment_method.findText(payment_method, Qt.MatchFixedString)
+            self.payment_method.blockSignals(True)
+            self.payment_method.setCurrentIndex(payment_index if payment_index >= 0 else 0)
+            self.payment_method.blockSignals(False)
+            self.payment_handler.payment_data = self._normalize_payment_data(payment_data)
+
+            self.table.setRowCount(0)
+            for row in rows:
+                self._insert_purchase_table_row(
+                    product_id=row.get("product"),
+                    product_name=row.get("product_name") or "",
+                    batch_data=row.get("batch") or "",
+                    expiry_data=row.get("expiry") or "",
+                    qty_data=str(row.get("qty") or ""),
+                    bonus_data=str(row.get("bonus") or "0"),
+                    rate_data=self._format_draft_text(row.get("rate"), 2),
+                    discount_data=self._format_draft_text(row.get("discount"), 2),
+                    tax_data=self._format_draft_text(row.get("tax"), 2),
+                    total_data=self._format_draft_text(row.get("total"), 2),
+                )
+
+            self.update_total_amount()
+            self.calculate_payment()
+            self.update_due_date_availability()
+            self.update_purchase_table_height()
+            self.item.setFocus()
+        finally:
+            self._suspend_purchase_draft_autosave = False
+
+    def prompt_resume_purchase_draft(self):
+        if self._purchase_draft_resume_checked:
+            return
+        if self.table.rowCount() > 0:
+            return
+
+        self._purchase_draft_resume_checked = True
+        try:
+            draft_record = load_latest_purchase_draft(
+                user_id=self._current_purchase_draft_user_id(),
+                session_id=get_active_session_id(strict=False),
+            )
+        except Exception as exc:
+            print(f"Could not load purchase draft for recovery: {exc}")
+            return
+
+        if not draft_record:
+            return
+
+        _, accepted = AppMessageBox.confirm(
+            self,
+            "Resume Draft Purchase",
+            "An unfinished purchase invoice draft was found. Would you like to resume it?",
+            confirm_label="Resume Draft",
+            cancel_label="Discard Draft",
+            kind="question",
+        )
+
+        if accepted:
+            self._restore_purchase_draft(draft_record)
+            return
+
+        self.current_purchase_draft_id = draft_record.get("id")
+        self._discard_current_purchase_draft()
         
         
     
@@ -1038,7 +1305,7 @@ class AddPurchaseWidget(QWidget):
         tax_236g = max(0.0, self._float_or_default(self.tax_236g_entry.text(), 0.0))
         tax_236h = max(0.0, self._float_or_default(self.tax_236h_entry.text(), 0.0))
         sales_tax = max(0.0, self._float_or_default(self.sales_tax_entry.text(), 0.0))
-        tax_amount = tax_236g + sales_tax - tax_236h
+        tax_amount = tax_236h + sales_tax - tax_236g
         net_amount = max(0.0, taxable + tax_amount)
         self.net_amount_entry.setText(f"{net_amount:.2f}")
 
@@ -1087,6 +1354,9 @@ class AddPurchaseWidget(QWidget):
 
     def parse_expiry_month_year(self, text):
         raw = str(text or "").strip()
+        collapsed = raw.replace("_", "").replace(" ", "")
+        if not collapsed or collapsed in {"-", "--"}:
+            return None
         if not raw:
             return None
 
@@ -1230,8 +1500,20 @@ class AddPurchaseWidget(QWidget):
        
    
     
-    def add_row(self):
-        
+    def _insert_purchase_table_row(
+        self,
+        *,
+        product_id,
+        product_name,
+        batch_data,
+        expiry_data,
+        qty_data,
+        bonus_data,
+        rate_data,
+        discount_data,
+        tax_data,
+        total_data,
+    ):
         row = self.table.rowCount()
         
         self.table.setRowHeight(row, self.row_height)
@@ -1243,31 +1525,11 @@ class AddPurchaseWidget(QWidget):
         remove_btn.clicked.connect(lambda _, r=row: self.remove_row(r))
         remove_btn.setStyleSheet("color: #333;")
         
-        product_name = self.item.currentText()
-        product_id = self.item.currentData()
-        
-        print(f"Product Name: {product_name}, Product ID: {product_id}")
-        
-        
         product_combo = QComboBox()
         product_combo.setEditable(True)
         product_combo.lineEdit().setReadOnly(True)
         product_combo.setInsertPolicy(QComboBox.NoInsert)
-        
-        
-        if product_name == '':
-            print("Please Select a product first")
-            AppMessageBox.information(self, 'Error', "Please Select a product first")
-            product_combo.setFocus()
-            return
-        elif product_id is None:
-            print("Entered product is not available... Please Add this product first")
-            AppMessageBox.information(self, 'Error', "Entered product is not available... Please Add this product first")
-            product_combo.setFocus()
-            return
-        
-        
-        
+
         product_combo.addItem(product_name, product_id)
 
         product_combo.setStyleSheet("""
@@ -1278,49 +1540,6 @@ class AddPurchaseWidget(QWidget):
             image: none;
         }
         """)
-        
-        
-        ### get data from Entry Line
-        
-        qty_data = self.qty_edit.text()
-        bonus_data = self.bonus_edit.text()
-        rate_data = self.rate_edit.text()
-        batch_data = self.batch_edit.text()
-        expiry_data = self.expiry_edit.text().strip()
-        if expiry_data:
-            parsed_expiry = self.parse_expiry_month_year(expiry_data)
-            if parsed_expiry is None:
-                AppMessageBox.information(
-                    self,
-                    'Error',
-                    "Please enter expiry in MM-YY format, for example 04-26."
-                )
-                self.expiry_edit.setFocus()
-                self.expiry_edit.selectAll()
-                return
-            expiry_data = self.expiry_month_year_text(parsed_expiry)
-        discount_data = self.discount_edit.text()
-        tax_data = self.tax_edit.text()
-        total_data = self.amount_edit.text()
-        
-        
-        if discount_data == "":
-            discount_data = "0.0"
-            
-        
-        if tax_data == "":
-            tax_data = "0.0"
-            
-        if bonus_data == "":
-            bonus_data = "0"
-            
-        
-        # quantity check
-        if qty_data == "" or qty_data == "0" or rate_data == "" or rate_data == "0":
-            print("Quantity or Rate cannot be empty or zero.")
-            AppMessageBox.information(self, 'Error', "Quantity or Rate cannot be empty or zero.")
-            return
-            
         
         qty_edit = QLineEdit()
         qty_edit.setReadOnly(True)
@@ -1381,10 +1600,74 @@ class AddPurchaseWidget(QWidget):
         
         
         remove_btn.clicked.connect(lambda _, r=row: self.remove_row(r))
+        return row
+
+    def add_row(self):
+        
+        product_name = self.item.currentText()
+        product_id = self.item.currentData()
+        
+        print(f"Product Name: {product_name}, Product ID: {product_id}")
+        
+        if product_name == '':
+            print("Please Select a product first")
+            AppMessageBox.information(self, 'Error', "Please Select a product first")
+            self.item.setFocus()
+            return
+        elif product_id is None:
+            print("Entered product is not available... Please Add this product first")
+            AppMessageBox.information(self, 'Error', "Entered product is not available... Please Add this product first")
+            self.item.setFocus()
+            return
+
+        qty_data = self.qty_edit.text()
+        bonus_data = self.bonus_edit.text()
+        rate_data = self.rate_edit.text()
+        batch_data = self.batch_edit.text()
+        expiry_data = self.expiry_edit.text().strip()
+        expiry_collapsed = expiry_data.replace("_", "").replace(" ", "")
+        if not expiry_collapsed or expiry_collapsed in {"-", "--"}:
+            expiry_data = ""
+        if expiry_data:
+            parsed_expiry = self.parse_expiry_month_year(expiry_data)
+            if parsed_expiry is None:
+                AppMessageBox.information(
+                    self,
+                    'Error',
+                    "Please enter expiry in MM-YY format, for example 04-26."
+                )
+                self.expiry_edit.setFocus()
+                self.expiry_edit.selectAll()
+                return
+            expiry_data = self.expiry_month_year_text(parsed_expiry)
+        discount_data = self.discount_edit.text() or "0.0"
+        tax_data = self.tax_edit.text() or "0.0"
+        total_data = self.amount_edit.text()
+        bonus_data = bonus_data or "0"
+
+        if qty_data == "" or qty_data == "0" or rate_data == "" or rate_data == "0":
+            print("Quantity or Rate cannot be empty or zero.")
+            AppMessageBox.information(self, 'Error', "Quantity or Rate cannot be empty or zero.")
+            return
+
+        self._insert_purchase_table_row(
+            product_id=product_id,
+            product_name=product_name,
+            batch_data=batch_data,
+            expiry_data=expiry_data,
+            qty_data=qty_data,
+            bonus_data=bonus_data,
+            rate_data=rate_data,
+            discount_data=discount_data,
+            tax_data=tax_data,
+            total_data=total_data,
+        )
         
         self.item.setFocus()
         
         self.update_total_amount()
+        self.calculate_payment()
+        self.update_due_date_availability()
         
         self.qty_edit.clear()
         self.bonus_edit.clear()
@@ -1397,6 +1680,7 @@ class AddPurchaseWidget(QWidget):
         # clear combo field
         self.item.setCurrentIndex(-1)
         self.update_purchase_table_height()
+        self.schedule_purchase_draft_save()
         
         
 
@@ -1417,7 +1701,10 @@ class AddPurchaseWidget(QWidget):
 
         
         self.update_total_amount()
+        self.calculate_payment()
+        self.update_due_date_availability()
         self.update_purchase_table_height()
+        self.schedule_purchase_draft_save()
         
         
 
@@ -1425,6 +1712,7 @@ class AddPurchaseWidget(QWidget):
         super().showEvent(event)
         self.populate_suppliers()
         QTimer.singleShot(0, self.update_purchase_table_height)
+        QTimer.singleShot(0, self.prompt_resume_purchase_draft)
 
 
     def resizeEvent(self, event):
@@ -1480,7 +1768,7 @@ class AddPurchaseWidget(QWidget):
         
 
 
-    def populate_suppliers(self):
+    def populate_suppliers(self, selected_supplier_id=None, selected_rep_id=None):
         
         self.supplier_edit.blockSignals(True)
         self.supplier_edit.clear()
@@ -1500,15 +1788,20 @@ class AddPurchaseWidget(QWidget):
         self.supplier_edit.blockSignals(False)
 
         if self.supplier_edit.count() > 0:
-            self.supplier_edit.setCurrentIndex(0)
-            self.populate_reps()
+            target_index = 0
+            if selected_supplier_id is not None:
+                found_index = self.supplier_edit.findData(selected_supplier_id)
+                if found_index >= 0:
+                    target_index = found_index
+            self.supplier_edit.setCurrentIndex(target_index)
+            self.populate_reps(selected_rep_id=selected_rep_id)
         else:
             self.rep_edit.clear()
         
         
         
         
-    def populate_reps(self):
+    def populate_reps(self, selected_rep_id=None):
         
         self.rep_edit.clear()
 
@@ -1546,7 +1839,12 @@ class AddPurchaseWidget(QWidget):
             
         # select the first rep automatically
         if self.rep_edit.count() > 0:
-            self.rep_edit.setCurrentIndex(0)
+            target_index = 0
+            if selected_rep_id is not None:
+                found_index = self.rep_edit.findData(selected_rep_id)
+                if found_index >= 0:
+                    target_index = found_index
+            self.rep_edit.setCurrentIndex(target_index)
     
     
     
@@ -1646,11 +1944,15 @@ class AddPurchaseWidget(QWidget):
             # --------------------------------------------------------
             db.rollback()
             print("Transaction rolled back due to error:", str(e))
-            AppMessageBox.error(
-                self,
-                "Error",
-                f"An error occurred while saving the purchase:\n{str(e)}"
-            )
+            error_text = str(e)
+            if error_text == "Please enter sales invoice.":
+                AppMessageBox.error(self, "Error", error_text)
+            else:
+                AppMessageBox.error(
+                    self,
+                    "Error",
+                    f"An error occurred while saving the purchase:\n{error_text}"
+                )
             return
 
         # ------------------------------------------------------------
@@ -1662,6 +1964,7 @@ class AddPurchaseWidget(QWidget):
             return
 
         print("Transaction committed successfully")
+        self._discard_current_purchase_draft()
         AppMessageBox.success(self, "Success", "Purchase saved successfully.")
         self.clear_fields()
         
@@ -1699,7 +2002,7 @@ class AddPurchaseWidget(QWidget):
             raise Exception("Please select a supplier.")
 
         if not sellerinvoice:
-            raise Exception("Please enter seller invoice.")
+            raise Exception("Please enter sales invoice.")
 
         # rep can be optional if your system allows it
         # if rep is None:
@@ -1715,7 +2018,7 @@ class AddPurchaseWidget(QWidget):
         tax_236h = max(0.0, self._float_or_default(tax_236h, 0.0))
         sales_tax = max(0.0, self._float_or_default(sales_tax, 0.0))
 
-        netamount = max(0.0, self._float_or_default(netamount, taxable + tax_236g + sales_tax - tax_236h))
+        netamount = max(0.0, self._float_or_default(netamount, taxable + tax_236h + sales_tax - tax_236g))
         cn_adjustment = max(0.0, self._float_or_default(cn_adjustment, 0.0))
         total = max(0.0, self._float_or_default(final_amount, netamount - cn_adjustment))
         paid = max(0.0, self._float_or_default(paid, 0.0))
@@ -1724,7 +2027,7 @@ class AddPurchaseWidget(QWidget):
         # ------------------------------------------------------------
         # 4) Calculate header net amount exactly in your style
         # ------------------------------------------------------------
-        header_net_amount = (-discount + tax_236g - tax_236h + sales_tax - cn_adjustment)
+        header_net_amount = (-discount - tax_236g + tax_236h + sales_tax - cn_adjustment)
 
         print("Header Net Amount: ", header_net_amount)
 
@@ -2159,46 +2462,57 @@ class AddPurchaseWidget(QWidget):
             editor.lineEdit().selectAll()
     
     
-    def clear_fields(self):
+    def clear_fields(self, reset_draft_state=True):
         
-        self.supplier_edit.clear()
+        self._draft_autosave_timer.stop()
+        self._suspend_purchase_draft_autosave = True
         
-        self.invoice_edit.clear()
-        
-        self.rep_edit.clear()
-        self.gross_entry.clear()
-        self.discount_entry.clear()
-        
-        self.tax_236g_entry.clear()
-        self.tax_236h_entry.clear()
-        self.sales_tax_entry.clear()
-        self.net_amount_entry.clear()
-        self.final_amount.clear()
-        self.paid_amount.clear()
-        self.remainingdata.clear()
-        
-        self.writeoff_check.setChecked(False)        
+        try:
+            self.supplier_edit.clear()
+            
+            self.invoice_edit.clear()
+            
+            self.rep_edit.clear()
+            self.gross_entry.clear()
+            self.discount_entry.clear()
+            
+            self.tax_236g_entry.clear()
+            self.tax_236h_entry.clear()
+            self.sales_tax_entry.clear()
+            self.net_amount_entry.clear()
+            self.final_amount.clear()
+            self.paid_amount.clear()
+            self.remainingdata.clear()
+            
+            self.writeoff_check.setChecked(False)        
 
-        self.due_date_combo.setCurrentText("None")
-        self.due_date_combo.setEnabled(False)
-        
-        self.table.setRowCount(0)
+            self.due_date_combo.setCurrentText("None")
+            self.due_date_combo.setEnabled(False)
+            
+            self.table.setRowCount(0)
 
-        self.qty_edit.clear()
-        self.bonus_edit.clear()
-        self.rate_edit.clear()
-        self.batch_edit.clear()
-        self.expiry_edit.clear()
-        self.discount_edit.clear()
-        self.tax_edit.clear()
-        self.item.setCurrentIndex(-1)
-        
-        self.payment_method.blockSignals(True); 
-        self.payment_method.setCurrentIndex(0) 
-        self.payment_method.blockSignals(False)
-        
-        self.populate_suppliers()
-        self.item.setFocus()
+            self.qty_edit.clear()
+            self.bonus_edit.clear()
+            self.rate_edit.clear()
+            self.batch_edit.clear()
+            self.expiry_edit.clear()
+            self.discount_edit.clear()
+            self.tax_edit.clear()
+            self.item.setCurrentIndex(-1)
+            
+            self.payment_method.blockSignals(True)
+            self.payment_method.setCurrentIndex(0)
+            self.payment_method.blockSignals(False)
+            self.payment_handler.payment_data = self._normalize_payment_data({"payment_method": "Cash"})
+            
+            self.populate_suppliers()
+            self.item.setFocus()
+
+            if reset_draft_state:
+                self.current_purchase_draft_id = None
+                self._purchase_draft_resume_checked = False
+        finally:
+            self._suspend_purchase_draft_autosave = False
 
     def confirm_clear_purchase(self):
         _, accepted = AppMessageBox.confirm(
@@ -2211,6 +2525,7 @@ class AddPurchaseWidget(QWidget):
         )
         if not accepted:
             return
+        self._discard_current_purchase_draft()
         self.clear_fields()
         
        
@@ -2481,6 +2796,9 @@ class AddPurchaseWidget(QWidget):
 
         try:
             updated_rows = 0
+            app = QApplication.instance()
+            change_user_id = app.property("user_id") if app else None
+            change_username = (app.property("username") or "") if app else ""
 
             for row in range(table.rowCount()):
                 product_id_item = table.item(row, 0)
@@ -2540,9 +2858,6 @@ class AddPurchaseWidget(QWidget):
                     )
                     VALUES (?, ?, ?, ?, ?, ?)
                 """)
-                app = QApplication.instance()
-                change_user_id = app.property("user_id") if app else None
-                change_username = (app.property("username") or "") if app else ""
                 change_query.addBindValue(product_id)
                 change_query.addBindValue(previous_price)
                 change_query.addBindValue(new_price)

@@ -4,10 +4,11 @@ DEFAULT_ACCOUNTING_SETTINGS = {
     "global_sales_discount_enabled": False,
     "global_sales_tax_group_id": None,
     "global_sales_tax_enabled": False,
-    "theme_primary_color": "#2F5D7C",
-    "theme_sidebar_color": "#151325",
+    "theme_primary_color": "#163B5C",
+    "theme_sidebar_color": "#163B5C",
     "sales_tax_policy": "both",
     "opening_inventory_value": 0.0,
+    "minimum_margin_percent": 15.0,
 }
 
 
@@ -36,10 +37,11 @@ def load_accounting_settings():
             COALESCE(global_sales_discount_enabled, 0),
             global_sales_tax_group_id,
             COALESCE(global_sales_tax_enabled, 0),
-            COALESCE(theme_primary_color, '#2F5D7C'),
-            COALESCE(theme_sidebar_color, '#151325'),
+            COALESCE(theme_primary_color, '#163B5C'),
+            COALESCE(theme_sidebar_color, '#163B5C'),
             COALESCE(sales_tax_policy, 'both'),
-            COALESCE(opening_inventory_value, 0)
+            COALESCE(opening_inventory_value, 0),
+            COALESCE(minimum_margin_percent, 15.0)
         FROM accounting_settings
         WHERE id = 1
         LIMIT 1
@@ -58,6 +60,7 @@ def load_accounting_settings():
         "theme_sidebar_color": normalize_hex_value(query.value(6), DEFAULT_ACCOUNTING_SETTINGS["theme_sidebar_color"]),
         "sales_tax_policy": str(query.value(7) or "both").strip() or "both",
         "opening_inventory_value": float(query.value(8) or 0.0),
+        "minimum_margin_percent": float(query.value(9) or 15.0),
     }
 
 
@@ -80,9 +83,10 @@ def save_accounting_settings(overrides):
             theme_sidebar_color,
             sales_tax_policy,
             opening_inventory_value,
+            minimum_margin_percent,
             updated_at
         )
-        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(id)
         DO UPDATE SET
             sales_discount_policy = excluded.sales_discount_policy,
@@ -94,6 +98,7 @@ def save_accounting_settings(overrides):
             theme_sidebar_color = excluded.theme_sidebar_color,
             sales_tax_policy = excluded.sales_tax_policy,
             opening_inventory_value = excluded.opening_inventory_value,
+            minimum_margin_percent = excluded.minimum_margin_percent,
             updated_at = CURRENT_TIMESTAMP
         """
     )
@@ -106,6 +111,7 @@ def save_accounting_settings(overrides):
     query.addBindValue(normalize_hex_value(settings["theme_sidebar_color"], DEFAULT_ACCOUNTING_SETTINGS["theme_sidebar_color"]))
     query.addBindValue(settings["sales_tax_policy"])
     query.addBindValue(float(settings["opening_inventory_value"] or 0.0))
+    query.addBindValue(float(settings["minimum_margin_percent"] or DEFAULT_ACCOUNTING_SETTINGS["minimum_margin_percent"]))
 
     if not query.exec():
         raise Exception(query.lastError().text())
@@ -118,6 +124,7 @@ def load_sales_policy_settings():
     return {
         "discount_policy": settings["sales_discount_policy"],
         "tax_policy": settings["sales_tax_policy"],
+        "minimum_margin_percent": float(settings["minimum_margin_percent"] or DEFAULT_ACCOUNTING_SETTINGS["minimum_margin_percent"]),
     }
 
 
@@ -127,17 +134,29 @@ def load_sales_discount_settings():
         "policy": settings["sales_discount_policy"],
         "group_id": settings["global_sales_discount_group_id"],
         "enabled": settings["global_sales_discount_enabled"],
+        "minimum_margin_percent": float(settings["minimum_margin_percent"] or DEFAULT_ACCOUNTING_SETTINGS["minimum_margin_percent"]),
     }
 
 
-def save_sales_discount_settings(*, policy, group_id, enabled):
+def save_sales_discount_settings(*, policy, group_id, enabled, minimum_margin_percent=None):
     if enabled and group_id is None:
         raise ValueError("Select a global sales discount group before enabling the global promo.")
+    try:
+        margin_value = float(
+            DEFAULT_ACCOUNTING_SETTINGS["minimum_margin_percent"]
+            if minimum_margin_percent in (None, "")
+            else minimum_margin_percent
+        )
+    except (TypeError, ValueError):
+        raise ValueError("Minimum margin % must be a valid number.")
+    if margin_value < 0:
+        raise ValueError("Minimum margin % cannot be negative.")
     return save_accounting_settings(
         {
             "sales_discount_policy": policy or "both",
             "global_sales_discount_group_id": group_id,
             "global_sales_discount_enabled": bool(enabled),
+            "minimum_margin_percent": margin_value,
         }
     )
 

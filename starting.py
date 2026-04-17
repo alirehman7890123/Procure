@@ -15,13 +15,13 @@ master_products_file = resource_path("master_products.csv")
 manufacturers_file = resource_path("manufacturers.csv")
 
 
-# Fix Wayland compositor issue (especially on Chromebooks / Crostini)
-if os.environ.get("WAYLAND_DISPLAY"):
-    # Wayland detected — but sometimes it's fake or broken
-    os.environ.setdefault("QT_QPA_PLATFORM", "wayland")
-else:
-    # Force X11 if Wayland isn't available
-    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+# Safer Qt platform strategy:
+# - do not force native Wayland by default because Linux client environments
+#   are often more stable under Qt auto-detection or X11/XWayland fallback
+# - only provide xcb as a compatibility fallback when no platform was set
+if not os.environ.get("QT_QPA_PLATFORM"):
+    if not os.environ.get("WAYLAND_DISPLAY"):
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
 
 # Fallback if still broken
 if not os.environ.get("QT_QPA_PLATFORMTHEME"):
@@ -595,10 +595,14 @@ class AuthWindow(QMainWindow):
             self.create_business_table,
             self.create_purchase_table,
             self.create_purchaseitem_table,
+            self.create_purchase_draft_table,
+            self.create_purchase_draft_item_table,
             self.create_purchase_order_table,
             self.create_purchase_order_line_table,
             self.create_goods_receipt_table,
             self.create_goods_receipt_line_table,
+            self.create_grn_draft_table,
+            self.create_grn_draft_item_table,
             self.create_sales_table,
             self.create_salesitem_table,
             self.create_sold_batch_table,
@@ -630,10 +634,14 @@ class AuthWindow(QMainWindow):
             print("Tables already exist. Skipping creation.")
             self.create_discount_group_table()
             self.create_tax_group_table()
+            self.create_purchase_draft_table()
+            self.create_purchase_draft_item_table()
             self.create_purchase_order_table()
             self.create_purchase_order_line_table()
             self.create_goods_receipt_table()
             self.create_goods_receipt_line_table()
+            self.create_grn_draft_table()
+            self.create_grn_draft_item_table()
             self.create_price_pack_table()
             self.create_price_changes_table()
             self.create_activity_log_table()
@@ -798,14 +806,17 @@ class AuthWindow(QMainWindow):
             if self._ensure_sqlite_column(conn, "accounting_settings", "global_sales_tax_enabled", "INTEGER DEFAULT 0"):
                 changed.append("accounting_settings.global_sales_tax_enabled")
 
-            if self._ensure_sqlite_column(conn, "accounting_settings", "theme_primary_color", "TEXT DEFAULT '#2F5D7C'"):
+            if self._ensure_sqlite_column(conn, "accounting_settings", "theme_primary_color", "TEXT DEFAULT '#163B5C'"):
                 changed.append("accounting_settings.theme_primary_color")
 
-            if self._ensure_sqlite_column(conn, "accounting_settings", "theme_sidebar_color", "TEXT DEFAULT '#151325'"):
+            if self._ensure_sqlite_column(conn, "accounting_settings", "theme_sidebar_color", "TEXT DEFAULT '#163B5C'"):
                 changed.append("accounting_settings.theme_sidebar_color")
 
             if self._ensure_sqlite_column(conn, "accounting_settings", "sales_tax_policy", "TEXT DEFAULT 'both'"):
                 changed.append("accounting_settings.sales_tax_policy")
+
+            if self._ensure_sqlite_column(conn, "accounting_settings", "minimum_margin_percent", "REAL DEFAULT 15.0"):
+                changed.append("accounting_settings.minimum_margin_percent")
 
             if changed:
                 conn.commit()
@@ -1006,9 +1017,10 @@ class AuthWindow(QMainWindow):
                 global_sales_discount_enabled INTEGER DEFAULT 0,
                 global_sales_tax_group_id INTEGER,
                 global_sales_tax_enabled INTEGER DEFAULT 0,
-                theme_primary_color TEXT DEFAULT '#2F5D7C',
-                theme_sidebar_color TEXT DEFAULT '#151325',
+                theme_primary_color TEXT DEFAULT '#163B5C',
+                theme_sidebar_color TEXT DEFAULT '#163B5C',
                 sales_tax_policy TEXT DEFAULT 'both',
+                minimum_margin_percent REAL DEFAULT 15.0,
 
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP
@@ -1034,6 +1046,7 @@ class AuthWindow(QMainWindow):
                 theme_primary_color,
                 theme_sidebar_color,
                 sales_tax_policy,
+                minimum_margin_percent,
                 updated_at
             )
             VALUES (
@@ -1041,9 +1054,10 @@ class AuthWindow(QMainWindow):
                 'both',
                 0,
                 0,
-                '#2F5D7C',
-                '#151325',
+                '#163B5C',
+                '#163B5C',
                 'both',
+                15.0,
                 CURRENT_TIMESTAMP
             );
             """
@@ -2012,6 +2026,67 @@ class AuthWindow(QMainWindow):
         print("Table 'purchaseitem' created successfully.")
         return True
 
+    def create_purchase_draft_table(self):
+        query = QSqlQuery()
+        print("Creating Purchase Draft Table")
+
+        if not query.exec("""
+            CREATE TABLE IF NOT EXISTS purchase_draft (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                supplier INTEGER,
+                rep INTEGER,
+                sellerinvoice TEXT,
+                draft_data TEXT NOT NULL,
+                payment_data TEXT,
+                user_id INTEGER,
+                session_id INTEGER,
+                status TEXT DEFAULT 'active',
+                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                FOREIGN KEY (supplier) REFERENCES supplier(id) ON DELETE RESTRICT,
+                FOREIGN KEY (rep) REFERENCES rep(id) ON DELETE RESTRICT,
+                FOREIGN KEY (user_id) REFERENCES auth(id) ON DELETE RESTRICT,
+                FOREIGN KEY (session_id) REFERENCES daily_session(id) ON DELETE RESTRICT
+            );
+        """):
+            AppMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
+            return False
+
+        print("Table 'purchase_draft' created successfully.")
+        return True
+
+    def create_purchase_draft_item_table(self):
+        query = QSqlQuery()
+        print("Creating Purchase Draft Item Table")
+
+        if not query.exec("""
+            CREATE TABLE IF NOT EXISTS purchase_draft_item (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                draft_id INTEGER NOT NULL,
+                line_no INTEGER NOT NULL,
+                product INTEGER,
+                product_name TEXT,
+                batch TEXT,
+                expiry TEXT,
+                qty INTEGER,
+                bonus INTEGER,
+                rate DECIMAL(10,2),
+                discount DECIMAL(10,2),
+                tax DECIMAL(10,2),
+                total DECIMAL(10,2),
+                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                FOREIGN KEY (draft_id) REFERENCES purchase_draft(id) ON DELETE CASCADE,
+                FOREIGN KEY (product) REFERENCES product(id) ON DELETE RESTRICT
+            );
+        """):
+            AppMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
+            return False
+
+        print("Table 'purchase_draft_item' created successfully.")
+        return True
+
     
      
     
@@ -2493,6 +2568,71 @@ class AuthWindow(QMainWindow):
             return False
 
         print("Table 'goods_receipt_line' created successfully.")
+        return True
+
+    def create_grn_draft_table(self):
+        query = QSqlQuery()
+        print("Creating GRN Draft Table")
+
+        if not query.exec("""
+            CREATE TABLE IF NOT EXISTS grn_draft (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                po_id INTEGER,
+                supplier INTEGER,
+                rep INTEGER,
+                grn_number TEXT,
+                grn_date TEXT,
+                draft_data TEXT NOT NULL,
+                payment_data TEXT,
+                user_id INTEGER,
+                session_id INTEGER,
+                status TEXT DEFAULT 'active',
+                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                FOREIGN KEY (po_id) REFERENCES purchase_order(id) ON DELETE RESTRICT,
+                FOREIGN KEY (supplier) REFERENCES supplier(id) ON DELETE RESTRICT,
+                FOREIGN KEY (rep) REFERENCES rep(id) ON DELETE RESTRICT,
+                FOREIGN KEY (user_id) REFERENCES auth(id) ON DELETE RESTRICT,
+                FOREIGN KEY (session_id) REFERENCES daily_session(id) ON DELETE RESTRICT
+            );
+        """):
+            AppMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
+            return False
+
+        print("Table 'grn_draft' created successfully.")
+        return True
+
+    def create_grn_draft_item_table(self):
+        query = QSqlQuery()
+        print("Creating GRN Draft Item Table")
+
+        if not query.exec("""
+            CREATE TABLE IF NOT EXISTS grn_draft_item (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                draft_id INTEGER NOT NULL,
+                line_no INTEGER NOT NULL,
+                po_line_id INTEGER,
+                product_id INTEGER,
+                product_name TEXT,
+                batch_no TEXT,
+                expiry_date TEXT,
+                qty_received INTEGER,
+                unit_price DECIMAL(10,2),
+                discount_mode TEXT,
+                discount_value DECIMAL(10,2),
+                tax DECIMAL(10,2),
+                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                FOREIGN KEY (draft_id) REFERENCES grn_draft(id) ON DELETE CASCADE,
+                FOREIGN KEY (po_line_id) REFERENCES purchase_order_line(id) ON DELETE RESTRICT,
+                FOREIGN KEY (product_id) REFERENCES product(id) ON DELETE RESTRICT
+            );
+        """):
+            AppMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
+            return False
+
+        print("Table 'grn_draft_item' created successfully.")
         return True
 
     

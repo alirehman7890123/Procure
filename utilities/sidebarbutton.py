@@ -59,10 +59,16 @@ class SideBarButton(QPushButton):
 
     def set_collapsed(self, collapsed: bool):
         self._is_collapsed = bool(collapsed)
+        self.setFixedHeight(38 if self._is_collapsed else 42)
         if self._is_collapsed:
+            self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            self.setFixedWidth(40)
             self.setText("")
             self.setToolTip(self._full_text)
         else:
+            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(16777215)
             self.setText(self._display_text)
             self.setToolTip("")
         self._apply_style()
@@ -81,20 +87,26 @@ class SideBarButton(QPushButton):
             fg = self.text_normal
             border = "transparent"
 
+        radius = "5px"
+
         text_align = "center" if self._is_collapsed else "left"
         left_pad = "0px" if self._is_collapsed else "18px"
         right_pad = "0px" if self._is_collapsed else "14px"
-        min_width = "44px" if self._is_collapsed else "0px"
+        min_width = "40px" if self._is_collapsed else "0px"
+        margin = "4px" if self._is_collapsed else "3px 0px"
+        padding = "0px" if self._is_collapsed else "0px"
+        radius = "10px" if self._is_collapsed else "5px"
 
         self.setStyleSheet(f"""
             QPushButton {{
                 background-color: {bg};
                 color: {fg};
                 border: 1px solid {border};
-                border-radius: 12px;
+                border-radius: {radius};
+                padding: {padding};
                 padding-left: {left_pad};
                 padding-right: {right_pad};
-                margin: 3px 0px;
+                margin: {margin};
                 text-align: {text_align};
                 font-family: montserrat;
                 font-size: 12px;

@@ -6,8 +6,8 @@ from PySide6.QtWidgets import QApplication
 from services.accounting_settings_service import load_theme_settings as load_theme_settings_from_service
 
 DEFAULT_THEME = {
-    "theme_primary_color": "#2F5D7C",
-    "theme_sidebar_color": "#151325",
+    "theme_primary_color": "#163B5C",
+    "theme_sidebar_color": "#163B5C",
 }
 
 

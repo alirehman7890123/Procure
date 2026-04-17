@@ -1,6 +1,7 @@
 import re
 
 from services.purchase_posting_service import compute_purchase_settlement
+from services.purchase_items_service import normalize_expiry_text
 
 
 def build_goods_receipt_payload(
@@ -32,7 +33,7 @@ def build_goods_receipt_payload(
         "status": status,
         "total_value": float(total_value or 0.0),
         "header_discount": header_discount,
-        "header_tax": tax_236g - tax_236h + sales_tax,
+        "header_tax": (-tax_236g) + tax_236h + sales_tax,
         "discount": 0.0,
         "tax_236g": tax_236g,
         "tax_236h": tax_236h,
@@ -68,7 +69,7 @@ def normalize_grn_receipt_line(
     tax = float(tax or 0.0)
     landing_cost = float(landing_cost if landing_cost is not None else unit_price)
 
-    expiry_value = str(expiry_date or "").strip()
+    expiry_value = normalize_expiry_text(expiry_date)
     if expiry_value and expiry_parser is not None:
         parsed = expiry_parser(expiry_value)
         if parsed is None:
