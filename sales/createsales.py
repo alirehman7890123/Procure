@@ -82,6 +82,7 @@ class SalesQuickProductDialog(QDialog):
         super().__init__(parent)
         self.saved_product_id = None
         self.saved_visible_name = ""
+        self.existing_product_id = None
         self.setWindowTitle("Quick Add Product")
         self.setModal(True)
         self.setMinimumWidth(560)
@@ -202,6 +203,7 @@ class SalesQuickProductDialog(QDialog):
         self.batch_input.returnPressed.connect(lambda: self.focus_next_field(self.expiry_input))
         self.expiry_input.returnPressed.connect(self.save_product)
 
+        self.try_prefill_existing_product(initial_name)
         self.product_name_input.setFocus()
         self.product_name_input.selectAll()
 
@@ -275,6 +277,7 @@ class SalesQuickProductDialog(QDialog):
             return float(default)
 
     def _find_existing_product_id(self, display_name):
+        normalized_name = re.sub(r"\s*\[\d+s\]\s*$", "", str(display_name or "").strip(), flags=re.IGNORECASE)
         query = QSqlQuery()
         query.prepare("""
             SELECT id
@@ -282,10 +285,88 @@ class SalesQuickProductDialog(QDialog):
             WHERE LOWER(TRIM(display_name)) = LOWER(TRIM(?))
             LIMIT 1
         """)
-        query.addBindValue(display_name)
+        query.addBindValue(normalized_name)
         if query.exec() and query.next():
             return int(query.value(0))
         return None
+
+    def _find_dormant_product_record(self, display_name):
+        normalized_name = re.sub(r"\s*\[\d+s\]\s*$", "", str(display_name or "").strip(), flags=re.IGNORECASE)
+        if not normalized_name:
+            return None
+
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT
+                p.id,
+                p.display_name,
+                COALESCE(p.generic_name, ''),
+                COALESCE(p.brand, ''),
+                COALESCE(p.form, ''),
+                COALESCE(p.strength, ''),
+                COALESCE(p.manufacturer_id, 0),
+                COALESCE((
+                    SELECT pp.pack_size
+                    FROM price_pack pp
+                    WHERE pp.product_id = p.id
+                    ORDER BY pp.is_default DESC, pp.id DESC
+                    LIMIT 1
+                ), 0),
+                COALESCE((
+                    SELECT pp.pack_price
+                    FROM price_pack pp
+                    WHERE pp.product_id = p.id
+                    ORDER BY pp.is_default DESC, pp.id DESC
+                    LIMIT 1
+                ), 0)
+            FROM product p
+            WHERE LOWER(TRIM(p.display_name)) = LOWER(TRIM(?))
+              AND COALESCE(p.status, 'active') <> 'used'
+            LIMIT 1
+        """)
+        query.addBindValue(normalized_name)
+        if not query.exec() or not query.next():
+            return None
+
+        return {
+            "product_id": int(query.value(0)),
+            "display_name": str(query.value(1) or "").strip(),
+            "generic_name": str(query.value(2) or "").strip(),
+            "brand": str(query.value(3) or "").strip(),
+            "form": str(query.value(4) or "").strip(),
+            "strength": str(query.value(5) or "").strip(),
+            "manufacturer_id": int(query.value(6) or 0) or None,
+            "pack_size": float(query.value(7) or 0.0),
+            "pack_price": float(query.value(8) or 0.0),
+        }
+
+    def try_prefill_existing_product(self, initial_name):
+        record = self._find_dormant_product_record(initial_name)
+        if not record:
+            return
+
+        self.existing_product_id = record["product_id"]
+        if record["brand"]:
+            self.product_name_input.setText(record["brand"].upper())
+        if record["strength"]:
+            self.dose_input.setText(record["strength"].upper())
+        if record["form"]:
+            self.form_input.setText(record["form"].upper())
+        if record["generic_name"]:
+            self.formula_input.setText(record["generic_name"])
+        if record["manufacturer_id"] is not None:
+            for index in range(self.manufacturer_combo.count()):
+                if self.manufacturer_combo.itemData(index) == record["manufacturer_id"]:
+                    self.manufacturer_combo.setCurrentIndex(index)
+                    break
+        if record["pack_size"] > 0:
+            pack_size = record["pack_size"]
+            if float(pack_size).is_integer():
+                self.pack_size_input.setText(str(int(pack_size)))
+            else:
+                self.pack_size_input.setText(f"{pack_size:.2f}")
+        if record["pack_price"] > 0:
+            self.sale_price_input.setText(f"{record['pack_price']:.2f}")
 
     def save_product(self):
         product_name = str(self.product_name_input.text() or "").strip()
@@ -360,7 +441,7 @@ class SalesQuickProductDialog(QDialog):
             return
 
         try:
-            product_id = self._find_existing_product_id(display_name)
+            product_id = self.existing_product_id or self._find_existing_product_id(display_name)
             if product_id is None:
                 insert_query = QSqlQuery(db)
                 insert_query.prepare("""
@@ -3897,7 +3978,7 @@ class CreateSalesWidget(QWidget):
                 LIMIT 1
             )
             WHERE TRIM(CAST(p.code AS TEXT)) = ?
-              AND COALESCE(p.status, 'active') IN ('active', 'used')
+              AND COALESCE(p.status, 'active') = 'used'
             LIMIT 1
         """)
         query.addBindValue(code_text)
@@ -4199,6 +4280,7 @@ class CreateSalesWidget(QWidget):
                  , COALESCE(tg.fixed_amount, 0)
                  , COALESCE(tg.apply_on_sale, 1)
                  , COALESCE(tg.name, '')
+                 , COALESCE(p.status, 'active')
             FROM product p
             LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
             LEFT JOIN tax_group tg ON tg.id = p.tax_group_id
@@ -4235,6 +4317,7 @@ class CreateSalesWidget(QWidget):
             tax_fixed_amount = query.value(13) or 0.0
             tax_apply_on_sale = bool(int(query.value(14) or 0))
             tax_group_name = str(query.value(15) or "").strip()
+            status = str(query.value(16) or "active").strip()
             results.append((visible_name, {
                 "product_id": product_id,
                 "display_name": name,
@@ -4252,6 +4335,7 @@ class CreateSalesWidget(QWidget):
                 "tax_fixed_amount": tax_fixed_amount,
                 "tax_apply_on_sale": tax_apply_on_sale,
                 "tax_group_name": tax_group_name,
+                "status": status,
             }))
         return results
 
@@ -4285,6 +4369,7 @@ class CreateSalesWidget(QWidget):
                  , COALESCE(tg.fixed_amount, 0)
                  , COALESCE(tg.apply_on_sale, 1)
                  , COALESCE(tg.name, '')
+                 , COALESCE(p.status, 'active')
             FROM product p
             LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
             LEFT JOIN tax_group tg ON tg.id = p.tax_group_id
@@ -4321,9 +4406,11 @@ class CreateSalesWidget(QWidget):
             "tax_fixed_amount": float(query.value(13) or 0.0),
             "tax_apply_on_sale": bool(int(query.value(14) or 0)),
             "tax_group_name": str(query.value(15) or "").strip(),
+            "status": str(query.value(16) or "active").strip(),
         }
 
     def find_sales_product_id_by_name(self, display_name):
+        normalized_name = re.sub(r"\s*\[\d+s\]\s*$", "", str(display_name or "").strip(), flags=re.IGNORECASE)
         query = QSqlQuery()
         query.prepare("""
             SELECT id
@@ -4331,7 +4418,7 @@ class CreateSalesWidget(QWidget):
             WHERE LOWER(TRIM(display_name)) = LOWER(TRIM(?))
             LIMIT 1
         """)
-        query.addBindValue(str(display_name or "").strip())
+        query.addBindValue(normalized_name)
         if query.exec() and query.next():
             return int(query.value(0))
         return None
@@ -4376,6 +4463,18 @@ class CreateSalesWidget(QWidget):
         data = selected_data if isinstance(selected_data, dict) else combo.currentData()
 
         if not isinstance(data, dict):
+            return None
+
+        product_status = str(data.get("status") or "active").strip().lower()
+        if product_status != "used":
+            combo.blockSignals(True)
+            combo.clear()
+            combo.setCurrentIndex(-1)
+            if combo.lineEdit() is not None:
+                combo.lineEdit().clear()
+            combo.blockSignals(False)
+            combo.hidePopup()
+            self.open_sales_product_quick_add_dialog(data.get("display_name") or text)
             return None
 
         product_id = data.get("product_id")
