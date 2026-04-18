@@ -851,6 +851,9 @@ class AddPurchaseWidget(QWidget):
         self.item = ProductSearchBox(self, placeholder="select product")
         self.item.wheelEvent = lambda event: event.ignore()
         self.item.setLineEdit(SelectAllLineEdit())
+        self.item.lineEdit().textEdited.connect(
+            lambda text: self.force_uppercase_line_edit(self.item.lineEdit(), text)
+        )
         self.item.lineEdit().editingFinished.connect(
             lambda c=self.item: self.handle_editing_finished(c)
         )
@@ -1314,6 +1317,8 @@ class AddPurchaseWidget(QWidget):
         self.final_amount.setText(f"{final_amount:.2f}")
         
         self.final_amount.setStyleSheet("font-weight: bold;")
+        self.calculate_payment()
+        self.update_due_date_availability()
         
     
 

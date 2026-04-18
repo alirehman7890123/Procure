@@ -1204,9 +1204,19 @@ class AddProductWidget(QWidget):
             status_query = QSqlQuery(db)
             status_query.prepare("""
                 UPDATE product
-                SET status = 'used', discount_group_id = ?, tax_group_id = ?, rack = ?
+                SET
+                    status = 'used',
+                    code = ?,
+                    generic_name = ?,
+                    manufacturer_id = ?,
+                    discount_group_id = ?,
+                    tax_group_id = ?,
+                    rack = ?
                 WHERE id = ?
             """)
+            status_query.addBindValue(code)
+            status_query.addBindValue(generic_name)
+            status_query.addBindValue(manufacturer_id)
             status_query.addBindValue(discount_group_id)
             status_query.addBindValue(tax_group_id)
             status_query.addBindValue(rack)
@@ -1249,27 +1259,56 @@ class AddProductWidget(QWidget):
             print("Batch stored")
 
             # ==================================================
-            # 3. Save current default price_pack
+            # 3. Save or update current default price_pack
             # ==================================================
-            reset_default_query = QSqlQuery(db)
-            reset_default_query.prepare("""
-                UPDATE price_pack
-                SET is_default = 0
+            default_price_pack_id = None
+            existing_default_query = QSqlQuery(db)
+            existing_default_query.prepare("""
+                SELECT id
+                FROM price_pack
                 WHERE product_id = ?
+                ORDER BY is_default DESC, id DESC
+                LIMIT 1
             """)
-            reset_default_query.addBindValue(product_id)
-            if not reset_default_query.exec():
-                raise Exception(reset_default_query.lastError().text())
+            existing_default_query.addBindValue(product_id)
+            if not existing_default_query.exec():
+                raise Exception(existing_default_query.lastError().text())
+            if existing_default_query.next():
+                default_price_pack_id = existing_default_query.value(0)
 
-            price_query = QSqlQuery(db)
-            price_query.prepare("""
-                INSERT INTO price_pack (product_id, pack_size, pack_price, reorder_level, is_default)
-                VALUES (?, ?, ?, ?, 1)
-            """)
-            price_query.addBindValue(product_id)
-            price_query.addBindValue(pack_size)
-            price_query.addBindValue(pack_price)
-            price_query.addBindValue(reorder_level)
+            if default_price_pack_id is not None:
+                normalize_default_query = QSqlQuery(db)
+                normalize_default_query.prepare("""
+                    UPDATE price_pack
+                    SET is_default = 0
+                    WHERE product_id = ?
+                      AND id <> ?
+                """)
+                normalize_default_query.addBindValue(product_id)
+                normalize_default_query.addBindValue(default_price_pack_id)
+                if not normalize_default_query.exec():
+                    raise Exception(normalize_default_query.lastError().text())
+
+                price_query = QSqlQuery(db)
+                price_query.prepare("""
+                    UPDATE price_pack
+                    SET pack_size = ?, pack_price = ?, reorder_level = ?, is_default = 1
+                    WHERE id = ?
+                """)
+                price_query.addBindValue(pack_size)
+                price_query.addBindValue(pack_price)
+                price_query.addBindValue(reorder_level)
+                price_query.addBindValue(default_price_pack_id)
+            else:
+                price_query = QSqlQuery(db)
+                price_query.prepare("""
+                    INSERT INTO price_pack (product_id, pack_size, pack_price, reorder_level, is_default)
+                    VALUES (?, ?, ?, ?, 1)
+                """)
+                price_query.addBindValue(product_id)
+                price_query.addBindValue(pack_size)
+                price_query.addBindValue(pack_price)
+                price_query.addBindValue(reorder_level)
 
             if not price_query.exec():
                 raise Exception(price_query.lastError().text())

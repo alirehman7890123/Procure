@@ -937,9 +937,23 @@ class AddPurchaseReturnWidget(QWidget):
 
 
     def on_cell_focus(self, row, column):
-        
+        if row < 0 or column < 0:
+            return
+
+        # Most purchase-return columns use embedded widgets (product search,
+        # batch combo, qty edit, etc.). Calling table.edit() on those model
+        # indexes makes Qt print noisy "edit: editing failed" warnings.
+        if self.table.cellWidget(row, column) is not None:
+            QTimer.singleShot(0, self._select_all_in_focus_widget)
+            return
+
+        item = self.table.item(row, column)
+        if item is None or not (item.flags() & Qt.ItemIsEditable):
+            QTimer.singleShot(0, self._select_all_in_focus_widget)
+            return
+
         index = self.table.model().index(row, column)
-        self.table.edit(index)  # Start editing cell
+        self.table.edit(index)  # Start editing plain editable item cells only
 
         QTimer.singleShot(0, lambda: self._select_all_in_focus_widget())
     

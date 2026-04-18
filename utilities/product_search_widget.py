@@ -174,6 +174,18 @@ class ProductSearchBox(QComboBox):
             self.product_selected.emit(int(data), text)
 
     @staticmethod
+    def format_product_label(display_name, pack_size):
+        name = str(display_name or "").strip()
+        try:
+            pack_size_num = int(float(pack_size))
+        except (TypeError, ValueError):
+            pack_size_num = 0
+
+        if pack_size_num > 0:
+            return f"{name} [{pack_size_num}s]"
+        return name
+
+    @staticmethod
     def lookup_product_by_code(code_text: str):
         code_text = str(code_text or "").strip()
         if not code_text:
@@ -182,9 +194,18 @@ class ProductSearchBox(QComboBox):
         query = QSqlQuery()
         query.prepare(
             """
-            SELECT id, display_name
+            SELECT
+                p.id,
+                p.display_name,
+                COALESCE((
+                    SELECT pp.pack_size
+                    FROM price_pack pp
+                    WHERE pp.product_id = p.id
+                    ORDER BY pp.is_default DESC, pp.id DESC
+                    LIMIT 1
+                ), 0) AS pack_size
             FROM product
-            WHERE TRIM(CAST(code AS TEXT)) = ?
+            WHERE TRIM(CAST(p.code AS TEXT)) = ?
               AND COALESCE(status, 'active') IN ('active', 'used')
             LIMIT 1
             """
@@ -194,7 +215,7 @@ class ProductSearchBox(QComboBox):
         if not query.exec() or not query.next():
             return None
 
-        return int(query.value(0)), str(query.value(1) or "").strip()
+        return int(query.value(0)), ProductSearchBox.format_product_label(query.value(1), query.value(2))
 
     # ------------------------------------------------------------------
     # Internal slots
@@ -266,8 +287,21 @@ class ProductSearchBox(QComboBox):
         """Run the standard id/display_name search."""
         query = QSqlQuery()
         query.prepare(
-            "SELECT id, display_name FROM product "
-            "WHERE display_name LIKE ? LIMIT 15"
+            """
+            SELECT
+                p.id,
+                p.display_name,
+                COALESCE((
+                    SELECT pp.pack_size
+                    FROM price_pack pp
+                    WHERE pp.product_id = p.id
+                    ORDER BY pp.is_default DESC, pp.id DESC
+                    LIMIT 1
+                ), 0) AS pack_size
+            FROM product p
+            WHERE p.display_name LIKE ?
+            LIMIT 15
+            """
         )
         query.addBindValue(f"%{search_text}%")
         results = []
@@ -275,6 +309,6 @@ class ProductSearchBox(QComboBox):
             return results
         while query.next():
             pid = int(query.value(0))
-            name = str(query.value(1)).strip()
-            results.append((name, pid))
+            label = ProductSearchBox.format_product_label(query.value(1), query.value(2))
+            results.append((label, pid))
         return results

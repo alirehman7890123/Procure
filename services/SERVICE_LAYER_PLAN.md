@@ -110,6 +110,7 @@ This project is ready to move core business logic out of UI widgets and into reu
 - `services/purchase_return_transaction_service.py`
 - `services/purchase_draft_service.py`
 - `services/grn_draft_service.py`
+- `reports/report_service.py`
 
 ### Wired Screens
 
@@ -142,7 +143,7 @@ This project is ready to move core business logic out of UI widgets and into reu
   - Inventory Adjustment
   - Product Catalog query behavior
   - Product Admin price-change behavior
-- Current backend safety net: growing SQLite-backed integration plus service-level verification across transactional, inventory, reporting, and product-admin slices
+- Current backend safety net: broad SQLite-backed integration plus service-level verification across transactional, inventory, reporting, product-admin, and settings slices
 
 ### What Is Effectively Done
 
@@ -158,42 +159,39 @@ This project is ready to move core business logic out of UI widgets and into reu
 - Sales detail extraction: receipt header/item/business reads and invoice export context now live in a dedicated read service
 - Accounting settings extraction: shared `accounting_settings` reads/writes for sales policies, global promo/global tax, and theme settings
 - Return service extraction: settlement rules, row normalization, transaction persistence, stock reversal/update helpers
-- Reports cleanup in progress: batch reference details, opening-cost review, near-expiry, low-stock, outstanding-balance readers, chart helpers, business-name lookup, product option readers, inventory/balance-sheet/trial-balance/cash-flow/profitability snapshots, overview metric refresh helpers, and multiple reference-detail readers now delegate to `reports/report_service.py`
-- `reports/mainpage.py` no longer owns direct SQL blocks for the extracted reporting slices; its remaining work is mostly rendering and orchestration
+- Reports service extraction in active progress: batch reference details, opening-cost review, near-expiry, low-stock, outstanding-balance readers, chart helpers, business-name lookup, product option readers, inventory/balance-sheet/trial-balance/cash-flow/profitability snapshots, overview metric refresh helpers, and multiple reference-detail readers now delegate to `reports/report_service.py`
+- `reports/mainpage.py` no longer owns direct SQL blocks for the extracted reporting slices; most remaining work there is rendering, orchestration, and a smaller set of report/read-model helpers
 - Widget cleanup pass: major save flows now read more like orchestration than embedded business logic
+- Sales now includes a compact quick-add product flow with opening stock from the Sales screen itself
+- The project is past first-wave service extraction and is now mainly in a consolidation, read-side cleanup, and hardening phase
 
 ### Next Recommended Workstreams
 
-1. Inventory movement service
-- Centralize shared batch in/out logic now duplicated across purchase, sales, GRN, and returns
-- Move FIFO and stock restoration behavior behind one reusable module
+1. Reports service completion
+- Continue moving the remaining report-side summaries, reconciliation helpers, selector feeds, and financial/read-model queries into `reports/report_service.py`
+- Keep `reports/mainpage.py` on a thin rendering/orchestration path
 
-2. Stock adjustment and audit workflows
-- Add SQLite-backed integration coverage for inventory adjustment
-- Strengthen inventory correction tooling for client-site safety
-- Consider adjustment approval / supervisor flows if needed later
+2. Product and detail/read services
+- Continue moving remaining product browse/detail/reference helpers out of widgets
+- Consider similar read-service treatment for purchase detail and other large detail/list screens
 
-3. Accounting settings service
-- Finish sweeping remaining direct `accounting_settings` reads/writes
-- Keep Sales, theme/application startup, and Business settings aligned on one shared settings backend
-
-4. Product and reports read services
-- Continue moving product browsing, reference lookups, and inventory read models out of widgets
-- Keep `product/productlist.py` and `reports/mainpage.py` on thin orchestration-only paths
-- Continue shifting any remaining summary/read-model helpers into dedicated services before adding new report UI
-
-5. Reports service
-- Continue moving valuation, profit/loss, unknown-cost, reconciliation, balance-sheet, trial-balance, cash-flow, overview-summary, and reference-detail logic out of report widgets
-
-6. Broader failure-path testing
+3. Broader failure-path testing
 - Add more integration tests for invalid inputs, partial failures, repeated returns, and stock edge cases
 - Keep expanding SQLite-backed coverage around newly extracted service domains before large new UI features land
 - Keep adding lightweight guard tests for blank input, over-return, and impossible stock states so client-side failures are caught earlier
 
+4. Stock adjustment and audit refinements
+- Strengthen inventory correction tooling for client-site safety
+- Consider adjustment approval / supervisor flows if needed later
+
+5. Remaining settings and inventory/report stragglers
+- Sweep any remaining direct `accounting_settings` reads/writes that bypass the shared service
+- Finish the last report/product/inventory read paths still sitting directly in widgets
+
 ### Current Focus
 
 - Keep thinning product, report, and stock-related widgets until they are mostly orchestration-only
-- Finish the remaining accounting-settings and inventory/audit straggler reads so shared services fully own those domains
 - Continue moving report-side summaries, chart feeds, selector/read-model queries, and remaining financial snapshot providers into `reports/report_service.py`
-- Favor service-first additions for any new report screens or dashboard cards so `mainpage.py` stays thin
+- Favor service-first additions for new report screens, dashboard cards, and read-heavy UI flows
 - Use the broadened integration suite as the baseline before each major service-layer expansion
+- Treat the current phase as consolidation: finish the read/report layer, tighten failure handling, and keep the core posting flows stable

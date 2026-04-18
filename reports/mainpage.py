@@ -36,6 +36,7 @@ class MainReportsPage(QWidget):
         
         duration_combo = QComboBox()
         duration_combo.addItems(['Today', 'Past Week', 'Past Month', 'Past Year', 'All'])
+        self.duration_combo = duration_combo
         self.current_duration_key = "today"
         
         duration_combo.currentIndexChanged.connect(self.on_duration_changed)
@@ -5004,16 +5005,30 @@ class MainReportsPage(QWidget):
         
         super().showEvent(event)
         print("Showing Reports page")
-        
-        
-        
-        
-        
+        self.current_duration_key = "today"
+        if hasattr(self, "duration_combo"):
+            self.duration_combo.blockSignals(True)
+            self.duration_combo.setCurrentIndex(0)
+            self.duration_combo.blockSignals(False)
+        self.refresh_overview_for_duration("today")
 
-        
-        
-        
-    
+
+
+    def refresh_overview_for_duration(self, duration_key):
+        duration_key = (duration_key or "today").lower()
+        self.current_duration_key = duration_key
+
+        overview_snapshot = report_service.ReportService().get_overview_totals_snapshot(duration_key)
+        total_sales = overview_snapshot["total_sales"]
+        total_purchase = overview_snapshot["total_purchase"]
+        total_expenses = overview_snapshot["total_expenses"]
+        self.set_overview_totals(
+            f"{total_sales:.2f}",
+            f"{total_purchase:.2f}",
+            f"{total_expenses:.2f}",
+        )
+
+        return overview_snapshot
 
     def get_today_data(self):
         
@@ -5073,17 +5088,7 @@ class MainReportsPage(QWidget):
             4: "all",
         }
         duration_key = duration_map.get(index, "today")
-        self.current_duration_key = duration_key
-
-        overview_snapshot = report_service.ReportService().get_overview_totals_snapshot(duration_key)
-        total_sales = overview_snapshot["total_sales"]
-        total_purchase = overview_snapshot["total_purchase"]
-        total_expenses = overview_snapshot["total_expenses"]
-        self.set_overview_totals(
-            f"{total_sales:.2f}",
-            f"{total_purchase:.2f}",
-            f"{total_expenses:.2f}",
-        )
+        overview_snapshot = self.refresh_overview_for_duration(duration_key)
         # The old revenue/stock/dues summary widgets were removed when the
         # reports page was simplified into overview + category cards.
         # Keep the duration filter scoped to widgets that still exist.

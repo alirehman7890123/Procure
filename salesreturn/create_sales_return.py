@@ -824,12 +824,12 @@ class AddSalesReturnWidget(QWidget):
                 except Exception as e:
                     raise Exception(f"Row {row + 1}: {str(e)}")
 
+                print("Passing salesitem_id to reverse_inventory_for_return:", normalized_row["salesitem_id"])
+                self.reverse_inventory_for_return(normalized_row["salesitem_id"], normalized_row["returned"], db)
+
                 insert_id = self._insert_sales_return_item(return_id, normalized_row)
                 print("Sales Return Item inserted")
                 print("last INSERTED ID IS", insert_id)
-
-                print("Passing salesitem_id to reverse_inventory_for_return:", normalized_row["salesitem_id"])
-                self.reverse_inventory_for_return(normalized_row["salesitem_id"], normalized_row["returned"], db)
 
         except Exception as e:
             print("An error occurred:", str(e))

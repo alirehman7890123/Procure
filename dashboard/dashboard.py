@@ -197,10 +197,6 @@ class DashboardWidget(QWidget):
         self.backup_check_timer.timeout.connect(self.run_scheduled_backup_cycle)
         self.backup_check_timer.start()
 
-        self.header_clock_timer = QTimer(self)
-        self.header_clock_timer.setInterval(1000)
-        self.header_clock_timer.timeout.connect(self.update_dashboard_datetime)
-        self.header_clock_timer.start()
         self.update_dashboard_datetime()
         
         
@@ -240,18 +236,21 @@ class DashboardWidget(QWidget):
         alerts_layout.setContentsMargins(0, 0, 0, 0)
         alerts_layout.setAlignment(Qt.AlignTop)
 
+        self.quick_links_card = self.build_quick_links_card()
         self.session_card = self.build_session_card()
         self.low_stock_card = self.build_low_stock_card()
         self.expiry_card = self.build_expiry_card()
         self.reminders_card = self.build_reminders_card()
         self.backup_card = self.build_backup_health_card()
 
+        self._apply_dashboard_card_style(self.quick_links_card)
         self._apply_dashboard_card_style(self.session_card)
         self._apply_dashboard_card_style(self.low_stock_card)
         self._apply_dashboard_card_style(self.expiry_card)
         self._apply_dashboard_card_style(self.reminders_card)
         self._apply_dashboard_card_style(self.backup_card)
 
+        alerts_layout.addWidget(self.quick_links_card)
         alerts_layout.addWidget(self.session_card)
 
         operational_row = QHBoxLayout()
@@ -267,6 +266,60 @@ class DashboardWidget(QWidget):
         self.layout.addWidget(self.alerts_container, 0, Qt.AlignTop)
 
         self.load_inventory_alerts()
+
+    def build_quick_links_card(self):
+        card = QFrame()
+        card.setObjectName("sectionCard")
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        title = QLabel("Quick Links")
+        title.setObjectName("SectionTitle")
+        title_hint = QLabel("Jump into common sales and purchase actions")
+        title_hint.setStyleSheet("color:#777; padding-left: 0;")
+
+        header.addWidget(title)
+        header.addSpacing(8)
+        header.addWidget(title_hint)
+        header.addStretch()
+        layout.addLayout(header)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(8)
+
+        helper_text = QLabel(
+            "Use these shortcuts to start a new sales or purchase invoice, or review only today's sales for the active session."
+        )
+        helper_text.setWordWrap(True)
+        helper_text.setStyleSheet("color:#5A7183; padding-left: 0;")
+        action_row.addWidget(helper_text, 1)
+
+        self.quick_create_sale_btn = QPushButton("Create Sale")
+        self.quick_create_sale_btn.setCursor(Qt.PointingHandCursor)
+        self.quick_create_sale_btn.setObjectName("TopRightButton")
+        self.quick_create_sale_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.quick_create_sale_btn.clicked.connect(self.open_create_sale_page)
+        action_row.addWidget(self.quick_create_sale_btn)
+
+        self.quick_today_sales_btn = QPushButton("Show Today Sales")
+        self.quick_today_sales_btn.setCursor(Qt.PointingHandCursor)
+        self.quick_today_sales_btn.setObjectName("TopRightButton")
+        self.quick_today_sales_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.quick_today_sales_btn.clicked.connect(self.show_today_sales_dialog)
+        action_row.addWidget(self.quick_today_sales_btn)
+
+        self.quick_create_purchase_btn = QPushButton("Purchase Invoice")
+        self.quick_create_purchase_btn.setCursor(Qt.PointingHandCursor)
+        self.quick_create_purchase_btn.setObjectName("TopRightButton")
+        self.quick_create_purchase_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.quick_create_purchase_btn.clicked.connect(self.open_create_purchase_page)
+        action_row.addWidget(self.quick_create_purchase_btn)
+
+        layout.addLayout(action_row)
+        return card
 
     def _apply_dashboard_card_style(self, card, min_height=0):
         if min_height > 0:
@@ -291,9 +344,422 @@ class DashboardWidget(QWidget):
             """
         )
 
+    def dialog_section_style(self, section):
+        if section == "header":
+            return "background-color: #EEF4F7; border: 1px solid #D7E2E8; border-radius: 10px;"
+        if section == "footer":
+            return "background-color: #F4F8FB; border: 1px solid #D7E2E8; border-radius: 10px;"
+        return "background-color: #FFFFFF; border: 1px solid #D7E2E8; border-radius: 10px;"
+
+    def build_report_dialog_shell(self, dialog):
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(12)
+
+        header_section = QWidget()
+        header_section.setObjectName("dialogHeader")
+        header_section.setStyleSheet(f"QWidget#dialogHeader {{ {self.dialog_section_style('header')} }}")
+        header_layout = QVBoxLayout(header_section)
+        header_layout.setContentsMargins(10, 10, 10, 10)
+        header_layout.setSpacing(12)
+
+        content_section = QWidget()
+        content_section.setObjectName("dialogContent")
+        content_section.setStyleSheet(f"QWidget#dialogContent {{ {self.dialog_section_style('content')} }}")
+        content_layout = QVBoxLayout(content_section)
+        content_layout.setContentsMargins(10, 10, 10, 10)
+        content_layout.setSpacing(12)
+
+        footer_section = QWidget()
+        footer_section.setObjectName("dialogFooter")
+        footer_section.setStyleSheet(f"QWidget#dialogFooter {{ {self.dialog_section_style('footer')} }}")
+        footer_layout = QHBoxLayout(footer_section)
+        footer_layout.setContentsMargins(10, 10, 10, 10)
+        footer_layout.setSpacing(8)
+
+        layout.addWidget(header_section)
+        layout.addWidget(content_section, 1)
+        layout.addWidget(footer_section)
+
+        return header_layout, content_layout, footer_layout
+
+    def open_create_sale_page(self):
+        main_window = self.window()
+        if main_window is None or not hasattr(main_window, "set_sales"):
+            AppMessageBox.warning(self, "Navigation Unavailable", "Could not open the Sales page from the dashboard.")
+            return
+
+        main_window.set_sales(main_window.base_sales, main_window.main_content_layout)
+        if hasattr(main_window.base_sales, "set_createsales_widget"):
+            main_window.base_sales.set_createsales_widget()
+
+    def open_create_purchase_page(self):
+        main_window = self.window()
+        if main_window is None or not hasattr(main_window, "set_purchase"):
+            AppMessageBox.warning(self, "Navigation Unavailable", "Could not open the Purchase page from the dashboard.")
+            return
+
+        main_window.set_purchase(main_window.purchase, main_window.main_content_layout)
+        if hasattr(main_window.purchase, "set_addpurchase_widget"):
+            main_window.purchase.set_addpurchase_widget()
+
+    def get_today_session_sales_rows(self, session_id):
+        rows = []
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                s.id,
+                COALESCE(c.name, 'Walk-in Customer') AS customer_name,
+                COALESCE(a.username, '') AS salesman_name,
+                COALESCE(s.total, 0),
+                COALESCE(s.received, 0),
+                COALESCE(s.remaining, 0),
+                COALESCE(s.writeoff, 0),
+                COALESCE(s.creation_date, '')
+            FROM sales s
+            LEFT JOIN customer c ON c.id = s.customer
+            LEFT JOIN auth a ON a.id = s.salesman
+            WHERE s.session_id = :session_id
+              AND DATE(s.creation_date) = DATE('now')
+            ORDER BY datetime(s.creation_date) DESC, s.id DESC
+            """
+        )
+        query.bindValue(":session_id", int(session_id))
+
+        if not query.exec():
+            raise Exception(f"Could not load today's sales.\n\n{query.lastError().text()}")
+
+        while query.next():
+            rows.append({
+                "sale_id": int(query.value(0) or 0),
+                "customer_name": str(query.value(1) or ""),
+                "salesman_name": str(query.value(2) or ""),
+                "total": float(query.value(3) or 0.0),
+                "received": float(query.value(4) or 0.0),
+                "remaining": float(query.value(5) or 0.0),
+                "writeoff": float(query.value(6) or 0.0),
+                "creation_date": str(query.value(7) or ""),
+            })
+        return rows
+
+    def get_today_session_sales_return_rows(self, session_id):
+        rows = []
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                sr.id,
+                COALESCE(sr.salesorder, 0),
+                COALESCE(c.name, 'Walk-in Customer') AS customer_name,
+                COALESCE(a.username, '') AS salesman_name,
+                COALESCE(sr.total, 0),
+                COALESCE(sr.paid, 0),
+                COALESCE(sr.remaining, 0),
+                COALESCE(sr.creation_date, '')
+            FROM salesreturn sr
+            LEFT JOIN customer c ON c.id = sr.customer
+            LEFT JOIN auth a ON a.id = sr.salesman
+            WHERE sr.session_id = :session_id
+              AND DATE(sr.creation_date) = DATE('now')
+            ORDER BY datetime(sr.creation_date) DESC, sr.id DESC
+            """
+        )
+        query.bindValue(":session_id", int(session_id))
+
+        if not query.exec():
+            raise Exception(f"Could not load today's sales returns.\n\n{query.lastError().text()}")
+
+        while query.next():
+            rows.append({
+                "return_id": int(query.value(0) or 0),
+                "salesorder_id": int(query.value(1) or 0),
+                "customer_name": str(query.value(2) or ""),
+                "salesman_name": str(query.value(3) or ""),
+                "total": float(query.value(4) or 0.0),
+                "paid": float(query.value(5) or 0.0),
+                "remaining": float(query.value(6) or 0.0),
+                "creation_date": str(query.value(7) or ""),
+            })
+        return rows
+
+    def show_today_sales_dialog(self):
+        session_result = check_active_session(strict=True)
+        if not session_result.ok or session_result.session_id is None:
+            if session_result.code == SessionErrorCode.NO_OPEN_SESSION:
+                AppMessageBox.information(
+                    self,
+                    "No Active Session",
+                    "There is no active daily session right now. Open the day first to review today's session sales.",
+                )
+                return
+            self._show_session_state_error(session_result, action_label="review today's sales")
+            return
+
+        session = self.get_open_session()
+        session_id = int(session_result.session_id)
+        session_date = session.get("session_date", "") if session else ""
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Today's Session Sales")
+        dialog.resize(1080, 640)
+
+        header_layout, content_layout, footer_layout = self.build_report_dialog_shell(dialog)
+
+        heading = QLabel("Today's Session Sales")
+        heading.setStyleSheet("font-size: 16px; font-weight: 700; color: #223746;")
+        subtitle = QLabel(
+            f"Sales recorded for the current daily session only. Session ID: {session_id}"
+            + (f" | Session Date: {session_date}" if session_date else "")
+        )
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet("font-size: 12px; color: #5A7183; padding-left: 0;")
+        header_layout.addWidget(heading)
+        header_layout.addWidget(subtitle)
+
+        summary_row = QHBoxLayout()
+        summary_row.setSpacing(10)
+
+        def make_metric_card(title_text, value_text):
+            card = QFrame()
+            card.setObjectName("card")
+            card.setStyleSheet(
+                """
+                QFrame#card {
+                    background-color: #E8EEF3;
+                    border: 1px solid #D3DDE6;
+                    border-radius: 8px;
+                    color: #223746;
+                }
+                """
+            )
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(10, 8, 10, 8)
+            card_layout.setSpacing(4)
+
+            title_label = QLabel(title_text)
+            title_label.setStyleSheet("font-size: 12px; font-weight: 700; color: #5A7183; padding-left: 0;")
+            value_label = QLabel(value_text)
+            value_label.setStyleSheet("font-size: 20px; font-weight: 700; color: #223746; padding-left: 0;")
+            card_layout.addWidget(title_label)
+            card_layout.addWidget(value_label)
+            return card, value_label
+
+        count_card, self.today_sales_count_value = make_metric_card("Invoices", "0")
+        total_card, self.today_sales_total_value = make_metric_card("Sales", "0.00")
+        returns_card, self.today_sales_returns_value = make_metric_card("Returns", "0.00")
+        net_card, self.today_sales_net_value = make_metric_card("Net Sales", "0.00")
+
+        summary_row.addWidget(count_card, 1)
+        summary_row.addWidget(total_card, 1)
+        summary_row.addWidget(returns_card, 1)
+        summary_row.addWidget(net_card, 1)
+        content_layout.addLayout(summary_row)
+
+        note_label = QLabel("Only sales and sales returns created today and tied to the currently open daily session are shown below.")
+        note_label.setWordWrap(True)
+        note_label.setStyleSheet("font-size: 11px; color: #5A7183; padding-left: 0;")
+        content_layout.addWidget(note_label)
+
+        sales_title = QLabel("Sales")
+        sales_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #223746; padding-left: 0;")
+        content_layout.addWidget(sales_title)
+
+        table = QTableWidget()
+        table.setColumnCount(7)
+        table.setHorizontalHeaderLabels([
+            "Sale ID", "Created At", "Customer", "Salesman", "Total", "Remaining", "Write-off"
+        ])
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.setAlternatingRowColors(True)
+        table.horizontalHeader().setStretchLastSection(False)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        content_layout.addWidget(table, 1)
+
+        returns_title = QLabel("Sales Returns")
+        returns_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #223746; padding-left: 0;")
+        content_layout.addWidget(returns_title)
+
+        returns_table = QTableWidget()
+        returns_table.setColumnCount(7)
+        returns_table.setHorizontalHeaderLabels([
+            "Return ID", "Sale ID", "Created At", "Customer", "Salesman", "Total", "Remaining"
+        ])
+        returns_table.verticalHeader().setVisible(False)
+        returns_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        returns_table.setSelectionBehavior(QTableWidget.SelectRows)
+        returns_table.setAlternatingRowColors(True)
+        returns_table.horizontalHeader().setStretchLastSection(False)
+        returns_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        returns_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        returns_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        returns_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        returns_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        returns_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        returns_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        returns_table.setMaximumHeight(220)
+        content_layout.addWidget(returns_table)
+
+        footer_status = QLabel("")
+        footer_status.setStyleSheet("font-size: 11px; font-weight: 600; color: #5A7183; padding-left: 0;")
+        footer_layout.addWidget(footer_status)
+        footer_layout.addStretch()
+
+        reload_btn = QPushButton("Reload")
+        reload_btn.setObjectName("TopRightButton")
+        reload_btn.setCursor(Qt.PointingHandCursor)
+        open_sales_btn = QPushButton("Create Sale")
+        open_sales_btn.setObjectName("TopRightButton")
+        open_sales_btn.setCursor(Qt.PointingHandCursor)
+        close_btn = QPushButton("Close")
+        close_btn.setObjectName("TopRightButton")
+        close_btn.setCursor(Qt.PointingHandCursor)
+        footer_layout.addWidget(reload_btn)
+        footer_layout.addWidget(open_sales_btn)
+        footer_layout.addWidget(close_btn)
+
+        def load_rows():
+            rows = self.get_today_session_sales_rows(session_id)
+            return_rows = self.get_today_session_sales_return_rows(session_id)
+            table.setRowCount(len(rows))
+            returns_table.setRowCount(len(return_rows))
+
+            total_sales = 0.0
+            total_returns = 0.0
+
+            for row_index, row in enumerate(rows):
+                total_sales += float(row.get("total", 0.0) or 0.0)
+
+                created_at = str(row.get("creation_date", "") or "")
+                created_dt = QDateTime.fromString(created_at, "yyyy-MM-dd HH:mm:ss")
+                if not created_dt.isValid():
+                    created_dt = QDateTime.fromString(created_at, Qt.ISODate)
+                if created_dt.isValid():
+                    if created_dt.timeSpec() == Qt.LocalTime:
+                        created_dt.setTimeSpec(Qt.UTC)
+                    created_at = created_dt.toLocalTime().toString("dd MMM yyyy | hh:mm AP")
+
+                writeoff_amount = float(row.get("writeoff", 0.0) or 0.0)
+                remaining_amount = float(row.get("remaining", 0.0) or 0.0)
+                if writeoff_amount > 0:
+                    writeoff_status = "Clear"
+                elif remaining_amount > 0:
+                    writeoff_status = "Not Clear"
+                else:
+                    writeoff_status = "N/A"
+
+                values = [
+                    str(row.get("sale_id", "")),
+                    created_at,
+                    str(row.get("customer_name", "")),
+                    str(row.get("salesman_name", "")),
+                    f"{float(row.get('total', 0.0) or 0.0):,.2f}",
+                    f"{remaining_amount:,.2f}",
+                    writeoff_status,
+                ]
+
+                for col, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    item.setFlags(item.flags() ^ Qt.ItemIsEditable)
+                    if col in {4, 5}:
+                        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    if col == 6:
+                        if writeoff_status == "Clear":
+                            item.setForeground(QColor("#2E7D32"))
+                        elif writeoff_status == "Not Clear":
+                            item.setForeground(QColor("#B45309"))
+                    table.setItem(row_index, col, item)
+
+            for row_index, row in enumerate(return_rows):
+                total_returns += float(row.get("total", 0.0) or 0.0)
+
+                created_at = str(row.get("creation_date", "") or "")
+                created_dt = QDateTime.fromString(created_at, "yyyy-MM-dd HH:mm:ss")
+                if not created_dt.isValid():
+                    created_dt = QDateTime.fromString(created_at, Qt.ISODate)
+                if created_dt.isValid():
+                    if created_dt.timeSpec() == Qt.LocalTime:
+                        created_dt.setTimeSpec(Qt.UTC)
+                    created_at = created_dt.toLocalTime().toString("dd MMM yyyy | hh:mm AP")
+
+                values = [
+                    str(row.get("return_id", "")),
+                    str(row.get("salesorder_id", "")),
+                    created_at,
+                    str(row.get("customer_name", "")),
+                    str(row.get("salesman_name", "")),
+                    f"{float(row.get('total', 0.0) or 0.0):,.2f}",
+                    f"{float(row.get('remaining', 0.0) or 0.0):,.2f}",
+                ]
+
+                for col, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    item.setFlags(item.flags() ^ Qt.ItemIsEditable)
+                    if col in {5, 6}:
+                        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    returns_table.setItem(row_index, col, item)
+
+            self.today_sales_count_value.setText(str(len(rows)))
+            self.today_sales_total_value.setText(f"{total_sales:,.2f}")
+            self.today_sales_returns_value.setText(f"{total_returns:,.2f}")
+            self.today_sales_net_value.setText(f"{(total_sales - total_returns):,.2f}")
+            footer_status.setText(
+                f"Sales shown: {len(rows)} | Returns shown: {len(return_rows)} | Session ID: {session_id}"
+                + (f" | Session Date: {session_date}" if session_date else "")
+            )
+
+        reload_btn.clicked.connect(load_rows)
+        open_sales_btn.clicked.connect(lambda: (dialog.accept(), self.open_create_sale_page()))
+        close_btn.clicked.connect(dialog.accept)
+
+        load_rows()
+        dialog.exec()
+
     def update_dashboard_datetime(self):
-        now = QDateTime.currentDateTime()
-        self.dashboard_datetime.setText(now.toString("ddd, dd MMM yyyy | hh:mm:ss AP"))
+        app = QApplication.instance()
+        username = (app.property("username") or "") if app else ""
+
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT timestamp
+            FROM activity_log
+            WHERE category = 'login'
+              AND action = 'login'
+              AND username = ?
+            ORDER BY datetime(timestamp) DESC
+            LIMIT 1
+            """
+        )
+        query.addBindValue(username)
+
+        last_login_text = ""
+        if query.exec() and query.next():
+            last_login_text = str(query.value(0) or "").strip()
+
+        if last_login_text:
+            login_dt = QDateTime.fromString(last_login_text, "yyyy-MM-dd HH:mm:ss")
+            if not login_dt.isValid():
+                login_dt = QDateTime.fromString(last_login_text, Qt.ISODate)
+
+            if login_dt.isValid():
+                if login_dt.timeSpec() == Qt.LocalTime:
+                    login_dt.setTimeSpec(Qt.UTC)
+                login_dt = login_dt.toLocalTime()
+                formatted = login_dt.toString("ddd, dd MMM yyyy | hh:mm AP")
+            else:
+                formatted = last_login_text
+            self.dashboard_datetime.setText(f"Login Time: {formatted}")
+        else:
+            self.dashboard_datetime.setText("Login Time: Not available")
 
     def build_session_card(self):
         card = QFrame()

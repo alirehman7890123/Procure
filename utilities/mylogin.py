@@ -998,7 +998,10 @@ class MainWindow(QMainWindow):
     def set_purchase(self, widget, layout):
         if not self._require_any_permission(("purchase.view", "purchase.create"), "Purchases"):
             return
-        self.purchase.reset_to_default()
+        if hasattr(self.purchase, "set_addpurchase_widget") and Permissions.has_permission('purchase.create'):
+            self.purchase.set_addpurchase_widget()
+        else:
+            self.purchase.reset_to_default()
         self.navigate_to_page(widget, layout)
     
     def set_po(self, widget, layout):
@@ -1016,7 +1019,10 @@ class MainWindow(QMainWindow):
     def set_sales(self, widget, layout):
         if not self._require_any_permission(("sales.view", "sales.create"), "Sales"):
             return
-        self.base_sales.reset_to_default()
+        if hasattr(self.base_sales, "set_createsales_widget") and Permissions.has_permission('sales.create'):
+            self.base_sales.set_createsales_widget()
+        else:
+            self.base_sales.reset_to_default()
         self.navigate_to_page(widget, layout)
 
     def set_customer(self, widget, layout):

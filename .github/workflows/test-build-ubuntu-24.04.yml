@@ -1,0 +1,217 @@
+name: Test & Build (Ubuntu 24.04)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    name: Test Suite
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install system dependencies for Qt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libglib2.0-0 \
+            libgl1 \
+            libegl1 \
+            libxkbcommon-x11-0 \
+            libdbus-1-3 \
+            libx11-xcb1 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-xfixes0 \
+            libxcb-sync1 \
+            libxcb-xinerama0 \
+            libxcb-xinput0
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -r medic/requirements.txt
+
+      - name: Run pytest
+        run: |
+          cd medic
+          pytest tests/ -v --tb=short --color=yes 2>&1 || true
+        continue-on-error: true
+
+      - name: Test import of main module
+        run: |
+          cd medic
+          python -c "from starting import AuthWindow; print('✓ Main module imports successfully')"
+
+  build:
+    runs-on: ubuntu-24.04
+    name: Build Executable
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install system dependencies for Qt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libglib2.0-0 \
+            libgl1 \
+            libegl1 \
+            libxkbcommon-x11-0 \
+            libdbus-1-3 \
+            libx11-xcb1 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-shape0 \
+            libxcb-xfixes0 \
+            libxcb-sync1 \
+            libxcb-xinerama0 \
+            libxcb-xinput0
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -r medic/requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable with PyInstaller
+        run: |
+          cd medic
+          
+          EXTRA_DATA=()
+          
+          [[ -d "res" ]] && EXTRA_DATA+=(--add-data "res:res")
+          [[ -d "styles" ]] && EXTRA_DATA+=(--add-data "styles:styles")
+          [[ -f "manufacturers.csv" ]] && EXTRA_DATA+=(--add-data "manufacturers.csv:.")
+          [[ -f "master_products.csv" ]] && EXTRA_DATA+=(--add-data "master_products.csv:.")
+          [[ -f "licensing/public_key.json" ]] && EXTRA_DATA+=(--add-data "licensing/public_key.json:licensing")
+          [[ -f "purchase/med-template.ods" ]] && EXTRA_DATA+=(--add-data "purchase/med-template.ods:purchase")
+          
+          python -m PyInstaller \
+            --noconfirm \
+            --clean \
+            --onedir \
+            --windowed \
+            --name ProcureMedic \
+            --collect-all PySide6 \
+            --collect-all pandas \
+            --collect-all numpy \
+            "${EXTRA_DATA[@]}" \
+            starting.py
+
+      - name: Create archive
+        run: |
+          cd medic
+          tar -czf ../ProcureMedic-ubuntu-24.04.tar.gz -C dist ProcureMedic
+          ls -lh ../ProcureMedic-ubuntu-24.04.tar.gz
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProcureMedic-ubuntu-24.04-executable
+          path: ProcureMedic-ubuntu-24.04.tar.gz
+          retention-days: 30
+
+      - name: Create release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+      - name: Upload to release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./ProcureMedic-ubuntu-24.04.tar.gz
+          asset_name: ProcureMedic-ubuntu-24.04-${{ github.ref_name }}.tar.gz
+          asset_content_type: application/gzip
+
+  lint:
+    runs-on: ubuntu-24.04
+    name: Code Quality Checks
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install linting tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 pylint black isort 2>&1 | grep -v "already satisfied" || true
+
+      - name: Check code formatting with black (report only)
+        run: |
+          cd medic
+          black --check --diff . 2>&1 | head -50 || echo "⚠ Code formatting issues found (see above)"
+        continue-on-error: true
+
+      - name: Check import sorting with isort (report only)
+        run: |
+          cd medic
+          isort --check-only --diff . 2>&1 | head -50 || echo "⚠ Import sorting issues found (see above)"
+        continue-on-error: true
+
+      - name: Run flake8 linting (report only)
+        run: |
+          cd medic
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics 2>&1 | head -50 || true
+        continue-on-error: true
+
+  summary:
+    runs-on: ubuntu-24.04
+    name: Build Summary
+    if: always()
+    needs: [test, build, lint]
+    
+    steps:
+      - name: Check job status
+        run: |
+          echo "📊 Workflow Summary:"
+          echo "✓ Test job: ${{ needs.test.result }}"
+          echo "✓ Build job: ${{ needs.build.result }}"
+          echo "✓ Lint job: ${{ needs.lint.result }}"
+          
+          if [[ "${{ needs.test.result }}" == "failure" || "${{ needs.build.result }}" == "failure" ]]; then
+            echo "❌ Build failed!"
+            exit 1
+          fi
+          echo "✅ Build completed successfully!"

@@ -7,7 +7,7 @@ import platform
 import subprocess
 
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
-from PySide6.QtGui import QPalette, QColor, QKeyEvent, QPdfWriter, QKeySequence, QPainter, QPageSize, QFont, QTextOption, QPen, QColor
+from PySide6.QtGui import QPalette, QColor, QKeyEvent, QPdfWriter, QKeySequence, QPainter, QPageSize, QFont, QTextOption, QPen, QColor, QFontMetrics
 from functools import partial
 import math
 from utilities.stylus import load_stylesheets
@@ -18,6 +18,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from utilities.payment_handler import PaymentMethodHandler
 from utilities.permissions import Permissions
 from utilities.app_messagebox import AppMessageBox
+from utilities.app_theme import get_theme_palette
 from sales.pricing_logic import compute_header_totals, compute_line_pricing
 from services.accounting_settings_service import load_sales_policy_settings
 from services.sales_defaults_service import resolve_sales_header_pricing
@@ -74,6 +75,415 @@ class SelectAllLineEdit(QLineEdit):
         if self._select_on_release:
             self._select_on_release = False
             self.selectAll()
+
+
+class SalesQuickProductDialog(QDialog):
+    def __init__(self, parent=None, initial_name=""):
+        super().__init__(parent)
+        self.saved_product_id = None
+        self.saved_visible_name = ""
+        self.setWindowTitle("Quick Add Product")
+        self.setModal(True)
+        self.setMinimumWidth(560)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        header = QLabel("Add product with opening stock")
+        header.setStyleSheet("font-size: 14px; font-weight: 700; color: #1F445D;")
+        layout.addWidget(header)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+
+        def form_label(text):
+            lbl = QLabel(text)
+            lbl.setStyleSheet("font-size: 11px; font-weight: 700; color: #4B5563;")
+            return lbl
+
+        initial_name = str(initial_name or "").strip().upper()
+
+        self.product_name_input = QLineEdit()
+        self.product_name_input.setPlaceholderText("Product")
+        self.product_name_input.setText(initial_name)
+        self.product_name_input.textEdited.connect(lambda text: self.force_uppercase_line_edit(self.product_name_input, text))
+
+        self.dose_input = QLineEdit()
+        self.dose_input.setPlaceholderText("Dose")
+        self.dose_input.textEdited.connect(lambda text: self.force_uppercase_line_edit(self.dose_input, text))
+
+        self.form_input = QLineEdit()
+        self.form_input.setPlaceholderText("Form")
+        self.form_input.textEdited.connect(lambda text: self.force_uppercase_line_edit(self.form_input, text))
+
+        self.formula_input = QLineEdit()
+        self.formula_input.setPlaceholderText("Formula / generic name")
+
+        self.manufacturer_combo = QComboBox()
+        self.manufacturer_combo.setEditable(True)
+        self.manufacturer_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.populate_manufacturer_combo()
+        self.manufacturer_combo.lineEdit().editingFinished.connect(self.handle_new_manufacturer_entry)
+
+        self.pack_size_input = QLineEdit()
+        self.pack_size_input.setPlaceholderText("Pack size")
+
+        self.sale_price_input = QLineEdit()
+        self.sale_price_input.setPlaceholderText("Sale price")
+
+        self.cost_price_input = QLineEdit()
+        self.cost_price_input.setPlaceholderText("Cost price (optional)")
+
+        self.qty_input = QLineEdit()
+        self.qty_input.setPlaceholderText("Opening qty")
+
+        self.batch_input = QLineEdit()
+        self.batch_input.setPlaceholderText("Batch")
+        self.batch_input.textEdited.connect(lambda text: self.force_uppercase_line_edit(self.batch_input, text))
+
+        self.expiry_input = QLineEdit()
+        self.expiry_input.setPlaceholderText("MM-YY (optional)")
+        self.expiry_input.setInputMask("99-99;_")
+
+        row = 0
+        grid.addWidget(form_label("Product"), row, 0)
+        grid.addWidget(self.product_name_input, row, 1)
+        grid.addWidget(form_label("Dose"), row, 2)
+        grid.addWidget(self.dose_input, row, 3)
+        grid.addWidget(form_label("Form"), row, 4)
+        grid.addWidget(self.form_input, row, 5)
+        row += 1
+        grid.addWidget(form_label("Formula"), row, 0)
+        grid.addWidget(self.formula_input, row, 1, 1, 5)
+        row += 1
+        grid.addWidget(form_label("Manufacturer"), row, 0)
+        grid.addWidget(self.manufacturer_combo, row, 1, 1, 5)
+        row += 1
+        grid.addWidget(form_label("Pack Size"), row, 0)
+        grid.addWidget(self.pack_size_input, row, 1)
+        grid.addWidget(form_label("Sale Price"), row, 2)
+        grid.addWidget(self.sale_price_input, row, 3)
+        grid.addWidget(form_label("Cost Price"), row, 4)
+        grid.addWidget(self.cost_price_input, row, 5)
+        row += 1
+        grid.addWidget(form_label("Opening Qty"), row, 0)
+        grid.addWidget(self.qty_input, row, 1)
+        grid.addWidget(form_label("Batch"), row, 2)
+        grid.addWidget(self.batch_input, row, 3)
+        grid.addWidget(form_label("Expiry"), row, 4)
+        grid.addWidget(self.expiry_input, row, 5)
+
+        grid.setColumnStretch(1, 2)
+        grid.setColumnStretch(3, 2)
+        grid.setColumnStretch(5, 2)
+        layout.addLayout(grid)
+
+        footer = QHBoxLayout()
+        footer.addStretch()
+        cancel_btn = QPushButton("Cancel", objectName="TopRightButton")
+        save_btn = QPushButton("Save Product", objectName="TopRightButton")
+        cancel_btn.clicked.connect(self.reject)
+        save_btn.clicked.connect(self.save_product)
+        footer.addWidget(cancel_btn)
+        footer.addWidget(save_btn)
+        layout.addLayout(footer)
+
+        self.product_name_input.returnPressed.connect(lambda: self.focus_next_field(self.dose_input))
+        self.dose_input.returnPressed.connect(lambda: self.focus_next_field(self.form_input))
+        self.form_input.returnPressed.connect(lambda: self.focus_next_field(self.formula_input))
+        self.formula_input.returnPressed.connect(lambda: self.focus_next_field(self.manufacturer_combo))
+        self.manufacturer_combo.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.pack_size_input))
+        self.pack_size_input.returnPressed.connect(lambda: self.focus_next_field(self.sale_price_input))
+        self.sale_price_input.returnPressed.connect(lambda: self.focus_next_field(self.cost_price_input))
+        self.cost_price_input.returnPressed.connect(lambda: self.focus_next_field(self.qty_input))
+        self.qty_input.returnPressed.connect(lambda: self.focus_next_field(self.batch_input))
+        self.batch_input.returnPressed.connect(lambda: self.focus_next_field(self.expiry_input))
+        self.expiry_input.returnPressed.connect(self.save_product)
+
+        self.product_name_input.setFocus()
+        self.product_name_input.selectAll()
+
+    def focus_next_field(self, widget):
+        widget.setFocus()
+        if isinstance(widget, QLineEdit):
+            widget.selectAll()
+        elif isinstance(widget, QComboBox) and widget.isEditable():
+            widget.lineEdit().selectAll()
+
+    def force_uppercase_line_edit(self, line_edit, text):
+        cursor_position = line_edit.cursorPosition()
+        line_edit.blockSignals(True)
+        line_edit.setText((text or "").upper())
+        line_edit.setCursorPosition(cursor_position)
+        line_edit.blockSignals(False)
+
+    def populate_manufacturer_combo(self):
+        self.manufacturer_combo.clear()
+        query = QSqlQuery("""
+            SELECT id, name
+            FROM manufacturer
+            WHERE status = 'active'
+            ORDER BY name
+        """)
+        while query.next():
+            self.manufacturer_combo.addItem(str(query.value(1) or "").strip(), query.value(0))
+
+    def handle_new_manufacturer_entry(self):
+        combo = self.manufacturer_combo
+        name = combo.currentText().strip()
+        if not name:
+            return
+        for index in range(combo.count()):
+            if combo.itemText(index).strip().lower() == name.lower():
+                combo.setCurrentIndex(index)
+                return
+        query = QSqlQuery()
+        query.prepare("INSERT INTO manufacturer (name) VALUES (?)")
+        query.addBindValue(name)
+        if not query.exec():
+            return
+        new_id = query.lastInsertId()
+        combo.addItem(name, new_id)
+        combo.setCurrentIndex(combo.count() - 1)
+
+    def parse_expiry_month_year(self, text):
+        raw = str(text or "").strip()
+        collapsed = raw.replace("_", "").replace(" ", "")
+        if not collapsed or collapsed in {"-", "--"}:
+            return None
+        match = re.fullmatch(r"(\d{2})-(\d{2})", raw)
+        if not match:
+            return None
+        month = int(match.group(1))
+        year = 2000 + int(match.group(2))
+        if month < 1 or month > 12:
+            return None
+        parsed = QDate(year, month, 1)
+        if not parsed.isValid():
+            return None
+        return parsed
+
+    def _float_or_default(self, value, default=0.0):
+        try:
+            text = str(value or "").strip()
+            if not text:
+                return float(default)
+            return float(re.sub(r"[^0-9.\\-]", "", text))
+        except Exception:
+            return float(default)
+
+    def _find_existing_product_id(self, display_name):
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT id
+            FROM product
+            WHERE LOWER(TRIM(display_name)) = LOWER(TRIM(?))
+            LIMIT 1
+        """)
+        query.addBindValue(display_name)
+        if query.exec() and query.next():
+            return int(query.value(0))
+        return None
+
+    def save_product(self):
+        product_name = str(self.product_name_input.text() or "").strip()
+        dose = str(self.dose_input.text() or "").strip()
+        form = str(self.form_input.text() or "").strip()
+        display_name = " ".join(part for part in [product_name, form, dose] if part).strip()
+        formula = str(self.formula_input.text() or "").strip() or None
+        manufacturer_id = self.manufacturer_combo.currentData()
+        manufacturer_id = int(manufacturer_id) if manufacturer_id not in (None, "") else None
+        pack_size_text = str(self.pack_size_input.text() or "").strip()
+        sale_price_text = str(self.sale_price_input.text() or "").strip()
+        cost_price_text = str(self.cost_price_input.text() or "").strip()
+        qty_text = str(self.qty_input.text() or "").strip()
+        batch_no = str(self.batch_input.text() or "").strip() or None
+        expiry_text = str(self.expiry_input.text() or "").strip()
+
+        if not product_name:
+            AppMessageBox.information(self, "Missing Data", "Product name is required.")
+            self.product_name_input.setFocus()
+            return
+
+        if not pack_size_text:
+            AppMessageBox.information(self, "Missing Data", "Pack size is required.")
+            self.pack_size_input.setFocus()
+            return
+
+        if not sale_price_text:
+            AppMessageBox.information(self, "Missing Data", "Sale price is required.")
+            self.sale_price_input.setFocus()
+            return
+
+        if not qty_text:
+            AppMessageBox.information(self, "Missing Data", "Opening qty is required.")
+            self.qty_input.setFocus()
+            return
+
+        pack_size = self._float_or_default(pack_size_text, 0.0)
+        sale_price = self._float_or_default(sale_price_text, 0.0)
+        opening_qty = self._float_or_default(qty_text, 0.0)
+        pack_cost = self._float_or_default(cost_price_text, 0.0) if cost_price_text else None
+
+        if pack_size <= 0:
+            AppMessageBox.information(self, "Missing Data", "Pack size must be greater than 0.")
+            self.pack_size_input.setFocus()
+            return
+        if sale_price <= 0:
+            AppMessageBox.information(self, "Missing Data", "Sale price must be greater than 0.")
+            self.sale_price_input.setFocus()
+            return
+        if opening_qty <= 0:
+            AppMessageBox.information(self, "Missing Data", "Opening qty must be greater than 0.")
+            self.qty_input.setFocus()
+            return
+        if pack_cost is not None and pack_cost < 0:
+            AppMessageBox.information(self, "Missing Data", "Cost price cannot be negative.")
+            self.cost_price_input.setFocus()
+            return
+
+        expiry_date = None
+        if expiry_text.replace("_", "").replace(" ", "") not in {"", "-", "--"}:
+            parsed_expiry = self.parse_expiry_month_year(expiry_text)
+            if parsed_expiry is None:
+                AppMessageBox.information(self, "Missing Data", "Expiry must be in MM-YY format, for example 04-26.")
+                self.expiry_input.setFocus()
+                self.expiry_input.selectAll()
+                return
+            expiry_date = parsed_expiry.toString("yyyy-MM-dd")
+
+        db = QSqlDatabase.database()
+        if not db.transaction():
+            AppMessageBox.information(self, "Error", "Failed to start transaction.")
+            return
+
+        try:
+            product_id = self._find_existing_product_id(display_name)
+            if product_id is None:
+                insert_query = QSqlQuery(db)
+                insert_query.prepare("""
+                    INSERT INTO product (
+                        display_name, code, reg_no, generic_name, brand, form, strength,
+                        packing, rack, manufacturer_id, status
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """)
+                insert_query.addBindValue(display_name)
+                insert_query.addBindValue(None)
+                insert_query.addBindValue(None)
+                insert_query.addBindValue(formula)
+                insert_query.addBindValue(product_name)
+                insert_query.addBindValue(form or None)
+                insert_query.addBindValue(dose or None)
+                insert_query.addBindValue(None)
+                insert_query.addBindValue("")
+                insert_query.addBindValue(manufacturer_id)
+                insert_query.addBindValue("used")
+                if not insert_query.exec():
+                    raise Exception(insert_query.lastError().text())
+                product_id = int(insert_query.lastInsertId())
+            else:
+                update_query = QSqlQuery(db)
+                update_query.prepare("""
+                    UPDATE product
+                    SET display_name = ?,
+                        generic_name = COALESCE(?, generic_name),
+                        brand = COALESCE(?, brand),
+                        form = COALESCE(?, form),
+                        strength = COALESCE(?, strength),
+                        manufacturer_id = COALESCE(?, manufacturer_id),
+                        status = 'used'
+                    WHERE id = ?
+                """)
+                update_query.addBindValue(display_name)
+                update_query.addBindValue(formula)
+                update_query.addBindValue(product_name)
+                update_query.addBindValue(form or None)
+                update_query.addBindValue(dose or None)
+                update_query.addBindValue(manufacturer_id)
+                update_query.addBindValue(product_id)
+                if not update_query.exec():
+                    raise Exception(update_query.lastError().text())
+
+            batch_query = QSqlQuery(db)
+            batch_query.prepare("""
+                INSERT INTO batch (
+                    batch_no, expiry_date, product_id, total_received, paid_qty,
+                    quantity_remaining, unit_cost, source
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """)
+            batch_query.addBindValue(batch_no)
+            batch_query.addBindValue(expiry_date)
+            batch_query.addBindValue(product_id)
+            batch_query.addBindValue(opening_qty)
+            batch_query.addBindValue(opening_qty)
+            batch_query.addBindValue(opening_qty)
+            batch_query.addBindValue(round(pack_cost / pack_size, 6) if pack_cost is not None else None)
+            batch_query.addBindValue("OPENING")
+            if not batch_query.exec():
+                raise Exception(batch_query.lastError().text())
+
+            existing_default_id = None
+            existing_default_query = QSqlQuery(db)
+            existing_default_query.prepare("""
+                SELECT id
+                FROM price_pack
+                WHERE product_id = ?
+                ORDER BY is_default DESC, id DESC
+                LIMIT 1
+            """)
+            existing_default_query.addBindValue(product_id)
+            if not existing_default_query.exec():
+                raise Exception(existing_default_query.lastError().text())
+            if existing_default_query.next():
+                existing_default_id = existing_default_query.value(0)
+
+            if existing_default_id is not None:
+                normalize_query = QSqlQuery(db)
+                normalize_query.prepare("""
+                    UPDATE price_pack
+                    SET is_default = 0
+                    WHERE product_id = ?
+                      AND id <> ?
+                """)
+                normalize_query.addBindValue(product_id)
+                normalize_query.addBindValue(existing_default_id)
+                if not normalize_query.exec():
+                    raise Exception(normalize_query.lastError().text())
+
+                price_query = QSqlQuery(db)
+                price_query.prepare("""
+                    UPDATE price_pack
+                    SET pack_size = ?, pack_price = ?, is_default = 1
+                    WHERE id = ?
+                """)
+                price_query.addBindValue(pack_size)
+                price_query.addBindValue(sale_price)
+                price_query.addBindValue(existing_default_id)
+            else:
+                price_query = QSqlQuery(db)
+                price_query.prepare("""
+                    INSERT INTO price_pack (product_id, pack_size, pack_price, reorder_level, is_default)
+                    VALUES (?, ?, ?, 0, 1)
+                """)
+                price_query.addBindValue(product_id)
+                price_query.addBindValue(pack_size)
+                price_query.addBindValue(sale_price)
+            if not price_query.exec():
+                raise Exception(price_query.lastError().text())
+
+            if not db.commit():
+                raise Exception(db.lastError().text())
+
+            self.saved_product_id = int(product_id)
+            self.saved_visible_name = ProductSearchBox.format_product_label(display_name, pack_size)
+            self.accept()
+        except Exception as exc:
+            db.rollback()
+            AppMessageBox.critical(self, "Error", f"Failed to save product.\n\n{exc}")
 
 
 
@@ -485,7 +895,7 @@ class CreateSalesWidget(QWidget):
 
             QLineEdit {
                 margin: 0;
-                padding: 5px 10px;
+                padding: 5px 6px;
                 border: 1px solid #ccc;
                 border-radius: 5px;
                 font-size: 12px;
@@ -495,7 +905,7 @@ class CreateSalesWidget(QWidget):
 
             QComboBox {
                 margin: 0;
-                padding: 5px 10px;
+                padding: 5px 6px;
                 padding-right: 30px;
                 border: 1px solid #ccc;
                 border-radius: 5px;
@@ -545,6 +955,60 @@ class CreateSalesWidget(QWidget):
         grid.setVerticalSpacing(2)
         grid.setContentsMargins(6, 4, 6, 2)
         self.entry_grid = grid
+
+        palette = get_theme_palette()
+        info_bg = palette.get("primary_main", "#2F5D7C")
+        info_border = palette.get("primary_hover", "#244A62")
+
+        info_strip = QFrame()
+        info_strip.setObjectName("LineInfoStrip")
+        info_strip.setStyleSheet(
+            f"""
+            QFrame#LineInfoStrip {{
+                background-color: {info_bg};
+                border: 1px solid {info_border};
+                border-radius: 6px;
+            }}
+            """
+        )
+        info_strip_layout = QHBoxLayout(info_strip)
+        info_strip_layout.setContentsMargins(10, 7, 10, 7)
+        info_strip_layout.setSpacing(12)
+
+        self.line_info_formula_label = QLabel("Formula: Waiting for product selection")
+        self.line_info_formula_label.setWordWrap(False)
+        self.line_info_formula_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.line_info_formula_label.setStyleSheet(
+            "color: #FFFFFF; font-size: 11px; font-weight: 700; padding-left: 0; margin: 0;"
+        )
+        self.line_info_cost_sale_label = QLabel("Cost: - | Sale: -")
+        self.line_info_cost_sale_label.setWordWrap(False)
+        self.line_info_cost_sale_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self.line_info_cost_sale_label.setStyleSheet(
+            "color: #FFFFFF; font-size: 11px; font-weight: 700; padding-left: 0; margin: 0;"
+        )
+        self.line_info_profit_label = QLabel("Profit: -")
+        self.line_info_profit_label.setWordWrap(False)
+        self.line_info_profit_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self.line_info_profit_label.setStyleSheet(
+            "color: #FFFFFF; font-size: 11px; font-weight: 700; padding-left: 0; margin: 0;"
+        )
+        self.line_info_margin_label = QLabel("Margin: -")
+        self.line_info_margin_label.setWordWrap(False)
+        self.line_info_margin_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self.line_info_margin_label.setStyleSheet(
+            "color: #FFFFFF; font-size: 11px; font-weight: 700; padding-left: 0; margin: 0;"
+        )
+
+        info_strip_layout.addWidget(self.line_info_formula_label, 4)
+        info_strip_layout.addSpacing(6)
+        info_strip_layout.addWidget(self.line_info_cost_sale_label, 2)
+        info_strip_layout.addSpacing(6)
+        info_strip_layout.addWidget(self.line_info_profit_label, 1)
+        info_strip_layout.addSpacing(6)
+        info_strip_layout.addWidget(self.line_info_margin_label, 2)
+        product_entry_layout.addWidget(info_strip)
+        product_entry_layout.addSpacing(4)
 
         # -----------------------------
         # Labels
@@ -608,9 +1072,15 @@ class CreateSalesWidget(QWidget):
             lambda pid, name, data, c=self.item: self.on_completer_selected(name, c, data)
         )
         self.item.setStyleSheet(field_style)
+        self.quick_add_product_btn = QPushButton("+", objectName="EntryButton")
+        self.quick_add_product_btn.setToolTip("Quick add product with opening stock")
+        self.quick_add_product_btn.clicked.connect(
+            lambda: self.open_sales_product_quick_add_dialog(self.item.lineEdit().text())
+        )
         
         product_box_layout.addWidget(product_label, 0)
         product_box_layout.addWidget(self.item, 1)
+        product_box_layout.addWidget(self.quick_add_product_btn, 0)
         
         grid.addLayout(product_box_layout, 0, 1)
         
@@ -726,13 +1196,6 @@ class CreateSalesWidget(QWidget):
 
         grid.addLayout(action_box_layout, 0, 7)
 
-        self.line_margin_label = QLabel("Margin: waiting for product selection")
-        self.line_margin_label.setWordWrap(False)
-        self.line_margin_label.setStyleSheet(
-            "color: #5C7080; font-size: 10px; font-weight: 700; padding-left: 2px; margin: 0;"
-        )
-        grid.addWidget(self.line_margin_label, 1, 3, 1, 5)
-
         qty_filter = QtyValidationFilter(self, self.qty_edit, self.item)
         self.qty_edit.installEventFilter(qty_filter)
 
@@ -797,10 +1260,12 @@ class CreateSalesWidget(QWidget):
         self.line_discount_manual_override = False
         self.line_tax_manual_override = False
         self.current_line_pricing_summary_text = "Line Pricing: Waiting for product selection"
-        if hasattr(self, "line_margin_label"):
-            self.line_margin_label.setText("Margin: waiting for product selection")
-            self.line_margin_label.setStyleSheet(
-                "color: #5C7080; font-size: 10px; font-weight: 700; padding-left: 2px; margin: 0;"
+        if hasattr(self, "line_info_formula_label"):
+            self._set_line_info_labels(
+                formula_text="Formula: Waiting for product selection",
+                cost_sale_text="Cost: - | Sale: -",
+                profit_text="Profit: -",
+                margin_text=f"Margin: - (Target: {self.minimum_margin_percent:.0f}%)",
             )
         self.refresh_pricing_details_dialog()
     
@@ -941,6 +1406,7 @@ class CreateSalesWidget(QWidget):
         self.additional_entry.textChanged.connect(self.update_total_amount)
         self.discount_entry.textEdited.connect(self.on_discount_entry_edited)
         self.tax_entry.textEdited.connect(self.on_tax_entry_edited)
+        self.additional_entry.editingFinished.connect(self.on_additional_entry_finished)
         self.received_entry.textChanged.connect(self.calculate_payment)
         self.received_entry.textChanged.connect(self.update_due_date_availability)
         self.writeoff_check.toggled.connect(self.update_due_date_availability)
@@ -1420,18 +1886,41 @@ class CreateSalesWidget(QWidget):
             "margin_percent": margin_percent,
         }
 
+    def _set_line_info_labels(self, *, formula_text, cost_sale_text, profit_text, margin_text):
+        if not hasattr(self, "line_info_formula_label"):
+            return
+
+        formula_text = str(formula_text or "").strip() or "Formula: -"
+        cost_sale_text = str(cost_sale_text or "").strip() or "Cost: - | Sale: -"
+        profit_text = str(profit_text or "").strip() or "Profit: -"
+        margin_text = str(margin_text or "").strip() or f"Margin: - (Target: {self.minimum_margin_percent:.0f}%)"
+
+        metrics = QFontMetrics(self.line_info_formula_label.font())
+        available_width = max(self.line_info_formula_label.width() - 6, 220)
+        elided_formula = metrics.elidedText(formula_text, Qt.ElideRight, available_width)
+
+        self.line_info_formula_label.setText(elided_formula)
+        self.line_info_formula_label.setToolTip(formula_text)
+        self.line_info_cost_sale_label.setText(cost_sale_text)
+        self.line_info_profit_label.setText(profit_text)
+        self.line_info_margin_label.setText(margin_text)
+
     def update_current_line_margin_indicator(self):
-        if not hasattr(self, "line_margin_label"):
+        if not hasattr(self, "line_info_formula_label"):
             return
 
         product_data = self.current_line_product_defaults or {}
+        formula = str(product_data.get("generic_name") or "").strip()
         cost_price = self._float_or_default(product_data.get("cost_price"), 0.0)
         sale_price = self._float_or_default(self.rate_edit.text(), 0.0)
+        formula_text = f"Formula: {formula}" if formula else "Formula: -"
 
         if cost_price <= 0:
-            self.line_margin_label.setText("Margin: no cost basis available")
-            self.line_margin_label.setStyleSheet(
-                "color: #6E7F8D; font-size: 10px; font-weight: 700; padding-left: 2px; margin: 0;"
+            self._set_line_info_labels(
+                formula_text=formula_text,
+                cost_sale_text=f"Cost: - | Sale: {sale_price:.2f}" if sale_price > 0 else "Cost: - | Sale: -",
+                profit_text="Profit: -",
+                margin_text=f"Margin: - (Target: {self.minimum_margin_percent:.0f}%)",
             )
             return
 
@@ -1440,24 +1929,19 @@ class CreateSalesWidget(QWidget):
         profit_amount = margin["profit_amount"]
 
         if margin_percent is None:
-            self.line_margin_label.setText(f"Cost: {cost_price:.2f} | Margin: waiting for price")
-            self.line_margin_label.setStyleSheet(
-                "color: #5C7080; font-size: 10px; font-weight: 700; padding-left: 2px; margin: 0;"
+            self._set_line_info_labels(
+                formula_text=formula_text,
+                cost_sale_text=f"Cost: {cost_price:.2f} | Sale: -",
+                profit_text="Profit: -",
+                margin_text=f"Margin: - (Target: {self.minimum_margin_percent:.0f}%)",
             )
             return
 
-        if margin_percent < self.minimum_margin_percent:
-            color = "#B33A3A"
-            status = f"Below {self.minimum_margin_percent:.0f}% target"
-        else:
-            color = "#356B43"
-            status = "Within target"
-
-        self.line_margin_label.setText(
-            f"Cost: {cost_price:.2f} | Profit: {profit_amount:.2f} | Margin: {margin_percent:.2f}% | {status}"
-        )
-        self.line_margin_label.setStyleSheet(
-            f"color: {color}; font-size: 10px; font-weight: 700; padding-left: 2px; margin: 0;"
+        self._set_line_info_labels(
+            formula_text=formula_text,
+            cost_sale_text=f"Cost: {cost_price:.2f} | Sale: {sale_price:.2f}",
+            profit_text=f"Profit: {profit_amount:.2f}",
+            margin_text=f"Margin: {margin_percent:.2f}% (Target: {self.minimum_margin_percent:.0f}%)",
         )
 
     def _sales_tax_policy_label(self):
@@ -1523,10 +2007,12 @@ class CreateSalesWidget(QWidget):
             self.tax.setText("0.00")
             self.line_discount_manual_override = False
             self.line_tax_manual_override = False
-            if hasattr(self, "line_margin_label"):
-                self.line_margin_label.setText("Margin: waiting for product selection")
-                self.line_margin_label.setStyleSheet(
-                    "color: #5C7080; font-size: 10px; font-weight: 700; padding-left: 2px; margin: 0;"
+            if hasattr(self, "line_info_formula_label"):
+                self._set_line_info_labels(
+                    formula_text="Formula: Waiting for product selection",
+                    cost_sale_text="Cost: - | Sale: -",
+                    profit_text="Profit: -",
+                    margin_text=f"Margin: - (Target: {self.minimum_margin_percent:.0f}%)",
                 )
             self.update_line_pricing_hint()
             self.update_line_total()
@@ -2317,6 +2803,8 @@ class CreateSalesWidget(QWidget):
     def insert_salesreceipt(self):
     
         try:
+            self.calculate_payment()
+            self.update_due_date_availability()
             # --- Collect Data ---
             customer_id = self.get_customer_id()
             salesman = self.get_salesman_id()
@@ -3654,6 +4142,16 @@ class CreateSalesWidget(QWidget):
         if isinstance(data, dict) and data.get("product_id"):
             self.qty_edit.setFocus()
             self.qty_edit.selectAll()
+            return
+
+        exact_product_id = self.find_sales_product_id_by_name(entered_text)
+        if exact_product_id is not None:
+            self.select_sales_product_by_id(exact_product_id)
+            self.qty_edit.setFocus()
+            self.qty_edit.selectAll()
+            return
+
+        self.open_sales_product_quick_add_dialog(entered_text)
 
     
     
@@ -3674,7 +4172,7 @@ class CreateSalesWidget(QWidget):
     def _sales_product_query_fn(self, search_text):
         query = QSqlQuery()
         query.prepare("""
-            SELECT p.id, p.display_name, pp.unit_price
+            SELECT p.id, p.display_name, COALESCE(p.generic_name, ''), COALESCE(pp.pack_size, 0), pp.unit_price
                  , COALESCE((
                     SELECT b.unit_cost
                     FROM batch b
@@ -3723,20 +4221,25 @@ class CreateSalesWidget(QWidget):
         while query.next():
             product_id = query.value(0)
             name = str(query.value(1)).strip()
-            unit_price = query.value(2) or 0.0
-            cost_price = query.value(3) or 0.0
-            discount_group_id = int(query.value(4) or 0) or None
-            discount_percent = query.value(5) or 0.0
-            discount_group_name = str(query.value(6) or "").strip()
-            discount_fixed_amount = query.value(7) or 0.0
-            discount_apply_on_sale = bool(int(query.value(8) or 0))
-            tax_group_id = int(query.value(9) or 0) or None
-            tax_percent = query.value(10) or 0.0
-            tax_fixed_amount = query.value(11) or 0.0
-            tax_apply_on_sale = bool(int(query.value(12) or 0))
-            tax_group_name = str(query.value(13) or "").strip()
-            results.append((name, {
+            generic_name = str(query.value(2) or "").strip()
+            visible_name = ProductSearchBox.format_product_label(name, query.value(3))
+            unit_price = query.value(4) or 0.0
+            cost_price = query.value(5) or 0.0
+            discount_group_id = int(query.value(6) or 0) or None
+            discount_percent = query.value(7) or 0.0
+            discount_group_name = str(query.value(8) or "").strip()
+            discount_fixed_amount = query.value(9) or 0.0
+            discount_apply_on_sale = bool(int(query.value(10) or 0))
+            tax_group_id = int(query.value(11) or 0) or None
+            tax_percent = query.value(12) or 0.0
+            tax_fixed_amount = query.value(13) or 0.0
+            tax_apply_on_sale = bool(int(query.value(14) or 0))
+            tax_group_name = str(query.value(15) or "").strip()
+            results.append((visible_name, {
                 "product_id": product_id,
+                "display_name": name,
+                "visible_name": visible_name,
+                "generic_name": generic_name,
                 "unit_price": unit_price,
                 "cost_price": cost_price,
                 "discount_group_id": discount_group_id,
@@ -3751,6 +4254,114 @@ class CreateSalesWidget(QWidget):
                 "tax_group_name": tax_group_name,
             }))
         return results
+
+    def _fetch_sales_product_data(self, product_id):
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT p.id, p.display_name, COALESCE(p.generic_name, ''), COALESCE(pp.pack_size, 0), pp.unit_price
+                 , COALESCE((
+                    SELECT b.unit_cost
+                    FROM batch b
+                    WHERE b.product_id = p.id
+                      AND b.unit_cost IS NOT NULL
+                      AND b.unit_cost > 0
+                    ORDER BY b.id DESC
+                    LIMIT 1
+                 ), COALESCE((
+                    SELECT pi.rate
+                    FROM purchaseitem pi
+                    JOIN purchase pu ON pu.id = pi.purchase
+                    WHERE pi.product = p.id
+                    ORDER BY pu.id DESC, pi.id DESC
+                    LIMIT 1
+                 ), 0))
+                 , COALESCE(dg.id, 0)
+                 , COALESCE(dg.discount_percent, 0)
+                 , COALESCE(dg.name, '')
+                 , COALESCE(dg.fixed_amount, 0)
+                 , COALESCE(dg.apply_on_sale, 1)
+                 , COALESCE(tg.id, 0)
+                 , CASE WHEN COALESCE(tg.apply_on_sale, 1) = 1 THEN COALESCE(tg.tax_percent, 0) ELSE 0 END
+                 , COALESCE(tg.fixed_amount, 0)
+                 , COALESCE(tg.apply_on_sale, 1)
+                 , COALESCE(tg.name, '')
+            FROM product p
+            LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
+            LEFT JOIN tax_group tg ON tg.id = p.tax_group_id
+            LEFT JOIN price_pack pp ON pp.id = (
+                SELECT id
+                FROM price_pack
+                WHERE product_id = p.id
+                ORDER BY is_default DESC, id DESC
+                LIMIT 1
+            )
+            WHERE p.id = ?
+            LIMIT 1
+        """)
+        query.addBindValue(int(product_id))
+        if not query.exec() or not query.next():
+            return None
+
+        name = str(query.value(1) or "").strip()
+        visible_name = ProductSearchBox.format_product_label(name, query.value(3))
+        return {
+            "product_id": int(query.value(0)),
+            "display_name": name,
+            "visible_name": visible_name,
+            "generic_name": str(query.value(2) or "").strip(),
+            "unit_price": float(query.value(4) or 0.0),
+            "cost_price": float(query.value(5) or 0.0),
+            "discount_group_id": int(query.value(6) or 0) or None,
+            "discount_percent": float(query.value(7) or 0.0),
+            "discount_group_name": str(query.value(8) or "").strip(),
+            "discount_fixed_amount": float(query.value(9) or 0.0),
+            "discount_apply_on_sale": bool(int(query.value(10) or 0)),
+            "tax_group_id": int(query.value(11) or 0) or None,
+            "tax_percent": float(query.value(12) or 0.0),
+            "tax_fixed_amount": float(query.value(13) or 0.0),
+            "tax_apply_on_sale": bool(int(query.value(14) or 0)),
+            "tax_group_name": str(query.value(15) or "").strip(),
+        }
+
+    def find_sales_product_id_by_name(self, display_name):
+        query = QSqlQuery()
+        query.prepare("""
+            SELECT id
+            FROM product
+            WHERE LOWER(TRIM(display_name)) = LOWER(TRIM(?))
+            LIMIT 1
+        """)
+        query.addBindValue(str(display_name or "").strip())
+        if query.exec() and query.next():
+            return int(query.value(0))
+        return None
+
+    def select_sales_product_by_id(self, product_id):
+        product_data = self._fetch_sales_product_data(product_id)
+        if not product_data:
+            return False
+
+        visible_name = product_data.get("visible_name") or product_data.get("display_name") or ""
+        self.item.blockSignals(True)
+        self.item.clear()
+        self.item.addItem(visible_name, product_data)
+        self.item.setCurrentIndex(0)
+        if self.item.isEditable():
+            self.item.lineEdit().setText(visible_name)
+        self.item.blockSignals(False)
+
+        self.on_completer_selected(visible_name, self.item, product_data)
+        return True
+
+    def open_sales_product_quick_add_dialog(self, initial_name=""):
+        dialog = SalesQuickProductDialog(self, initial_name=initial_name)
+        if dialog.exec() != QDialog.Accepted or not dialog.saved_product_id:
+            return
+
+        if self.select_sales_product_by_id(dialog.saved_product_id):
+            self.qty_edit.setFocus()
+            self.qty_edit.selectAll()
+
     def on_completer_selected(self, text, combo, selected_data=None):
         
         index = combo.findText(text.strip(), Qt.MatchExactly)
@@ -3899,7 +4510,10 @@ class CreateSalesWidget(QWidget):
 
         self.net_amount_entry.setText(f"{net_amount:.2f}")
 
-        if self.additional_entry.text().strip() != f"{additional_charges:.2f}":
+        if (
+            not self.additional_entry.hasFocus()
+            and self.additional_entry.text().strip() != f"{additional_charges:.2f}"
+        ):
             self.additional_entry.blockSignals(True)
             self.additional_entry.setText(f"{additional_charges:.2f}")
             self.additional_entry.blockSignals(False)
@@ -3914,7 +4528,16 @@ class CreateSalesWidget(QWidget):
         self.final_amount_entry.setStyleSheet("font-weight: bold;")
         
         self.main_final_amount.setText(f"{final_amount:.2f}")
+        self.calculate_payment()
+        self.update_due_date_availability()
         self.refresh_customer_pricing_summary()
+
+    def on_additional_entry_finished(self):
+        additional_charges = self._float_or_default(self.additional_entry.text(), 0.0)
+        self.additional_entry.blockSignals(True)
+        self.additional_entry.setText(f"{additional_charges:.2f}")
+        self.additional_entry.blockSignals(False)
+        self.update_total_amount()
         
     def build_hold_row_product_data(self, product_id):
         query = QSqlQuery()
@@ -4863,6 +5486,11 @@ class CreateSalesWidget(QWidget):
     def compute_due_date(self):
         """Compute due date based on selected days from combo box"""
         return compute_due_date_from_option(self.due_date_combo.currentText())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "line_info_formula_label"):
+            QTimer.singleShot(0, self.update_current_line_margin_indicator)
 
     
     

@@ -742,6 +742,7 @@ class InventoryAdjustmentDialog(QDialog):
         self.product_selector = QComboBox()
         self.product_selector.setEditable(True)
         self.product_selector.setInsertPolicy(QComboBox.NoInsert)
+        self.product_selector.lineEdit().setPlaceholderText("Select product")
         self.product_selector.currentIndexChanged.connect(self.load_batches_for_selected_product)
 
         filter_row.addWidget(product_label)
@@ -789,7 +790,6 @@ class InventoryAdjustmentDialog(QDialog):
     def populate_product_selector(self):
         self.product_selector.blockSignals(True)
         self.product_selector.clear()
-        self.product_selector.addItem("Select a product...", None)
         try:
             product_rows = fetch_adjustable_products()
         except Exception as exc:
@@ -800,6 +800,9 @@ class InventoryAdjustmentDialog(QDialog):
         for row in product_rows:
             self.product_selector.addItem(row["display_name"], row["product_id"])
 
+        self.product_selector.setCurrentIndex(-1)
+        if self.product_selector.lineEdit() is not None:
+            self.product_selector.lineEdit().clear()
         self.product_selector.blockSignals(False)
 
     def get_selected_product_id(self):

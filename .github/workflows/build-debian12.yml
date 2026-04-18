@@ -1,51 +1,31 @@
-name: Build PyInstaller App (Ubuntu 24.04)
+name: Build PyInstaller App (Debian 12)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     defaults:
       run:
         shell: bash
 
+    container:
+      image: debian:12
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libglib2.0-0 \
-            libgl1-mesa-glx \
-            libxkbcommon-x11-0 \
-            libdbus-1-3 \
-            libxcb-icccm4 \
-            libxcb-image0 \
-            libxcb-keysyms1 \
-            libxcb-randr0 \
-            libxcb-render-util0 \
-            libxcb-shape0 \
-            libxcb-xfixes0 \
-            libxcb-sync1 \
-            libxcb-xinerama0 \
-            libxcb-xinput0 \
-            libx11-xcb1 \
-            patchelf \
-            libxcb-cursor0
+          apt-get update
+          apt-get install -y python3.11 python3.11-venv python3-pip python3-dev build-essential libglib2.0-0 libgl1-mesa-glx libxkbcommon-x11-0 libdbus-1-3 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 libxcb-sync1 libxcb-xinerama0 libxcb-xinput0 libx11-xcb1 patchelf libxcb-cursor0
 
       - name: Create and activate virtual environment
         run: |
-          python -m venv venv
+          python3.11 -m venv venv
           . venv/bin/activate
           python -m pip install --upgrade pip setuptools wheel
 
@@ -56,7 +36,7 @@ jobs:
 
       - name: Ensure public key exists
         run: |
-          python - <<'PY'
+          python3.11 - <<'PY'
           import json
           from pathlib import Path
           path = Path("licensing/public_key.json")
@@ -104,5 +84,5 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: procure-medics-ubuntu24
+          name: procure-medics-debian12
           path: dist/
