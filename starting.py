@@ -74,8 +74,11 @@ class AuthWindow(QMainWindow):
         install_dialog_scrolling()
         self.settings = QSettings("procure", "procure_medics")  # unique identifiers
         self._login_attempt_state = {}
-        
-        check_xcb_support()
+
+        # This compatibility probe shells out to ldd and is only useful for
+        # diagnosing broken Linux client environments.
+        if os.environ.get("PROCURE_DEBUG_XCB_CHECK") == "1":
+            check_xcb_support()
         
         self.close()
         
@@ -339,7 +342,10 @@ class AuthWindow(QMainWindow):
             conn = sqlite3.connect(db_path)
             cur = conn.cursor()
 
-            cur.execute("PRAGMA integrity_check")
+            # quick_check is dramatically cheaper than integrity_check and is
+            # enough for normal startup validation. Recovery mode still exists
+            # for deeper repair workflows if corruption is suspected.
+            cur.execute("PRAGMA quick_check")
             result = cur.fetchone()
             integrity = str((result[0] if result else "") or "")
             if integrity.lower() != "ok":
@@ -559,7 +565,6 @@ class AuthWindow(QMainWindow):
 
     
     def required_tables_exist(self):
-        self.create_expense_table()
         required_tables = [
             "expense",
             "supplier_transaction",
@@ -577,6 +582,11 @@ class AuthWindow(QMainWindow):
                 return False
 
         return True
+
+    def _ensure_table_exists(self, table_name, builder):
+        if self.table_exists(table_name):
+            return True
+        return builder()
     
     def create_schema_tables(self):
         table_builders = [
@@ -632,22 +642,30 @@ class AuthWindow(QMainWindow):
         
         if self.required_tables_exist():
             print("Tables already exist. Skipping creation.")
-            self.create_discount_group_table()
-            self.create_tax_group_table()
-            self.create_purchase_draft_table()
-            self.create_purchase_draft_item_table()
-            self.create_purchase_order_table()
-            self.create_purchase_order_line_table()
-            self.create_goods_receipt_table()
-            self.create_goods_receipt_line_table()
-            self.create_grn_draft_table()
-            self.create_grn_draft_item_table()
-            self.create_price_pack_table()
-            self.create_price_changes_table()
-            self.create_activity_log_table()
+
+            table_builders = [
+                ("discount_group", self.create_discount_group_table),
+                ("tax_group", self.create_tax_group_table),
+                ("purchase_draft", self.create_purchase_draft_table),
+                ("purchase_draft_item", self.create_purchase_draft_item_table),
+                ("purchase_order", self.create_purchase_order_table),
+                ("purchase_order_line", self.create_purchase_order_line_table),
+                ("goods_receipt", self.create_goods_receipt_table),
+                ("goods_receipt_line", self.create_goods_receipt_line_table),
+                ("grn_draft", self.create_grn_draft_table),
+                ("grn_draft_item", self.create_grn_draft_item_table),
+                ("price_pack", self.create_price_pack_table),
+                ("price_changes", self.create_price_changes_table),
+                ("activity_log", self.create_activity_log_table),
+                ("customer", self.create_customer_table),
+            ]
+
+            for table_name, builder in table_builders:
+                if self._ensure_table_exists(table_name, builder) is False:
+                    return
+
             self.seed_discount_group_table()
             self.seed_tax_group_table()
-            self.create_customer_table()
             self.apply_runtime_schema_migrations()
             self._startup_seed_summary = self.ensure_catalog_seeded()
             return

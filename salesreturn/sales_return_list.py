@@ -5,6 +5,7 @@ from functools import partial
 
 
 from utilities.stylus import load_stylesheets
+from utilities.table_helpers import centered_cell_widget, style_table_action_button
 
 
 
@@ -27,9 +28,12 @@ class SalesReturnListWidget(QWidget):
 
         heading = QLabel("Sales Return List", objectName='SectionTitle')
         self.addSalesReturn = QPushButton('Add Sales Return', objectName='TopRightButton')
+        self.addSalesReturn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
         grid_layout.addWidget(heading, 0,0)
         grid_layout.addWidget(self.addSalesReturn, 0,2)
+        grid_layout.setColumnStretch(1, 1)
+        grid_layout.setAlignment(self.addSalesReturn, Qt.AlignRight | Qt.AlignVCenter)
 
         layout.addWidget(grid_widget)
 
@@ -140,15 +144,8 @@ class SalesReturnListWidget(QWidget):
             self.table.setItem(row, 2, QTableWidgetItem(salesman))
             self.table.setItem(row, 3, QTableWidgetItem(creation))
 
-            detail = QPushButton('Details')
-            detail.setStyleSheet("""
-                    background-color: #777;
-                    color: blue;              
-                    font-weight: 600;
-                
-            """)
-            
-            self.table.setCellWidget(row, 4, detail)
+            detail = style_table_action_button(QPushButton('Details'))
+            self.table.setCellWidget(row, 4, centered_cell_widget(detail))
             detail.clicked.connect(partial(self.detailpagesignal.emit, id))
             
             row += 1
@@ -159,4 +156,3 @@ class SalesReturnListWidget(QWidget):
 
             
         
-

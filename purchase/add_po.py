@@ -3,9 +3,12 @@ from PySide6.QtWidgets import (
     QComboBox, QTableWidget, QTableWidgetItem, QFrame, QHeaderView,
     QSizePolicy, QGridLayout, QCheckBox, QDialog
 )
-from PySide6.QtCore import Qt, Signal, QDate
+from PySide6.QtCore import Qt, Signal, QDate, QRectF
 from PySide6.QtSql import QSqlQuery, QSqlDatabase
-from PySide6.QtGui import QColor, QKeySequence, QShortcut, QIntValidator, QDoubleValidator
+from PySide6.QtGui import QColor, QKeySequence, QShortcut, QIntValidator, QDoubleValidator, QPdfWriter, QPainter, QPageSize, QFont, QTextOption, QPen
+import os
+import platform
+import subprocess
 from utilities.stylus import load_stylesheets
 from utilities.activity_logger import log_activity
 from utilities.session_gate import require_open_session
@@ -261,47 +264,57 @@ class AddPOWidget(QWidget):
         header_layout2.setContentsMargins(10, 10, 10, 10)
         header_layout2.setSpacing(10)
 
-        row1 = QHBoxLayout()
+        header_grid = QGridLayout()
+        header_grid.setContentsMargins(0, 0, 0, 0)
+        header_grid.setHorizontalSpacing(12)
+        header_grid.setVerticalSpacing(10)
+
         supplier_label = QLabel("Supplier")
         supplier_label.setStyleSheet("font-weight: 600;")
         self.supplier_combo = QComboBox()
+        self.supplier_combo.setEditable(True)
+        self.supplier_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.supplier_combo.setLineEdit(SelectAllLineEdit())
         self.supplier_combo.setPlaceholderText("Select supplier")
         self.load_suppliers()
-        row1.addWidget(supplier_label, 1)
-        row1.addWidget(self.supplier_combo, 2)
+        if self.supplier_combo.lineEdit() is not None:
+            self.supplier_combo.lineEdit().editingFinished.connect(self.handle_supplier_enter)
+        header_grid.addWidget(supplier_label, 0, 0)
+        header_grid.addWidget(self.supplier_combo, 0, 1)
 
         po_number_label = QLabel("PO Number")
         po_number_label.setStyleSheet("font-weight: 600;")
         self.po_number_edit = QLineEdit()
         self.po_number_edit.setPlaceholderText("Auto-generated (PO-1001+) or enter manually")
-        row1.addWidget(po_number_label, 1)
-        row1.addWidget(self.po_number_edit, 2)
+        header_grid.addWidget(po_number_label, 0, 2)
+        header_grid.addWidget(self.po_number_edit, 0, 3)
 
         po_date_label = QLabel("PO Date")
         po_date_label.setStyleSheet("font-weight: 600;")
         self.po_date = QDateEdit()
         self.po_date.setCalendarPopup(True)
         self.po_date.setDate(QDate.currentDate())
-        row1.addWidget(po_date_label, 1)
-        row1.addWidget(self.po_date, 2)
-        header_layout2.addLayout(row1)
+        header_grid.addWidget(po_date_label, 0, 4)
+        header_grid.addWidget(self.po_date, 0, 5)
 
-        row2 = QHBoxLayout()
         delivery_label = QLabel("Expected Delivery Date")
         delivery_label.setStyleSheet("font-weight: 600;")
         self.delivery_date = QDateEdit()
         self.delivery_date.setCalendarPopup(True)
         self.delivery_date.setDate(QDate.currentDate().addDays(7))
-        row2.addWidget(delivery_label, 1)
-        row2.addWidget(self.delivery_date, 2)
+        header_grid.addWidget(delivery_label, 1, 0)
+        header_grid.addWidget(self.delivery_date, 1, 1, 1, 3)
 
         notes_label = QLabel("Notes")
         notes_label.setStyleSheet("font-weight: 600;")
         self.notes_edit = QLineEdit()
         self.notes_edit.setPlaceholderText("Any special instructions...")
-        row2.addWidget(notes_label, 1)
-        row2.addWidget(self.notes_edit, 2)
-        header_layout2.addLayout(row2)
+        header_grid.addWidget(notes_label, 1, 4)
+        header_grid.addWidget(self.notes_edit, 1, 5)
+        header_grid.setColumnStretch(1, 3)
+        header_grid.setColumnStretch(3, 3)
+        header_grid.setColumnStretch(5, 3)
+        header_layout2.addLayout(header_grid)
         self.layout.addWidget(header_frame)
 
         # === Line Items Section (entry line + table) ===
@@ -326,16 +339,22 @@ class AddPOWidget(QWidget):
         action_layout = QHBoxLayout()
         action_layout.addStretch()
         self.save_btn = QPushButton("Save PO")
-        self.save_btn.setObjectName("TopRightButton")
+        self.save_btn.setObjectName("SaveButton")
         self.save_btn.setCursor(Qt.PointingHandCursor)
         self.save_btn.setFixedWidth(150)
         self.save_btn.clicked.connect(self.save_po)
+        self.save_print_btn = QPushButton("Save & Print")
+        self.save_print_btn.setObjectName("TopRightButton")
+        self.save_print_btn.setCursor(Qt.PointingHandCursor)
+        self.save_print_btn.setFixedWidth(150)
+        self.save_print_btn.clicked.connect(self.save_po_and_print)
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.setObjectName("CancelButton")
+        cancel_btn.setObjectName("TopRightButton")
         cancel_btn.setCursor(Qt.PointingHandCursor)
         cancel_btn.setFixedWidth(150)
         cancel_btn.clicked.connect(self.on_back_clicked)
         action_layout.addWidget(self.save_btn)
+        action_layout.addWidget(self.save_print_btn)
         action_layout.addWidget(cancel_btn)
         self.layout.addLayout(action_layout)
         self.layout.addStretch()
@@ -343,6 +362,98 @@ class AddPOWidget(QWidget):
         self.setStyleSheet(load_stylesheets())
         QShortcut(QKeySequence("Ctrl+Return"), self, activated=self.save_po)
         QShortcut(QKeySequence("Ctrl+Enter"), self, activated=self.save_po)
+
+    def open_supplier_dialog(self, initial_name=""):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add Supplier")
+        dialog.setMinimumWidth(350)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+
+        title = QLabel("New Supplier")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        name_label = QLabel("Supplier Name")
+        name_edit = QLineEdit()
+        name_edit.setPlaceholderText("Enter supplier name")
+        name_edit.setText(str(initial_name or "").strip())
+
+        contact_label = QLabel("Contact")
+        contact_edit = QLineEdit()
+        contact_edit.setPlaceholderText("Enter contact")
+
+        layout.addWidget(name_label)
+        layout.addWidget(name_edit)
+        layout.addWidget(contact_label)
+        layout.addWidget(contact_edit)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        save_btn = QPushButton("Save")
+        cancel_btn = QPushButton("Cancel")
+
+        btn_row.addWidget(save_btn)
+        btn_row.addWidget(cancel_btn)
+        layout.addLayout(btn_row)
+
+        def save_supplier():
+            name = name_edit.text().strip()
+            contact = contact_edit.text().strip()
+
+            if not name:
+                AppMessageBox.warning(dialog, "Validation Error", "Supplier name is required.")
+                return
+
+            query = QSqlQuery()
+            query.prepare("""
+                INSERT INTO supplier (
+                    name,
+                    contact
+                )
+                VALUES (?, ?)
+            """)
+            query.addBindValue(name)
+            query.addBindValue(contact if contact else None)
+
+            if not query.exec():
+                AppMessageBox.critical(
+                    dialog,
+                    "Database Error",
+                    f"Failed to save supplier:\n{query.lastError().text()}"
+                )
+                return
+
+            supplier_id = query.lastInsertId()
+            try:
+                supplier_id = int(supplier_id)
+            except Exception:
+                supplier_id = None
+
+            AppMessageBox.information(dialog, "Success", "Supplier added successfully.")
+            dialog.accept()
+            self.load_suppliers(selected_supplier_id=supplier_id)
+
+        save_btn.clicked.connect(save_supplier)
+        cancel_btn.clicked.connect(dialog.reject)
+        name_edit.setFocus()
+        name_edit.selectAll()
+        dialog.exec()
+
+    def handle_supplier_enter(self):
+        typed_name = str(self.supplier_combo.currentText() or "").strip()
+        if not typed_name:
+            return
+
+        for index in range(self.supplier_combo.count()):
+            if str(self.supplier_combo.itemText(index) or "").strip().lower() == typed_name.lower():
+                self.supplier_combo.setCurrentIndex(index)
+                return
+
+        self.open_supplier_dialog(typed_name)
 
     # ─────────────────────────────────────────────────────────────
     # UI builders
@@ -886,13 +997,21 @@ class AddPOWidget(QWidget):
     # DB helpers
     # ─────────────────────────────────────────────────────────────
 
-    def load_suppliers(self):
+    def load_suppliers(self, selected_supplier_id=None):
+        self.supplier_combo.clear()
         query = QSqlQuery()
         if not query.exec("SELECT id, name FROM supplier ORDER BY name ASC"):
             print("Error loading suppliers:", query.lastError().text())
             return
         while query.next():
             self.supplier_combo.addItem(str(query.value(1)), query.value(0))
+        if self.supplier_combo.count() > 0:
+            target_index = 0
+            if selected_supplier_id is not None:
+                found_index = self.supplier_combo.findData(selected_supplier_id)
+                if found_index >= 0:
+                    target_index = found_index
+            self.supplier_combo.setCurrentIndex(target_index)
 
     def get_next_po_number(self):
         return fetch_next_purchase_order_number()
@@ -920,6 +1039,167 @@ class AddPOWidget(QWidget):
 
     @Permissions.require_permission('po.create')
     def save_po(self):
+        self._save_po(print_after=False)
+
+    @Permissions.require_permission('po.create')
+    def save_po_and_print(self):
+        self._save_po(print_after=True)
+
+    def export_po_pdf(self, po_id, filename="purchase_order.pdf"):
+        business_name = "Business"
+        business_address = "-"
+        business_contact = "-"
+
+        business_query = QSqlQuery()
+        business_query.prepare("""
+            SELECT businessname, address, contact
+            FROM business
+            WHERE id = 1
+            LIMIT 1
+        """)
+        if business_query.exec() and business_query.next():
+            business_name = str(business_query.value(0) or business_name)
+            business_address = str(business_query.value(1) or business_address)
+            business_contact = str(business_query.value(2) or business_contact)
+
+        header_query = QSqlQuery()
+        header_query.prepare("""
+            SELECT
+                po.po_number,
+                po.po_date,
+                po.expected_delivery_date,
+                po.total_value,
+                po.notes,
+                COALESCE(s.name, 'Unknown Supplier')
+            FROM purchase_order po
+            LEFT JOIN supplier s ON s.id = po.supplier
+            WHERE po.id = ?
+            LIMIT 1
+        """)
+        header_query.addBindValue(int(po_id))
+        if not header_query.exec() or not header_query.next():
+            raise Exception(f"Failed to load PO header: {header_query.lastError().text()}")
+
+        po_number = str(header_query.value(0) or "")
+        po_date = str(header_query.value(1) or "")
+        expected_delivery = str(header_query.value(2) or "")
+        total_value = float(header_query.value(3) or 0.0)
+        notes = str(header_query.value(4) or "").strip()
+        supplier_name = str(header_query.value(5) or "Unknown Supplier")
+
+        line_query = QSqlQuery()
+        line_query.prepare("""
+            SELECT
+                p.display_name,
+                pol.qty_ordered,
+                pol.unit_price,
+                pol.total_price
+            FROM purchase_order_line pol
+            JOIN product p ON p.id = pol.product
+            WHERE pol.po_id = ?
+            ORDER BY pol.id ASC
+        """)
+        line_query.addBindValue(int(po_id))
+        if not line_query.exec():
+            raise Exception(f"Failed to load PO line items: {line_query.lastError().text()}")
+
+        items = []
+        while line_query.next():
+            items.append(
+                (
+                    str(line_query.value(0) or ""),
+                    float(line_query.value(1) or 0.0),
+                    float(line_query.value(2) or 0.0),
+                    float(line_query.value(3) or 0.0),
+                )
+            )
+
+        pdf = QPdfWriter(filename)
+        pdf.setPageSize(QPageSize(QPageSize.A4))
+        pdf.setResolution(300)
+
+        painter = QPainter(pdf)
+        painter.setPen(Qt.black)
+
+        x = 100
+        y = 200
+
+        painter.setFont(QFont("Arial", 16, QFont.Bold))
+        painter.drawText(x, y, business_name)
+
+        y += 80
+        painter.setFont(QFont("Arial", 12))
+        painter.drawText(x, y, business_address)
+        y += 70
+        painter.drawText(x, y, business_contact)
+
+        painter.setFont(QFont("Arial", 30, QFont.Bold))
+        painter.drawText(1550, 230, "Purchase Order")
+
+        painter.setFont(QFont("Arial", 12))
+        right_option = QTextOption()
+        right_option.setAlignment(Qt.AlignRight)
+        painter.drawText(QRectF(1550, 250, 650, 100), f"# {po_number}", right_option)
+        painter.drawText(QRectF(1550, 320, 650, 100), po_date, right_option)
+
+        y += 150
+        painter.setFont(QFont("Arial", 12, QFont.Bold))
+        painter.drawText(x, y, f"Supplier: {supplier_name}")
+        y += 70
+        painter.setFont(QFont("Arial", 11))
+        painter.drawText(x, y, f"Expected Delivery: {expected_delivery}")
+
+        y += 70
+        pen = QPen(QColor("black"))
+        pen.setWidth(4)
+        painter.setPen(pen)
+        painter.drawLine(x, y, pdf.width() - 200, y)
+
+        y += 70
+        painter.setFont(QFont("Arial", 11, QFont.Bold))
+        painter.drawText(x + 20, y, "Item")
+        painter.drawText(x + 1100, y, "Qty")
+        painter.drawText(x + 1450, y, "Unit Price")
+        painter.drawText(x + 1850, y, "Total")
+
+        y += 40
+        painter.drawLine(x, y, pdf.width() - 200, y)
+        y += 90
+
+        painter.setFont(QFont("Arial", 11))
+        for product_name, qty_ordered, unit_price, total_price in items:
+            painter.drawText(x + 20, y, product_name)
+            painter.drawText(x + 1100, y, f"{qty_ordered:g}")
+            painter.drawText(x + 1450, y, f"{unit_price:.2f}")
+            painter.drawText(x + 1850, y, f"{total_price:.2f}")
+            y += 80
+
+        y += 30
+        painter.drawLine(x + 1450, y, pdf.width() - 200, y)
+        y += 80
+        painter.setFont(QFont("Arial", 14, QFont.Bold))
+        painter.drawText(x + 1450, y, "Total Value:")
+        painter.drawText(x + 1900, y, f"{total_value:.2f}")
+
+        if notes:
+            y += 120
+            painter.setFont(QFont("Arial", 11, QFont.Bold))
+            painter.drawText(x, y, "Notes:")
+            y += 55
+            painter.setFont(QFont("Arial", 11))
+            painter.drawText(QRectF(x, y, pdf.width() - 300, 220), notes)
+
+        painter.end()
+        return filename
+
+    def print_pdf(self, filename):
+        system = platform.system()
+        if system in ("Linux", "Darwin"):
+            subprocess.run(["lp", filename], check=False)
+        elif system == "Windows":
+            os.startfile(filename, "print")
+
+    def _save_po(self, print_after=False):
         if not require_open_session(self):
             return
         if self.supplier_combo.currentIndex() < 0:
@@ -980,7 +1260,24 @@ class AddPOWidget(QWidget):
             except Exception as e:
                 print("Activity log failed (non-blocking):", e)
 
-            AppMessageBox.success(self, "Success", f"Purchase Order {po_number} created successfully.")
+            print_warning = None
+            if print_after:
+                try:
+                    filename = self.export_po_pdf(po_id, filename=f"purchase_order_{po_id}.pdf")
+                    self.print_pdf(filename)
+                except Exception as exc:
+                    print_warning = str(exc)
+
+            success_message = f"Purchase Order {po_number} created successfully."
+            if print_after and not print_warning:
+                success_message += "\n\nThe PO was also sent for printing."
+            AppMessageBox.success(self, "Success", success_message)
+            if print_warning:
+                AppMessageBox.warning(
+                    self,
+                    "Print Warning",
+                    f"Purchase Order was saved, but printing failed:\n{print_warning}"
+                )
             self.clear_form()
             self.po_list_signal.emit()
 

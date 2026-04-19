@@ -60,6 +60,9 @@ class SelectAllLineEdit(QLineEdit):
         super().__init__(parent)
         self._select_on_release = False
 
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+
     def mousePressEvent(self, event):
         if not self.hasFocus():
             self._select_on_release = True
@@ -186,6 +189,12 @@ class AddPurchaseWidget(QWidget):
         self.invoice_edit = QLineEdit()
 
         # Optional placeholders
+        self.supplier_edit.setEditable(True)
+        self.supplier_edit.setInsertPolicy(QComboBox.NoInsert)
+        self.supplier_edit.setLineEdit(SelectAllLineEdit())
+        self.rep_edit.setEditable(True)
+        self.rep_edit.setInsertPolicy(QComboBox.NoInsert)
+        self.rep_edit.setLineEdit(SelectAllLineEdit())
         self.supplier_edit.setPlaceholderText("Select supplier")
         self.rep_edit.setPlaceholderText("Select rep")
         self.invoice_edit.setPlaceholderText("Invoice number")
@@ -255,7 +264,7 @@ class AddPurchaseWidget(QWidget):
     
         
 
-    def open_supplier_dialog(self):
+    def open_supplier_dialog(self, initial_name=""):
         
         dialog = QDialog(self)
         dialog.setWindowTitle("Add Supplier")
@@ -272,6 +281,7 @@ class AddPurchaseWidget(QWidget):
         name_label = QLabel("Supplier Name")
         name_edit = QLineEdit()
         name_edit.setPlaceholderText("Enter supplier name")
+        name_edit.setText(str(initial_name or "").strip())
 
         contact_label = QLabel("Contact")
         contact_edit = QLineEdit()
@@ -335,11 +345,14 @@ class AddPurchaseWidget(QWidget):
         save_btn.clicked.connect(save_supplier)
         cancel_btn.clicked.connect(dialog.reject)
 
+        name_edit.setFocus()
+        name_edit.selectAll()
+
         dialog.exec()
 
 
 
-    def open_rep_dialog(self):
+    def open_rep_dialog(self, initial_name=""):
         dialog = QDialog(self)
         dialog.setWindowTitle("Add Sales Rep")
         dialog.setMinimumWidth(380)
@@ -366,9 +379,16 @@ class AddPurchaseWidget(QWidget):
             supplier_name = query.value(1)
             supplier_combo.addItem(f"{supplier_id} - {supplier_name}", supplier_id)
 
+        current_supplier_id = self.supplier_edit.currentData()
+        if current_supplier_id is not None:
+            found_index = supplier_combo.findData(current_supplier_id)
+            if found_index >= 0:
+                supplier_combo.setCurrentIndex(found_index)
+
         name_label = QLabel("Rep Name")
         name_edit = QLineEdit()
         name_edit.setPlaceholderText("Enter rep name")
+        name_edit.setText(str(initial_name or "").strip())
 
         contact_label = QLabel("Contact")
         contact_edit = QLineEdit()
@@ -442,6 +462,8 @@ class AddPurchaseWidget(QWidget):
                 
         save_btn.clicked.connect(save_rep)
         cancel_btn.clicked.connect(dialog.reject)
+        name_edit.setFocus()
+        name_edit.selectAll()
 
         dialog.exec()
     
@@ -452,7 +474,44 @@ class AddPurchaseWidget(QWidget):
     
     def setup_supplier_rep_signals(self):
         
-        self.supplier_edit.currentIndexChanged.connect(self.populate_reps)    
+        self.supplier_edit.currentIndexChanged.connect(self.populate_reps)
+        if self.supplier_edit.lineEdit() is not None:
+            try:
+                self.supplier_edit.lineEdit().editingFinished.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            self.supplier_edit.lineEdit().editingFinished.connect(self.handle_supplier_enter)
+        if self.rep_edit.lineEdit() is not None:
+            try:
+                self.rep_edit.lineEdit().editingFinished.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            self.rep_edit.lineEdit().editingFinished.connect(self.handle_rep_enter)
+
+    def handle_supplier_enter(self):
+        typed_name = str(self.supplier_edit.currentText() or "").strip()
+        if not typed_name:
+            return
+
+        for index in range(self.supplier_edit.count()):
+            if str(self.supplier_edit.itemText(index) or "").strip().lower() == typed_name.lower():
+                self.supplier_edit.setCurrentIndex(index)
+                self.populate_reps()
+                return
+
+        self.open_supplier_dialog(typed_name)
+
+    def handle_rep_enter(self):
+        typed_name = str(self.rep_edit.currentText() or "").strip()
+        if not typed_name:
+            return
+
+        for index in range(self.rep_edit.count()):
+            if str(self.rep_edit.itemText(index) or "").strip().lower() == typed_name.lower():
+                self.rep_edit.setCurrentIndex(index)
+                return
+
+        self.open_rep_dialog(typed_name)
 
     def force_uppercase_line_edit(self, line_edit, text):
         cursor_pos = line_edit.cursorPosition()
@@ -1547,8 +1606,8 @@ class AddPurchaseWidget(QWidget):
         """)
         
         qty_edit = QLineEdit()
-        qty_edit.setReadOnly(True)
         qty_edit.setText(qty_data)
+        qty_edit.setPlaceholderText("qty")
         
         
         bonus_edit = QLineEdit()
@@ -1556,7 +1615,6 @@ class AddPurchaseWidget(QWidget):
         bonus_edit.setText(bonus_data)
         
         rate_edit = QLineEdit()
-        rate_edit.setReadOnly(True)
         rate_edit.setText(rate_data)
         
         batch_edit = QLineEdit()
@@ -1568,11 +1626,9 @@ class AddPurchaseWidget(QWidget):
         expiry_edit.setText(expiry_data)
         
         discount_edit = QLineEdit()
-        discount_edit.setReadOnly(True)
         discount_edit.setText(discount_data)
         
         tax_edit = QLineEdit()
-        tax_edit.setReadOnly(True)
         tax_edit.setText(tax_data)
         
         total_edit = QLineEdit()
@@ -1602,10 +1658,41 @@ class AddPurchaseWidget(QWidget):
         self.table.setCellWidget(row, 9, total_edit)
         self.table.setCellWidget(row, 10, remove_btn)
         
+        qty_edit.textChanged.connect(lambda _text, current_row=row: self._recalculate_purchase_table_row(current_row))
+        rate_edit.textChanged.connect(lambda _text, current_row=row: self._recalculate_purchase_table_row(current_row))
+        discount_edit.textChanged.connect(lambda _text, current_row=row: self._recalculate_purchase_table_row(current_row))
+        tax_edit.textChanged.connect(lambda _text, current_row=row: self._recalculate_purchase_table_row(current_row))
         
         
         remove_btn.clicked.connect(lambda _, r=row: self.remove_row(r))
         return row
+
+    def _recalculate_purchase_table_row(self, row):
+        qty_widget = self.table.cellWidget(row, 4)
+        rate_widget = self.table.cellWidget(row, 6)
+        discount_widget = self.table.cellWidget(row, 7)
+        tax_widget = self.table.cellWidget(row, 8)
+        total_widget = self.table.cellWidget(row, 9)
+
+        if not all([qty_widget, rate_widget, discount_widget, tax_widget, total_widget]):
+            return
+
+        qty_value = max(0.0, self._float_or_default(qty_widget.text(), 0.0))
+        rate_value = max(0.0, self._float_or_default(rate_widget.text(), 0.0))
+        discount_value = max(0.0, self._float_or_default(discount_widget.text(), 0.0))
+        tax_value = max(0.0, self._float_or_default(tax_widget.text(), 0.0))
+
+        subtotal = qty_value * rate_value
+        flat_discount = min(subtotal, (subtotal * discount_value) / 100.0)
+        taxable_amount = max(0.0, subtotal - flat_discount)
+        tax_amount = (taxable_amount * tax_value) / 100.0
+        total = taxable_amount + tax_amount
+
+        total_widget.setText(f"{total:.2f}")
+        self.update_total_amount()
+        self.calculate_payment()
+        self.update_due_date_availability()
+        self.schedule_purchase_draft_save()
 
     def add_row(self):
         
@@ -2953,23 +3040,25 @@ class ImportDialog(QDialog):
         
         super().__init__(parent)
         self.setWindowTitle("Add New Product")
-        self.resize(600, 332)
+        self.resize(600, 360)
         self.setMinimumWidth(560)
+        self.setMinimumHeight(348)
 
         self.layout = QVBoxLayout()
-        self.layout.setContentsMargins(14, 12, 14, 12)
-        self.layout.setSpacing(10)
+        self.layout.setContentsMargins(12, 12, 12, 12)
+        self.layout.setSpacing(8)
         self.indicators = {}
         self.insert_subheading("PRODUCT Does Not Exist... Add INFORMATION")
 
         self.form_card = QFrame()
         self.form_card.setObjectName("ImportProductCard")
         self.form_layout = QVBoxLayout(self.form_card)
-        self.form_layout.setContentsMargins(16, 14, 16, 14)
-        self.form_layout.setSpacing(10)
+        self.form_layout.setContentsMargins(10, 8, 10, 8)
+        self.form_layout.setSpacing(6)
 
         self.populate_product_fields()
         self.layout.addWidget(self.form_card)
+        self.layout.setStretchFactor(self.form_card, 1)
 
         self.setLayout(self.layout)
         
@@ -2977,8 +3066,8 @@ class ImportDialog(QDialog):
         self.footer_card = QFrame()
         self.footer_card.setObjectName("ImportDialogFooter")
         self.footer_layout = QHBoxLayout(self.footer_card)
-        self.footer_layout.setContentsMargins(14, 10, 14, 10)
-        self.footer_layout.setSpacing(10)
+        self.footer_layout.setContentsMargins(9, 6, 9, 6)
+        self.footer_layout.setSpacing(6)
 
         self.footer_hint = QLabel("This product will be available immediately in Purchase Invoice.")
         self.footer_hint.setObjectName("ImportDialogFooterHint")
@@ -2992,19 +3081,20 @@ class ImportDialog(QDialog):
             save_button.setText("Save Product")
             save_button.setObjectName("SaveButton")
             save_button.setCursor(Qt.PointingHandCursor)
-            save_button.setMinimumHeight(34)
-            save_button.setMinimumWidth(124)
+            save_button.setMinimumHeight(30)
+            save_button.setMinimumWidth(116)
         if cancel_button is not None:
             cancel_button.setText("Cancel")
             cancel_button.setObjectName("TopRightButton")
             cancel_button.setCursor(Qt.PointingHandCursor)
-            cancel_button.setMinimumHeight(34)
-            cancel_button.setMinimumWidth(92)
+            cancel_button.setMinimumHeight(30)
+            cancel_button.setMinimumWidth(88)
         button_box.accepted.connect(self.accept)   # Save → dialog.accept()
         button_box.rejected.connect(self.reject)   # Cancel → dialog.reject()
         self.footer_layout.addWidget(self.footer_hint, 1)
         self.footer_layout.addWidget(button_box, 0, Qt.AlignRight)
         self.layout.addWidget(self.footer_card)
+        self.layout.setStretchFactor(self.footer_card, 0)
         self.setStyleSheet(load_stylesheets() + """
             QDialog {
                 background-color: #F5F7FB;
@@ -3015,19 +3105,19 @@ class ImportDialog(QDialog):
                     stop: 0 #264B68, stop: 1 #315D7D
                 );
                 border: 1px solid #1D4058;
-                border-radius: 12px;
+                border-radius: 8px;
             }
             QLabel#ImportDialogBadge {
                 background-color: rgba(255, 255, 255, 0.14);
                 color: #FFFFFF;
-                border-radius: 13px;
+                border-radius: 12px;
                 font-family: montserrat;
                 font-size: 11px;
                 font-weight: 800;
-                min-width: 26px;
-                min-height: 26px;
-                max-width: 26px;
-                max-height: 26px;
+                min-width: 24px;
+                min-height: 24px;
+                max-width: 24px;
+                max-height: 24px;
                 qproperty-alignment: AlignCenter;
             }
             QWidget#ImportDialogTitleWrap {
@@ -3036,7 +3126,7 @@ class ImportDialog(QDialog):
             QLabel#ImportDialogTitle {
                 color: #FFFFFF;
                 font-family: montserrat;
-                font-size: 16px;
+                font-size: 15px;
                 font-weight: 800;
             }
             QLabel#ImportDialogHint {
@@ -3048,40 +3138,40 @@ class ImportDialog(QDialog):
             QFrame#ImportProductCard {
                 background-color: #FFFFFF;
                 border: 1px solid #D6E0E8;
-                border-radius: 12px;
+                border-radius: 6px;
             }
             QLabel#ImportFieldLabel {
                 color: #30485C;
                 font-family: montserrat;
-                font-size: 11px;
+                font-size: 10px;
                 font-weight: 700;
                 letter-spacing: 0.2px;
             }
             QLineEdit#importField,
             QComboBox#importField {
-                min-height: 34px;
-                background-color: #F9FBFD;
-                border: 1px solid #C9D7E3;
-                border-radius: 9px;
-                padding: 0 10px;
+                min-height: 28px;
+                background-color: #FFFFFF;
+                border: 1px solid #C7D4DF;
+                border-radius: 3px;
+                padding: 2px 6px;
                 color: #22313F;
                 font-family: montserrat;
                 font-size: 12px;
             }
             QLineEdit#importField:focus,
             QComboBox#importField:focus {
-                border: 1px solid #7EA4C1;
-                background-color: #FFFFFF;
+                border: 1px solid #5A9EC9;
+                background-color: #F7FBFF;
             }
             QComboBox#importField::drop-down {
-                width: 28px;
+                width: 24px;
                 border: none;
                 background: transparent;
             }
             QFrame#ImportDialogFooter {
                 background-color: #FFFFFF;
                 border: 1px solid #D6E0E8;
-                border-radius: 12px;
+                border-radius: 6px;
             }
             QLabel#ImportDialogFooterHint {
                 color: #5D6E7D;
@@ -3097,8 +3187,8 @@ class ImportDialog(QDialog):
         self.header_card = QFrame()
         self.header_card.setObjectName("ImportDialogHeader")
         subheader_layout = QHBoxLayout(self.header_card)
-        subheader_layout.setContentsMargins(14, 10, 14, 10)
-        subheader_layout.setSpacing(10)
+        subheader_layout.setContentsMargins(10, 9, 10, 9)
+        subheader_layout.setSpacing(8)
 
         badge = QLabel("P")
         badge.setObjectName("ImportDialogBadge")
@@ -3107,7 +3197,7 @@ class ImportDialog(QDialog):
         title_wrap.setObjectName("ImportDialogTitleWrap")
         title_layout = QVBoxLayout(title_wrap)
         title_layout.setContentsMargins(0, 0, 0, 0)
-        title_layout.setSpacing(1)
+        title_layout.setSpacing(2)
         heading = QLabel("Add New Product")
         heading.setObjectName("ImportDialogTitle")
 
@@ -3137,9 +3227,12 @@ class ImportDialog(QDialog):
         price_label = QLabel("Pack Sale Price")
         price_label.setObjectName("ImportFieldLabel")
 
-        self.name_input = QLineEdit()
+        self.name_input = SelectAllLineEdit()
         self.name_input.setObjectName("importField")
         self.name_input.setPlaceholderText("Product name")
+        self.name_input.textEdited.connect(
+            lambda text: self.force_uppercase_line_edit(self.name_input, text)
+        )
 
         forms = [
             "AEROSOL","BALM","BUBBLE GUM","CAP","CAPLET","CAPS SR","CREAM","DRAGEES","DROPS",
@@ -3158,10 +3251,11 @@ class ImportDialog(QDialog):
         self.form_input = QComboBox()
         self.form_input.setObjectName("importField")
         self.form_input.setEditable(True)
+        self.form_input.setLineEdit(SelectAllLineEdit())
         self.form_input.lineEdit().setObjectName("importField")
         self.form_input.addItems(forms)
 
-        self.packing_input = QLineEdit()
+        self.packing_input = SelectAllLineEdit()
         self.packing_input.setObjectName("importField")
         self.packing_input.setPlaceholderText("Strength / dose")
 
@@ -3170,28 +3264,40 @@ class ImportDialog(QDialog):
         self.setup_manufacturer_combobox(self.brand_input)
         self.brand_input.lineEdit().setObjectName("importField")
 
-        self.packsize_input = QLineEdit()
+        self.packsize_input = SelectAllLineEdit()
         self.packsize_input.setObjectName("importField")
         self.packsize_input.setPlaceholderText("Units per pack")
 
-        self.saleprice_input = QLineEdit()
+        self.saleprice_input = SelectAllLineEdit()
         self.saleprice_input.setObjectName("importField")
         self.saleprice_input.setPlaceholderText("Sale price")
 
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(6)
+
+        grid.addWidget(item_label, 0, 0)
+
         item_row = QHBoxLayout()
-        item_row.setSpacing(10)
+        item_row.setSpacing(8)
         item_row.addWidget(self.name_input, 3)
         item_row.addWidget(self.form_input, 2)
         item_row.addWidget(self.packing_input, 2)
+        grid.addLayout(item_row, 0, 1)
 
-        self.form_layout.addWidget(item_label)
-        self.form_layout.addLayout(item_row)
-        self.form_layout.addWidget(brand_label)
-        self.form_layout.addWidget(self.brand_input)
-        self.form_layout.addWidget(packsize_label)
-        self.form_layout.addWidget(self.packsize_input)
-        self.form_layout.addWidget(price_label)
-        self.form_layout.addWidget(self.saleprice_input)
+        grid.addWidget(brand_label, 1, 0)
+        grid.addWidget(self.brand_input, 1, 1)
+
+        grid.addWidget(packsize_label, 2, 0)
+        grid.addWidget(self.packsize_input, 2, 1)
+
+        grid.addWidget(price_label, 3, 0)
+        grid.addWidget(self.saleprice_input, 3, 1)
+
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
+        self.form_layout.addLayout(grid)
         
         
     def populate_manufacturer_combobox(self, combo: QComboBox):
@@ -3215,10 +3321,7 @@ class ImportDialog(QDialog):
     def setup_manufacturer_combobox(self, combo: QComboBox):
         
         combo.setEditable(True)
-        combo.lineEdit().focusInEvent = lambda event, le=combo.lineEdit(): (
-            le.selectAll(),
-            QLineEdit.focusInEvent(le, event)
-        )
+        combo.setLineEdit(SelectAllLineEdit())
         combo.setInsertPolicy(QComboBox.NoInsert)
 
         self.populate_manufacturer_combobox(combo)

@@ -101,6 +101,7 @@ class MainReportsPage(QWidget):
         
         
         self.setStyleSheet(load_stylesheets())
+        self._overview_loaded_once = False
         
        
 
@@ -406,6 +407,7 @@ class MainReportsPage(QWidget):
     def get_inventory_report_handler(self, report_name):
         handler_map = {
             "Stock Valuation Report": self.show_stock_valuation_report_dialog,
+            "Stock Sale Value Report": self.show_stock_sale_value_report_dialog,
             "Stock Movement Report": self.show_stock_movement_dialog,
             "Near Expiry Report": self.show_near_expiry_dialog,
             "Expired Stock Report": self.show_expired_stock_report_dialog,
@@ -464,6 +466,59 @@ class MainReportsPage(QWidget):
         row.addWidget(open_btn, 0)
 
         return row
+
+    def _is_quantity_like_report_field(self, header=None, key=None):
+        tokens = []
+        if header:
+            tokens.append(str(header).strip().lower())
+        if key:
+            tokens.append(str(key).strip().lower())
+
+        quantity_markers = (
+            "qty",
+            "quantity",
+            "units",
+            "count",
+            "invoices",
+            "invoice_count",
+            "line_count",
+            "grn_count",
+            "days left",
+            "days_since",
+            "days_since_last_sale",
+            "total_sold",
+            "stock_qty",
+            "qty_sold",
+            "qty_received",
+            "qty_remaining",
+            "ordered_qty",
+            "received_qty",
+            "remaining_qty",
+            "old_qty",
+            "new_qty",
+        )
+        return any(marker in token for token in tokens for marker in quantity_markers)
+
+    def _format_report_quantity(self, value):
+        try:
+            numeric = float(value or 0)
+        except Exception:
+            return str(value)
+
+        rounded = round(numeric)
+        if abs(numeric - rounded) < 1e-9:
+            return f"{int(rounded):,}"
+
+        return f"{numeric:,.2f}".rstrip("0").rstrip(".")
+
+    def _format_report_number(self, value, header=None, key=None):
+        if not isinstance(value, (int, float)):
+            return str(value)
+
+        if self._is_quantity_like_report_field(header, key):
+            return self._format_report_quantity(value)
+
+        return f"{float(value):,.2f}"
 
     def show_sales_table_report_dialog(self, title, description, columns, fetch_rows, summary_builder=None, note_text="", row_double_click_handler=None):
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView
@@ -550,10 +605,8 @@ class MainReportsPage(QWidget):
 
         state = {"export_text": "", "rows": []}
 
-        def as_display(value):
-            if isinstance(value, float):
-                return f"{value:,.2f}"
-            return str(value)
+        def as_display(value, header=None, key=None):
+            return self._format_report_number(value, header, key)
 
         def rebuild():
             duration_key = period_combo.currentData()
@@ -564,7 +617,7 @@ class MainReportsPage(QWidget):
 
             for r, row in enumerate(rows):
                 for c, (_header, key) in enumerate(columns):
-                    item = QTableWidgetItem(as_display(row.get(key, "")))
+                    item = QTableWidgetItem(as_display(row.get(key, ""), _header, key))
                     if isinstance(row.get(key), (int, float)) and c > 0:
                         item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                     if c == 0:
@@ -584,7 +637,7 @@ class MainReportsPage(QWidget):
                 {
                     "title": "Rows",
                     "lines": [
-                        " | ".join(f"{header}: {as_display(row.get(key, ''))}" for header, key in columns)
+                        " | ".join(f"{header}: {as_display(row.get(key, ''), header, key)}" for header, key in columns)
                         for row in rows
                     ] or ["No rows found for selected period."],
                 }
@@ -1019,8 +1072,8 @@ class MainReportsPage(QWidget):
         note_grid.setColumnStretch(0, 1)
         note_grid.setColumnStretch(1, 0)
 
-        add_line(note_grid, 0, "Inventory Units on Hand", f"{float(inventory.get('total_units', 0.0) or 0.0):,.2f}")
-        add_line(note_grid, 1, "Units With Unknown Cost", f"{float(inventory.get('unknown_cost_units', 0.0) or 0.0):,.2f}")
+        add_line(note_grid, 0, "Inventory Units on Hand", self._format_report_quantity(float(inventory.get('total_units', 0.0) or 0.0)))
+        add_line(note_grid, 1, "Units With Unknown Cost", self._format_report_quantity(float(inventory.get('unknown_cost_units', 0.0) or 0.0)))
         add_line(note_grid, 2, "Batches With Unknown Cost", f"{int(inventory.get('unknown_cost_batches', 0) or 0)}")
         add_line(note_grid, 3, "Estimated Opening Inventory Cost", f"{float(opening_estimate or 0.0):,.2f}")
         note_layout.addLayout(note_grid)
@@ -1064,8 +1117,8 @@ class MainReportsPage(QWidget):
                 {
                     "title": "Known vs Unknown Inventory",
                     "lines": [
-                        ("Inventory Units on Hand", f"{float(inventory.get('total_units', 0.0) or 0.0):,.2f}"),
-                        ("Units With Unknown Cost", f"{float(inventory.get('unknown_cost_units', 0.0) or 0.0):,.2f}"),
+                        ("Inventory Units on Hand", self._format_report_quantity(float(inventory.get('total_units', 0.0) or 0.0))),
+                        ("Units With Unknown Cost", self._format_report_quantity(float(inventory.get('unknown_cost_units', 0.0) or 0.0))),
                         ("Batches With Unknown Cost", f"{int(inventory.get('unknown_cost_batches', 0) or 0)}"),
                         ("Estimated Opening Inventory Cost", f"{float(opening_estimate or 0.0):,.2f}"),
                     ],
@@ -1177,7 +1230,7 @@ class MainReportsPage(QWidget):
         content_layout.addWidget(table)
 
         memo = QLabel(
-            f"Unknown-cost inventory currently sits outside the debit total: {float(inventory.get('unknown_cost_units', 0.0) or 0.0):,.2f} unit(s) across {int(inventory.get('unknown_cost_batches', 0) or 0)} batch(es)."
+            f"Unknown-cost inventory currently sits outside the debit total: {self._format_report_quantity(float(inventory.get('unknown_cost_units', 0.0) or 0.0))} unit(s) across {int(inventory.get('unknown_cost_batches', 0) or 0)} batch(es)."
         )
         memo.setWordWrap(True)
         memo.setStyleSheet("font-size: 11px; color: #5A7183; padding-left: 0;")
@@ -1201,7 +1254,7 @@ class MainReportsPage(QWidget):
                         ("Total Credit", f"{total_credit:,.2f}"),
                         (
                             "Unknown-cost inventory outside debit total",
-                            f"{float(inventory.get('unknown_cost_units', 0.0) or 0.0):,.2f} unit(s) across {int(inventory.get('unknown_cost_batches', 0) or 0)} batch(es)",
+                            f"{self._format_report_quantity(float(inventory.get('unknown_cost_units', 0.0) or 0.0))} unit(s) across {int(inventory.get('unknown_cost_batches', 0) or 0)} batch(es)",
                         ),
                     ],
                 },
@@ -1514,7 +1567,7 @@ class MainReportsPage(QWidget):
             ],
             fetch_rows=lambda duration: report_service.ReportService().get_sales_by_product_rows(duration),
             summary_builder=lambda rows: (
-                f"Rows: {len(rows)} | Qty Sold: {sum(float(r.get('qty_sold', 0) or 0) for r in rows):,.2f} | "
+                f"Rows: {len(rows)} | Qty Sold: {self._format_report_quantity(sum(float(r.get('qty_sold', 0) or 0) for r in rows))} | "
                 f"Sales Value: {sum(float(r.get('sales_value', 0) or 0) for r in rows):,.2f}"
             ),
         )
@@ -1699,7 +1752,7 @@ class MainReportsPage(QWidget):
             ],
             fetch_rows=lambda duration: report_service.ReportService().get_purchase_by_product_rows(duration),
             summary_builder=lambda rows: (
-                f"Rows: {len(rows)} | Qty Received: {sum(float(r.get('qty_received', 0) or 0) for r in rows):,.2f} | "
+                f"Rows: {len(rows)} | Qty Received: {self._format_report_quantity(sum(float(r.get('qty_received', 0) or 0) for r in rows))} | "
                 f"Purchase Value: {sum(float(r.get('purchase_value', 0) or 0) for r in rows):,.2f}"
             ),
         )
@@ -1721,9 +1774,9 @@ class MainReportsPage(QWidget):
             ],
             fetch_rows=lambda duration: report_service.ReportService().get_po_status_rows(duration),
             summary_builder=lambda rows: (
-                f"Rows: {len(rows)} | Ordered: {sum(float(r.get('ordered_qty', 0) or 0) for r in rows):,.2f} | "
-                f"Received: {sum(float(r.get('received_qty', 0) or 0) for r in rows):,.2f} | "
-                f"Remaining: {sum(float(r.get('remaining_qty', 0) or 0) for r in rows):,.2f}"
+                f"Rows: {len(rows)} | Ordered: {self._format_report_quantity(sum(float(r.get('ordered_qty', 0) or 0) for r in rows))} | "
+                f"Received: {self._format_report_quantity(sum(float(r.get('received_qty', 0) or 0) for r in rows))} | "
+                f"Remaining: {self._format_report_quantity(sum(float(r.get('remaining_qty', 0) or 0) for r in rows))}"
             ),
             row_double_click_handler=lambda row: self.show_reference_detail_dialog(
                 f"PO Detail ({int(row.get('po_id', 0) or 0)})",
@@ -1772,9 +1825,9 @@ class MainReportsPage(QWidget):
             ],
             fetch_rows=lambda duration: report_service.ReportService().get_partial_po_receipt_rows(duration),
             summary_builder=lambda rows: (
-                f"Rows: {len(rows)} | Ordered: {sum(float(r.get('ordered_qty', 0) or 0) for r in rows):,.2f} | "
-                f"Received: {sum(float(r.get('received_qty', 0) or 0) for r in rows):,.2f} | "
-                f"Remaining: {sum(float(r.get('remaining_qty', 0) or 0) for r in rows):,.2f}"
+                f"Rows: {len(rows)} | Ordered: {self._format_report_quantity(sum(float(r.get('ordered_qty', 0) or 0) for r in rows))} | "
+                f"Received: {self._format_report_quantity(sum(float(r.get('received_qty', 0) or 0) for r in rows))} | "
+                f"Remaining: {self._format_report_quantity(sum(float(r.get('remaining_qty', 0) or 0) for r in rows))}"
             ),
             note_text="This report focuses only on partially received POs and helps track incomplete procurement against cumulative GRNs.",
             row_double_click_handler=lambda row: self.show_reference_detail_dialog(
@@ -1854,7 +1907,7 @@ class MainReportsPage(QWidget):
             ],
             fetch_rows=lambda _duration: report_service.ReportService().get_stock_valuation_rows(),
             summary_builder=lambda rows: (
-                f"Rows: {len(rows)} | Stock Qty: {sum(float(r.get('stock_qty', 0) or 0) for r in rows):,.2f} | "
+                f"Rows: {len(rows)} | Stock Qty: {self._format_report_quantity(sum(float(r.get('stock_qty', 0) or 0) for r in rows))} | "
                 f"Known Stock Value: {sum(float(r.get('known_stock_value', 0) or 0) for r in rows):,.2f}"
             ),
             note_text="This view is current-state and not period-filtered. Unknown-cost units are excluded from known stock value.",
@@ -1862,9 +1915,46 @@ class MainReportsPage(QWidget):
                 f"Product Stock Summary ({row.get('product_name', '')})",
                 [
                     ("Product", row.get("product_name", "")),
-                    ("Stock Qty", f"{float(row.get('stock_qty', 0) or 0):.2f}"),
+                    ("Stock Qty", self._format_report_quantity(float(row.get('stock_qty', 0) or 0))),
                     ("Known Stock Value", f"{float(row.get('known_stock_value', 0) or 0):.2f}"),
-                    ("Unknown Cost Units", f"{float(row.get('unknown_cost_units', 0) or 0):.2f}"),
+                    ("Unknown Cost Units", self._format_report_quantity(float(row.get('unknown_cost_units', 0) or 0))),
+                ],
+            ),
+        )
+
+    def show_stock_sale_value_report_dialog(self):
+        self.show_sales_table_report_dialog(
+            "Stock Sale Value Report",
+            "Current on-hand stock valued at selling price, with projected margin against known cost.",
+            [
+                ("Product", "product_name"),
+                ("Stock Qty", "stock_qty"),
+                ("Sale Value", "sale_value"),
+                ("Known Cost Value", "known_cost_value"),
+                ("Projected Margin", "projected_margin"),
+                ("No Sale Price Units", "unknown_sale_price_units"),
+                ("Unknown Cost Units", "unknown_cost_units"),
+            ],
+            fetch_rows=lambda _duration: report_service.ReportService().get_stock_sale_value_rows(),
+            summary_builder=lambda rows: (
+                f"Rows: {len(rows)} | Stock Qty: {self._format_report_quantity(sum(float(r.get('stock_qty', 0) or 0) for r in rows))} | "
+                f"Sale Value: {sum(float(r.get('sale_value', 0) or 0) for r in rows):,.2f} | "
+                f"Projected Margin: {sum(float(r.get('projected_margin', 0) or 0) for r in rows):,.2f}"
+            ),
+            note_text=(
+                "This view is current-state and not period-filtered. "
+                "Units with no selling price are excluded from sale value, and unknown-cost units remain visible separately."
+            ),
+            row_double_click_handler=lambda row: self.show_reference_detail_dialog(
+                f"Product Sale Value Summary ({row.get('product_name', '')})",
+                [
+                    ("Product", row.get("product_name", "")),
+                    ("Stock Qty", self._format_report_quantity(float(row.get('stock_qty', 0) or 0))),
+                    ("Sale Value", f"{float(row.get('sale_value', 0) or 0):.2f}"),
+                    ("Known Cost Value", f"{float(row.get('known_cost_value', 0) or 0):.2f}"),
+                    ("Projected Margin", f"{float(row.get('projected_margin', 0) or 0):.2f}"),
+                    ("No Sale Price Units", self._format_report_quantity(float(row.get('unknown_sale_price_units', 0) or 0))),
+                    ("Unknown Cost Units", self._format_report_quantity(float(row.get('unknown_cost_units', 0) or 0))),
                 ],
             ),
         )
@@ -1884,7 +1974,7 @@ class MainReportsPage(QWidget):
             ],
             fetch_rows=lambda _duration: report_service.ReportService().get_expired_stock_rows(),
             summary_builder=lambda rows: (
-                f"Rows: {len(rows)} | Qty Remaining: {sum(float(r.get('qty_remaining', 0) or 0) for r in rows):,.2f} | "
+                f"Rows: {len(rows)} | Qty Remaining: {self._format_report_quantity(sum(float(r.get('qty_remaining', 0) or 0) for r in rows))} | "
                 f"Stock Value: {sum(float(r.get('stock_value', 0) or 0) for r in rows):,.2f}"
             ),
             note_text="This view is current-state and not period-filtered.",
@@ -1918,7 +2008,7 @@ class MainReportsPage(QWidget):
             fetch_rows=lambda _duration: report_service.ReportService().get_batch_traceability_rows(),
             summary_builder=lambda rows: (
                 f"Rows: {len(rows)} | Total Received: {sum(float(r.get('total_received', 0) or 0) for r in rows):,.2f} | "
-                f"Qty Remaining: {sum(float(r.get('quantity_remaining', 0) or 0) for r in rows):,.2f}"
+                f"Qty Remaining: {self._format_report_quantity(sum(float(r.get('quantity_remaining', 0) or 0) for r in rows))}"
             ),
             note_text="This view is current-state and not period-filtered.",
             row_double_click_handler=lambda row: self.show_reference_detail_dialog(
@@ -1945,7 +2035,7 @@ class MainReportsPage(QWidget):
             ],
             fetch_rows=lambda duration: report_service.ReportService().get_inventory_adjustment_rows(duration),
             summary_builder=lambda rows: (
-                f"Rows: {len(rows)} | Total Qty Changed: {sum(float(r.get('qty', 0) or 0) for r in rows):,.2f}"
+                f"Rows: {len(rows)} | Total Qty Changed: {self._format_report_quantity(sum(float(r.get('qty', 0) or 0) for r in rows))}"
             ),
             row_double_click_handler=lambda row: self.show_reference_detail_dialog(
                 f"Inventory Adjustment Detail (ADJ#{int(row.get('adjustment_id', 0) or 0)})",
@@ -2419,6 +2509,7 @@ class MainReportsPage(QWidget):
 
         reports = [
             "Stock Valuation Report",
+            "Stock Sale Value Report",
             "Stock Movement Report",
             "Near Expiry Report",
             "Expired Stock Report",
@@ -2667,10 +2758,32 @@ class MainReportsPage(QWidget):
         second_line_layout.addWidget(self.known_stock_cost_data, 1)
         
         card_layout.addLayout(second_line_layout)
+
+        third_line_layout = QHBoxLayout()
+
+        potential_sale_label = QLabel("Potential Stock Sale Value")
+        self.potential_stock_sale_data = QLabel()
+
+        third_line_layout.addWidget(potential_sale_label, 3)
+        third_line_layout.addWidget(self.potential_stock_sale_data, 1)
+
+        card_layout.addLayout(third_line_layout)
+
+        fourth_line_layout = QHBoxLayout()
+
+        projected_margin_label = QLabel("Projected Gross Margin")
+        self.projected_stock_margin_data = QLabel()
+
+        fourth_line_layout.addWidget(projected_margin_label, 3)
+        fourth_line_layout.addWidget(self.projected_stock_margin_data, 1)
+
+        card_layout.addLayout(fourth_line_layout)
         
         snapshot = report_service.ReportService().get_inventory_overview_snapshot()
         self.estimate_cost.setText(f"{float(snapshot.get('opening_estimate_amount', 0.0) or 0.0):,.2f}")
         self.known_stock_cost_data.setText(f"{float(snapshot.get('known_stock_cost_amount', 0.0) or 0.0):.2f}")
+        self.potential_stock_sale_data.setText(f"{float(snapshot.get('potential_stock_sale_amount', 0.0) or 0.0):,.2f}")
+        self.projected_stock_margin_data.setText(f"{float(snapshot.get('projected_stock_margin_amount', 0.0) or 0.0):,.2f}")
 
         action_row = QHBoxLayout()
         action_row.setContentsMargins(0, 4, 0, 0)
@@ -2769,8 +2882,8 @@ class MainReportsPage(QWidget):
         near_expiry = count.get('near_expiry_batches', 0)
         low_stock = count.get('low_stock_products', 0)
         
-        self.expiry_count.setText(f"{near_expiry:.2f}")
-        self.low_stock_count.setText(f"{low_stock:.2f}")
+        self.expiry_count.setText(self._format_report_quantity(near_expiry))
+        self.low_stock_count.setText(self._format_report_quantity(low_stock))
         
         
         return card
@@ -3025,12 +3138,12 @@ class MainReportsPage(QWidget):
                 values = [
                     status,
                     str(row_data.get("product_name", "")),
-                    f"{float(row_data.get('stock_qty', 0) or 0.0):.2f}",
+                    self._format_report_quantity(float(row_data.get('stock_qty', 0) or 0.0)),
                     f"{float(row_data.get('stock_value', 0) or 0.0):.2f}",
                     last_sale if last_sale else "Never",
                     days_display,
                     str(row_data.get("oldest_batch_date", "") or ""),
-                    f"{float(row_data.get('total_sold', 0) or 0.0):.2f}",
+                    self._format_report_quantity(float(row_data.get('total_sold', 0) or 0.0)),
                 ]
 
                 for c, value in enumerate(values):
@@ -3058,7 +3171,7 @@ class MainReportsPage(QWidget):
                 totals_values = [
                     "TOTAL",
                     f"Products: {len(rows)}",
-                    f"{total_qty:.2f}",
+                    self._format_report_quantity(total_qty),
                     f"{total_value:.2f}",
                     "",
                     "",
@@ -3078,7 +3191,7 @@ class MainReportsPage(QWidget):
             table.sortItems(3, Qt.DescendingOrder)
             summary_label.setText(
                 f"Rows: {len(rows)} | Dead: {dead_count} | Non-moving: {nonmoving_count} | "
-                f"Qty: {total_qty:.2f} | Value: {total_value:.2f}"
+                f"Qty: {self._format_report_quantity(total_qty)} | Value: {total_value:.2f}"
             )
 
             if not rows:
@@ -4565,7 +4678,7 @@ class MainReportsPage(QWidget):
 
                 values = [
                     str(row.get("product_name", "")),
-                    f"{float(row.get('qty_sold', 0)):.2f}",
+                    self._format_report_quantity(float(row.get('qty_sold', 0) or 0)),
                     f"{float(row.get('known_revenue', 0)):.2f}",
                     f"{float(row.get('known_cogs', 0)):.2f}",
                     f"{known_profit:.2f}",
@@ -4695,7 +4808,7 @@ class MainReportsPage(QWidget):
 
                 values = [
                     str(row.get("product_name", "")),
-                    f"{float(row.get('qty_sold', 0)):.2f}",
+                    self._format_report_quantity(float(row.get('qty_sold', 0) or 0)),
                     f"{float(row.get('known_revenue', 0)):.2f}",
                     f"{float(row.get('known_cogs', 0)):.2f}",
                     f"{known_profit:.2f}",
@@ -4918,7 +5031,7 @@ class MainReportsPage(QWidget):
 
                 values = [
                     str(row.get("period", "")),
-                    f"{float(row.get('qty_sold', 0)):.2f}",
+                    self._format_report_quantity(float(row.get('qty_sold', 0) or 0)),
                     f"{float(row.get('known_revenue', 0)):.2f}",
                     f"{float(row.get('known_cogs', 0)):.2f}",
                     f"{known_profit:.2f}",
@@ -4949,7 +5062,7 @@ class MainReportsPage(QWidget):
                 totals_row_idx = len(rows)
                 totals_values = [
                     "TOTAL",
-                    f"{tot_qty:.2f}",
+                    self._format_report_quantity(tot_qty),
                     f"{tot_revenue:.2f}",
                     f"{tot_cogs:.2f}",
                     f"{tot_profit:.2f}",
@@ -5004,13 +5117,15 @@ class MainReportsPage(QWidget):
     def showEvent(self, event):
         
         super().showEvent(event)
-        print("Showing Reports page")
-        self.current_duration_key = "today"
-        if hasattr(self, "duration_combo"):
-            self.duration_combo.blockSignals(True)
-            self.duration_combo.setCurrentIndex(0)
-            self.duration_combo.blockSignals(False)
-        self.refresh_overview_for_duration("today")
+        if not self._overview_loaded_once:
+            print("Showing Reports page")
+            self.current_duration_key = "today"
+            if hasattr(self, "duration_combo"):
+                self.duration_combo.blockSignals(True)
+                self.duration_combo.setCurrentIndex(0)
+                self.duration_combo.blockSignals(False)
+            self.refresh_overview_for_duration("today")
+            self._overview_loaded_once = True
 
 
 
@@ -5534,15 +5649,23 @@ class MainReportsPage(QWidget):
         self.estimate_cost.setStyleSheet(self.compact_metric_value_style())
         self.known_stock_cost_data = QLabel("0.00")
         self.known_stock_cost_data.setStyleSheet(self.compact_metric_value_style())
+        self.potential_stock_sale_data = QLabel("0.00")
+        self.potential_stock_sale_data.setStyleSheet(self.compact_metric_value_style())
+        self.projected_stock_margin_data = QLabel("0.00")
+        self.projected_stock_margin_data.setStyleSheet(self.compact_metric_value_style())
 
         add_metric(0, 0, "Estimated Opening Stock Cost", self.estimate_cost)
         add_metric(0, 1, "Known Stock Cost", self.known_stock_cost_data)
+        add_metric(1, 0, "Potential Stock Sale Value", self.potential_stock_sale_data)
+        add_metric(1, 1, "Projected Gross Margin", self.projected_stock_margin_data)
 
         layout.addLayout(grid)
 
         snapshot = report_service.ReportService().get_inventory_overview_snapshot()
         self.estimate_cost.setText(f"{float(snapshot.get('opening_estimate_amount', 0.0) or 0.0):,.2f}")
         self.known_stock_cost_data.setText(f"{float(snapshot.get('known_stock_cost_amount', 0.0) or 0.0):.2f}")
+        self.potential_stock_sale_data.setText(f"{float(snapshot.get('potential_stock_sale_amount', 0.0) or 0.0):,.2f}")
+        self.projected_stock_margin_data.setText(f"{float(snapshot.get('projected_stock_margin_amount', 0.0) or 0.0):,.2f}")
 
         action_row = QHBoxLayout()
         action_row.setContentsMargins(0, 4, 0, 0)
@@ -5614,8 +5737,8 @@ class MainReportsPage(QWidget):
 
         snapshot = report_service.ReportService().get_inventory_overview_snapshot()
         count = snapshot.get("stock_alerts", {})
-        self.expiry_count.setText(f"{float(count.get('near_expiry_batches', 0) or 0):.2f}")
-        self.low_stock_count.setText(f"{float(count.get('low_stock_products', 0) or 0):.2f}")
+        self.expiry_count.setText(self._format_report_quantity(float(count.get('near_expiry_batches', 0) or 0)))
+        self.low_stock_count.setText(self._format_report_quantity(float(count.get('low_stock_products', 0) or 0)))
 
         return card
 
@@ -5713,10 +5836,10 @@ class MainReportsPage(QWidget):
                 table.setItem(row, 1, make_readonly_item(str(row_data["product_name"])))
                 table.setItem(row, 2, make_readonly_item(str(row_data["batch_no"])))
                 table.setItem(row, 3, make_readonly_item(str(row_data["expiry_date"])))
-                table.setItem(row, 4, make_readonly_item(f"{float(row_data['added_qty']):,.2f}", Qt.AlignRight | Qt.AlignVCenter))
-                table.setItem(row, 5, make_readonly_item(f"{float(row_data['remaining_qty']):,.2f}", Qt.AlignRight | Qt.AlignVCenter))
-                table.setItem(row, 6, make_readonly_item(f"{float(row_data['sold_qty']):,.2f}", Qt.AlignRight | Qt.AlignVCenter))
-                table.setItem(row, 7, make_readonly_item(f"{float(row_data['unknown_sold_qty']):,.2f}", Qt.AlignRight | Qt.AlignVCenter))
+                table.setItem(row, 4, make_readonly_item(self._format_report_quantity(float(row_data['added_qty'])), Qt.AlignRight | Qt.AlignVCenter))
+                table.setItem(row, 5, make_readonly_item(self._format_report_quantity(float(row_data['remaining_qty'])), Qt.AlignRight | Qt.AlignVCenter))
+                table.setItem(row, 6, make_readonly_item(self._format_report_quantity(float(row_data['sold_qty'])), Qt.AlignRight | Qt.AlignVCenter))
+                table.setItem(row, 7, make_readonly_item(self._format_report_quantity(float(row_data['unknown_sold_qty'])), Qt.AlignRight | Qt.AlignVCenter))
 
                 cost_edit = QLineEdit()
                 cost_edit.setPlaceholderText("Enter unit cost")
@@ -5740,7 +5863,7 @@ class MainReportsPage(QWidget):
 
             table.resizeColumnsToContents()
             summary_label.setText(
-                f"Opening batches: {len(rows)} | Missing cost: {missing_count} | Sold quantity still excluded from known profit: {impacted_qty:,.2f}"
+                f"Opening batches: {len(rows)} | Missing cost: {missing_count} | Sold quantity still excluded from known profit: {self._format_report_quantity(impacted_qty)}"
             )
 
         def save_cost_updates():

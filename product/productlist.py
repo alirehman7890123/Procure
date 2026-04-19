@@ -593,6 +593,13 @@ class ProductListWidget(QWidget):
         
         super().showEvent(event)
         self.load_products_into_table()
+        QTimer.singleShot(0, self._focus_product_search)
+
+    def _focus_product_search(self):
+        if not hasattr(self, "search_edit") or self.search_edit is None:
+            return
+        self.search_edit.setFocus()
+        self.search_edit.selectAll()
         
         
 

@@ -21,13 +21,11 @@ class BaseDashboardWidget(BasePage):
         self.dashboard_widget.session_history_btn.clicked.connect(self.set_daily_session_widget)
         
         self.welcome_widget = WelcomeWidget()
-        self.daily_session_widget = DailySession()
-        self.daily_session_widget.dashboard_btn.clicked.connect(self.set_dashboard_widget)
+        self.daily_session_widget = None
 
         
         self.stacked_layout.addWidget(self.dashboard_widget)
         self.stacked_layout.addWidget(self.welcome_widget)
-        self.stacked_layout.addWidget(self.daily_session_widget)
         
 
         self.setLayout(self.stacked_layout)
@@ -44,6 +42,10 @@ class BaseDashboardWidget(BasePage):
         
     @Permissions.require_permission('dashboard')
     def set_daily_session_widget(self):
+        if self.daily_session_widget is None:
+            self.daily_session_widget = DailySession()
+            self.daily_session_widget.dashboard_btn.clicked.connect(self.set_dashboard_widget)
+            self.stacked_layout.addWidget(self.daily_session_widget)
         self.stacked_layout.setCurrentWidget(self.daily_session_widget)
         
 

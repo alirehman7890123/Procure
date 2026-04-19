@@ -65,6 +65,9 @@ class SelectAllLineEdit(QLineEdit):
         super().__init__(parent)
         self._select_on_release = False
 
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+
     def mousePressEvent(self, event):
         if not self.hasFocus():
             self._select_on_release = True
@@ -78,6 +81,21 @@ class SelectAllLineEdit(QLineEdit):
 
 
 class SalesQuickProductDialog(QDialog):
+    FORM_OPTIONS = sorted([
+        f.title() for f in [
+            "AEROSOL","BALM","BUBBLE GUM","CAP","CAPLET","CAPS SR","CREAM","DRAGEES","DROPS",
+            "DRY SUSP","E AND E DROPS","EAR DROPS","ELIXIR","EMUL","ENEMA","EXPC","EYE DROPS",
+            "EYE GEL","EYE OINT","EYE SUSP","FORM","GEL","GRANULES","INF","INHALER","INJ",
+            "INJ CS","INJ DS","INJ IM/IV","INJ SC","INJ SR","INJ-IM","INJ-IV","LINCTUS",
+            "LINIMENT","LIQUID","LOTION","LOZENGES","MIXTURE","MOUTH SPRAY","MOUTH WASH",
+            "NASAL DROPS","NASAL SPRAY","NEBULISER","OIL","OINT","ORAL SOLN","PAINT",
+            "PASTE","PATCHES","PELLETS","POULTICE","POWDER","ROTA CAPS","SACHET","SCRUB",
+            "SHAMPOO","SOAP","SOFT CAPS","SOLN","SPRAY","SUPPOSITORIES","SUSP","SUSP DS",
+            "SYP","SYRINGE","TAB","TAB ENTERIC COATED","TABS CHEWABLE","TABS DS","TABS EFR",
+            "TABS SL","TABS SR","TINC","TOOTH PASTE","VAG CREAM","VAG OVULE","VAG PESSARIES","VAG TABS"
+        ]
+    ])
+
     def __init__(self, parent=None, initial_name=""):
         super().__init__(parent)
         self.saved_product_id = None
@@ -85,19 +103,72 @@ class SalesQuickProductDialog(QDialog):
         self.existing_product_id = None
         self.setWindowTitle("Quick Add Product")
         self.setModal(True)
-        self.setMinimumWidth(560)
+        self.setMinimumWidth(640)
+
+        self.setStyleSheet("""
+            QDialog {
+                background: #EEF4F8;
+            }
+            QFrame#quickAddHeader {
+                background-color: #325D7B;
+                border: 1px solid #284B63;
+                border-radius: 8px;
+            }
+            QFrame#quickAddContent, QFrame#quickAddFooter {
+                background: #FFFFFF;
+                border: 1px solid #D3DEE7;
+                border-radius: 8px;
+            }
+            QLineEdit, QComboBox {
+                min-height: 28px;
+                padding: 3px 7px;
+                border: 1px solid #C7D4DF;
+                border-radius: 6px;
+                background: #FFFFFF;
+                color: #223746;
+            }
+            QLineEdit:focus, QComboBox:focus {
+                border: 1px solid #5A9EC9;
+                background: #F7FBFF;
+                color: #16364B;
+            }
+            QComboBox QAbstractItemView {
+                background: white;
+                color: #223746;
+                selection-background-color: #5A9EC9;
+                selection-color: white;
+            }
+        """)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        header = QLabel("Add product with opening stock")
-        header.setStyleSheet("font-size: 14px; font-weight: 700; color: #1F445D;")
-        layout.addWidget(header)
+        header_frame = QFrame()
+        header_frame.setObjectName("quickAddHeader")
+        header_layout = QVBoxLayout(header_frame)
+        header_layout.setContentsMargins(10, 9, 10, 9)
+        header_layout.setSpacing(2)
+
+        header = QLabel("Add Product With Opening Stock")
+        header.setStyleSheet("font-size: 15px; font-weight: 700; color: #FFFFFF;")
+        header_layout.addWidget(header)
+
+        header_note = QLabel("Create a new sellable item or revive a dormant product by assigning opening stock, pricing, batch, and expiry.")
+        header_note.setWordWrap(True)
+        header_note.setStyleSheet("font-size: 11px; color: #DDEAF3;")
+        header_layout.addWidget(header_note)
+        layout.addWidget(header_frame)
+
+        content_frame = QFrame()
+        content_frame.setObjectName("quickAddContent")
+        content_layout = QVBoxLayout(content_frame)
+        content_layout.setContentsMargins(10, 8, 10, 8)
+        content_layout.setSpacing(6)
 
         grid = QGridLayout()
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(8)
+        grid.setHorizontalSpacing(7)
+        grid.setVerticalSpacing(5)
 
         def form_label(text):
             lbl = QLabel(text)
@@ -106,55 +177,60 @@ class SalesQuickProductDialog(QDialog):
 
         initial_name = str(initial_name or "").strip().upper()
 
-        self.product_name_input = QLineEdit()
+        self.product_name_input = SelectAllLineEdit()
         self.product_name_input.setPlaceholderText("Product")
         self.product_name_input.setText(initial_name)
         self.product_name_input.textEdited.connect(lambda text: self.force_uppercase_line_edit(self.product_name_input, text))
 
-        self.dose_input = QLineEdit()
+        self.dose_input = SelectAllLineEdit()
         self.dose_input.setPlaceholderText("Dose")
         self.dose_input.textEdited.connect(lambda text: self.force_uppercase_line_edit(self.dose_input, text))
 
-        self.form_input = QLineEdit()
+        self.form_input = QComboBox()
+        self.form_input.setEditable(True)
+        self.form_input.setLineEdit(SelectAllLineEdit())
+        self.form_input.setInsertPolicy(QComboBox.NoInsert)
+        self.form_input.addItems(self.FORM_OPTIONS)
         self.form_input.setPlaceholderText("Form")
-        self.form_input.textEdited.connect(lambda text: self.force_uppercase_line_edit(self.form_input, text))
+        if self.form_input.lineEdit() is not None:
+            self.form_input.lineEdit().textEdited.connect(
+                lambda text: self.force_uppercase_line_edit(self.form_input.lineEdit(), text)
+            )
 
-        self.formula_input = QLineEdit()
+        self.formula_input = SelectAllLineEdit()
         self.formula_input.setPlaceholderText("Formula / generic name")
 
         self.manufacturer_combo = QComboBox()
         self.manufacturer_combo.setEditable(True)
+        self.manufacturer_combo.setLineEdit(SelectAllLineEdit())
         self.manufacturer_combo.setInsertPolicy(QComboBox.NoInsert)
         self.populate_manufacturer_combo()
         self.manufacturer_combo.lineEdit().editingFinished.connect(self.handle_new_manufacturer_entry)
 
-        self.pack_size_input = QLineEdit()
+        self.pack_size_input = SelectAllLineEdit()
         self.pack_size_input.setPlaceholderText("Pack size")
 
-        self.sale_price_input = QLineEdit()
+        self.sale_price_input = SelectAllLineEdit()
         self.sale_price_input.setPlaceholderText("Sale price")
 
-        self.cost_price_input = QLineEdit()
+        self.cost_price_input = SelectAllLineEdit()
         self.cost_price_input.setPlaceholderText("Cost price (optional)")
 
-        self.qty_input = QLineEdit()
+        self.qty_input = SelectAllLineEdit()
         self.qty_input.setPlaceholderText("Opening qty")
 
-        self.batch_input = QLineEdit()
+        self.batch_input = SelectAllLineEdit()
         self.batch_input.setPlaceholderText("Batch")
         self.batch_input.textEdited.connect(lambda text: self.force_uppercase_line_edit(self.batch_input, text))
 
-        self.expiry_input = QLineEdit()
+        self.expiry_input = SelectAllLineEdit()
         self.expiry_input.setPlaceholderText("MM-YY (optional)")
         self.expiry_input.setInputMask("99-99;_")
 
         row = 0
-        grid.addWidget(form_label("Product"), row, 0)
-        grid.addWidget(self.product_name_input, row, 1)
-        grid.addWidget(form_label("Dose"), row, 2)
-        grid.addWidget(self.dose_input, row, 3)
-        grid.addWidget(form_label("Form"), row, 4)
-        grid.addWidget(self.form_input, row, 5)
+        grid.addWidget(self.product_name_input, row, 0, 1, 2)
+        grid.addWidget(self.dose_input, row, 2, 1, 2)
+        grid.addWidget(self.form_input, row, 4, 1, 2)
         row += 1
         grid.addWidget(form_label("Formula"), row, 0)
         grid.addWidget(self.formula_input, row, 1, 1, 5)
@@ -164,24 +240,29 @@ class SalesQuickProductDialog(QDialog):
         row += 1
         grid.addWidget(form_label("Pack Size"), row, 0)
         grid.addWidget(self.pack_size_input, row, 1)
-        grid.addWidget(form_label("Sale Price"), row, 2)
-        grid.addWidget(self.sale_price_input, row, 3)
+        grid.addWidget(form_label("Opening Qty"), row, 2)
+        grid.addWidget(self.qty_input, row, 3)
         grid.addWidget(form_label("Cost Price"), row, 4)
         grid.addWidget(self.cost_price_input, row, 5)
         row += 1
-        grid.addWidget(form_label("Opening Qty"), row, 0)
-        grid.addWidget(self.qty_input, row, 1)
-        grid.addWidget(form_label("Batch"), row, 2)
-        grid.addWidget(self.batch_input, row, 3)
-        grid.addWidget(form_label("Expiry"), row, 4)
-        grid.addWidget(self.expiry_input, row, 5)
+        grid.addWidget(form_label("Batch"), row, 0)
+        grid.addWidget(self.batch_input, row, 1)
+        grid.addWidget(form_label("Expiry"), row, 2)
+        grid.addWidget(self.expiry_input, row, 3)
+        grid.addWidget(form_label("Sale Price"), row, 4)
+        grid.addWidget(self.sale_price_input, row, 5)
 
         grid.setColumnStretch(1, 2)
         grid.setColumnStretch(3, 2)
         grid.setColumnStretch(5, 2)
-        layout.addLayout(grid)
+        content_layout.addLayout(grid)
+        layout.addWidget(content_frame)
 
-        footer = QHBoxLayout()
+        footer_frame = QFrame()
+        footer_frame.setObjectName("quickAddFooter")
+        footer = QHBoxLayout(footer_frame)
+        footer.setContentsMargins(10, 7, 10, 7)
+        footer.setSpacing(7)
         footer.addStretch()
         cancel_btn = QPushButton("Cancel", objectName="TopRightButton")
         save_btn = QPushButton("Save Product", objectName="TopRightButton")
@@ -189,19 +270,20 @@ class SalesQuickProductDialog(QDialog):
         save_btn.clicked.connect(self.save_product)
         footer.addWidget(cancel_btn)
         footer.addWidget(save_btn)
-        layout.addLayout(footer)
+        layout.addWidget(footer_frame)
 
         self.product_name_input.returnPressed.connect(lambda: self.focus_next_field(self.dose_input))
         self.dose_input.returnPressed.connect(lambda: self.focus_next_field(self.form_input))
-        self.form_input.returnPressed.connect(lambda: self.focus_next_field(self.formula_input))
+        if self.form_input.lineEdit() is not None:
+            self.form_input.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.formula_input))
         self.formula_input.returnPressed.connect(lambda: self.focus_next_field(self.manufacturer_combo))
         self.manufacturer_combo.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.pack_size_input))
-        self.pack_size_input.returnPressed.connect(lambda: self.focus_next_field(self.sale_price_input))
-        self.sale_price_input.returnPressed.connect(lambda: self.focus_next_field(self.cost_price_input))
-        self.cost_price_input.returnPressed.connect(lambda: self.focus_next_field(self.qty_input))
-        self.qty_input.returnPressed.connect(lambda: self.focus_next_field(self.batch_input))
+        self.pack_size_input.returnPressed.connect(lambda: self.focus_next_field(self.qty_input))
+        self.qty_input.returnPressed.connect(lambda: self.focus_next_field(self.cost_price_input))
+        self.cost_price_input.returnPressed.connect(lambda: self.focus_next_field(self.batch_input))
         self.batch_input.returnPressed.connect(lambda: self.focus_next_field(self.expiry_input))
-        self.expiry_input.returnPressed.connect(self.save_product)
+        self.expiry_input.returnPressed.connect(lambda: self.focus_next_field(self.sale_price_input))
+        self.sale_price_input.returnPressed.connect(self.save_product)
 
         self.try_prefill_existing_product(initial_name)
         self.product_name_input.setFocus()
@@ -351,7 +433,7 @@ class SalesQuickProductDialog(QDialog):
         if record["strength"]:
             self.dose_input.setText(record["strength"].upper())
         if record["form"]:
-            self.form_input.setText(record["form"].upper())
+            self.form_input.setEditText(record["form"].title())
         if record["generic_name"]:
             self.formula_input.setText(record["generic_name"])
         if record["manufacturer_id"] is not None:
@@ -371,7 +453,7 @@ class SalesQuickProductDialog(QDialog):
     def save_product(self):
         product_name = str(self.product_name_input.text() or "").strip()
         dose = str(self.dose_input.text() or "").strip()
-        form = str(self.form_input.text() or "").strip()
+        form = str(self.form_input.currentText() or "").strip()
         display_name = " ".join(part for part in [product_name, form, dose] if part).strip()
         formula = str(self.formula_input.text() or "").strip() or None
         manufacturer_id = self.manufacturer_combo.currentData()
@@ -976,29 +1058,31 @@ class CreateSalesWidget(QWidget):
 
             QLineEdit {
                 margin: 0;
-                padding: 5px 6px;
+                padding: 5px 4px;
                 border: 1px solid #ccc;
                 border-radius: 5px;
                 font-size: 12px;
                 letter-spacing: 0.2px;
                 background-color: #fbfcfd;
+                color: #223746;
             }
 
             QComboBox {
                 margin: 0;
-                padding: 5px 6px;
-                padding-right: 30px;
+                padding: 5px 4px;
+                padding-right: 24px;
                 border: 1px solid #ccc;
                 border-radius: 5px;
                 font-size: 12px;
                 letter-spacing: 0.2px;
                 background-color: #fbfcfd;
+                color: #223746;
             }
 
             QComboBox::drop-down {
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
-                width: 24px;
+                width: 20px;
                 border: none;
                 border-left: 1px solid #d8e0e6;
                 background-color: #f1f5f8;
@@ -1021,12 +1105,13 @@ class CreateSalesWidget(QWidget):
 
             KeyUpLineEdit {
                 margin: 0;
-                padding: 5px 10px;
+                padding: 5px 4px;
                 border: 1px solid #ccc;
                 border-radius: 5px;
                 font-size: 12px;
                 letter-spacing: 0.2px;
                 background-color: #fbfcfd;
+                color: #223746;
             }
         """
 
@@ -1039,7 +1124,9 @@ class CreateSalesWidget(QWidget):
 
         palette = get_theme_palette()
         info_bg = palette.get("primary_main", "#2F5D7C")
-        info_border = palette.get("primary_hover", "#244A62")
+        info_bg = palette.get("primary_light", "#DCEAF5")
+        info_border = palette.get("primary_soft_border", "#B7CCDD")
+        info_text = palette.get("primary_deep_text", "#1F445D")
 
         info_strip = QFrame()
         info_strip.setObjectName("LineInfoStrip")
@@ -1060,25 +1147,25 @@ class CreateSalesWidget(QWidget):
         self.line_info_formula_label.setWordWrap(False)
         self.line_info_formula_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.line_info_formula_label.setStyleSheet(
-            "color: #FFFFFF; font-size: 11px; font-weight: 700; padding-left: 0; margin: 0;"
+            f"color: {info_text}; font-size: 11px; font-weight: 700; padding-left: 0; margin: 0;"
         )
         self.line_info_cost_sale_label = QLabel("Cost: - | Sale: -")
         self.line_info_cost_sale_label.setWordWrap(False)
         self.line_info_cost_sale_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.line_info_cost_sale_label.setStyleSheet(
-            "color: #FFFFFF; font-size: 11px; font-weight: 700; padding-left: 0; margin: 0;"
+            f"color: {info_text}; font-size: 11px; font-weight: 700; padding-left: 0; margin: 0;"
         )
         self.line_info_profit_label = QLabel("Profit: -")
         self.line_info_profit_label.setWordWrap(False)
         self.line_info_profit_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.line_info_profit_label.setStyleSheet(
-            "color: #FFFFFF; font-size: 11px; font-weight: 700; padding-left: 0; margin: 0;"
+            f"color: {info_text}; font-size: 11px; font-weight: 700; padding-left: 0; margin: 0;"
         )
         self.line_info_margin_label = QLabel("Margin: -")
         self.line_info_margin_label.setWordWrap(False)
         self.line_info_margin_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.line_info_margin_label.setStyleSheet(
-            "color: #FFFFFF; font-size: 11px; font-weight: 700; padding-left: 0; margin: 0;"
+            f"color: {info_text}; font-size: 11px; font-weight: 700; padding-left: 0; margin: 0;"
         )
 
         info_strip_layout.addWidget(self.line_info_formula_label, 4)
@@ -2288,9 +2375,8 @@ class CreateSalesWidget(QWidget):
         
         
         qty_edit = QLineEdit()
-        qty_edit.setReadOnly(True)
         qty_edit.setText(qty_data)
-        
+        qty_edit.setPlaceholderText("qty")
         qty_edit.setStyleSheet("font-weight: 600;")
         
         
@@ -2300,15 +2386,18 @@ class CreateSalesWidget(QWidget):
         
         
         rate_edit = QLineEdit()
-        rate_edit.setReadOnly(True)
         rate_edit.setText(rate_data)
         rate_edit.setStyleSheet("font-weight: 600;")
         discount = QLineEdit()
-        discount.setReadOnly(True)
         discount.setText(discount_data)
         discount.setProperty("discount_input_mode", discount_mode)
         discount.setProperty("discount_percent_applied", resolved["discount_percent"])
+        discount.setProperty("discount_fixed_amount_applied", resolved["discount_fixed_amount"])
         discount.setProperty("discount_amount_applied", resolved["discount_amount"])
+        discount.setProperty(
+            "discount_apply_on_sale",
+            self.current_line_product_defaults.get("discount_apply_on_sale", True)
+        )
         discount.setProperty(
             "default_discount_group_id",
             self.current_line_product_defaults.get("discount_group_id")
@@ -2320,11 +2409,14 @@ class CreateSalesWidget(QWidget):
         discount.setProperty("discount_source", discount_source)
         
         tax = QLineEdit()
-        tax.setReadOnly(True)
         tax.setText(tax_data)
         tax.setProperty("tax_percent_applied", resolved["tax_percent"])
         tax.setProperty("tax_fixed_amount_applied", resolved["tax_fixed_amount"])
         tax.setProperty("tax_amount_applied", resolved["tax_amount"])
+        tax.setProperty(
+            "tax_apply_on_sale",
+            self.current_line_product_defaults.get("tax_apply_on_sale", True)
+        )
         tax.setProperty(
             "default_tax_group_id",
             self.current_line_product_defaults.get("tax_group_id")
@@ -2347,6 +2439,30 @@ class CreateSalesWidget(QWidget):
         self.table.setCellWidget(row, 5, tax)
         self.table.setCellWidget(row, 6, amount_edit)
         self.table.setCellWidget(row, 7, remove_btn)
+        qty_edit.textChanged.connect(
+            lambda _text, current_row=row: self._recalculate_sales_table_row(current_row)
+        )
+        rate_edit.textChanged.connect(
+            lambda _text, current_row=row: self._recalculate_sales_table_row(current_row)
+        )
+        discount.textChanged.connect(
+            lambda _text, current_row=row: self._recalculate_sales_table_row(current_row)
+        )
+        tax.textChanged.connect(
+            lambda _text, current_row=row: self._recalculate_sales_table_row(current_row)
+        )
+        discount.textEdited.connect(
+            lambda _text, widget=discount: (
+                widget.setProperty("discount_group_id", None),
+                widget.setProperty("discount_source", "manual_override")
+            )
+        )
+        tax.textEdited.connect(
+            lambda _text, widget=tax: (
+                widget.setProperty("tax_group_id", None),
+                widget.setProperty("tax_source", "manual_override")
+            )
+        )
         
         
         
@@ -2362,6 +2478,7 @@ class CreateSalesWidget(QWidget):
         self.current_line_product_defaults = {}
         self.line_discount_manual_override = False
         self.line_tax_manual_override = False
+        self.reset_current_line_defaults()
         self.update_line_pricing_hint()
         
         
@@ -2472,11 +2589,11 @@ class CreateSalesWidget(QWidget):
     def showEvent(self, event):
         
         super().showEvent(event)
-        print("Widget shown — refreshing data")
-        
-        if not self.reloading_sale:
-            
-            self.populate_customers()
+        if not getattr(self, "_customers_loaded_once", False):
+            print("Widget shown — refreshing data")
+            if not self.reloading_sale:
+                self.populate_customers()
+            self._customers_loaded_once = True
 
 
 
@@ -4292,9 +4409,10 @@ class CreateSalesWidget(QWidget):
                 LIMIT 1
             )
             WHERE p.display_name LIKE ?
-            LIMIT 10
+            ORDER BY p.display_name ASC
+            LIMIT 50
         """)
-        query.addBindValue(f"%{search_text}%")
+        query.addBindValue(f"{search_text}%")
 
         results = []
         if not query.exec():
@@ -4743,22 +4861,24 @@ class CreateSalesWidget(QWidget):
         )
 
         qty_edit = QLineEdit()
-        qty_edit.setReadOnly(True)
         qty_edit.setText(str(qty_data))
+        qty_edit.setPlaceholderText("qty")
         qty_edit.setStyleSheet("font-weight: 600;")
 
         rate_edit = QLineEdit()
-        rate_edit.setReadOnly(True)
         rate_edit.setText(str(rate_data))
         rate_edit.setStyleSheet("font-weight: 600;")
 
         discount = QLineEdit()
-        discount.setReadOnly(True)
         discount.setText(str(discount_data))
         discount.setProperty("discount_input_mode", discount_mode)
         discount.setProperty("discount_percent_applied", resolved["discount_percent"])
         discount.setProperty("discount_fixed_amount_applied", resolved["discount_fixed_amount"])
         discount.setProperty("discount_amount_applied", resolved["discount_amount"])
+        discount.setProperty(
+            "discount_apply_on_sale",
+            product_data.get("discount_apply_on_sale", True)
+        )
         discount.setProperty("default_discount_group_id", product_data.get("discount_group_id"))
         discount.setProperty(
             "discount_group_id",
@@ -4770,11 +4890,14 @@ class CreateSalesWidget(QWidget):
         )
 
         tax = QLineEdit()
-        tax.setReadOnly(True)
         tax.setText(str(tax_data))
         tax.setProperty("tax_percent_applied", resolved["tax_percent"])
         tax.setProperty("tax_fixed_amount_applied", resolved["tax_fixed_amount"])
         tax.setProperty("tax_amount_applied", resolved["tax_amount"])
+        tax.setProperty(
+            "tax_apply_on_sale",
+            product_data.get("tax_apply_on_sale", True)
+        )
         tax.setProperty("default_tax_group_id", product_data.get("tax_group_id"))
         tax.setProperty(
             "tax_group_id",
@@ -4798,6 +4921,30 @@ class CreateSalesWidget(QWidget):
         self.table.setCellWidget(row, 5, tax)
         self.table.setCellWidget(row, 6, amount_edit)
         self.table.setCellWidget(row, 7, remove_btn)
+        qty_edit.textChanged.connect(
+            lambda _text, current_row=row: self._recalculate_sales_table_row(current_row)
+        )
+        rate_edit.textChanged.connect(
+            lambda _text, current_row=row: self._recalculate_sales_table_row(current_row)
+        )
+        discount.textChanged.connect(
+            lambda _text, current_row=row: self._recalculate_sales_table_row(current_row)
+        )
+        tax.textChanged.connect(
+            lambda _text, current_row=row: self._recalculate_sales_table_row(current_row)
+        )
+        discount.textEdited.connect(
+            lambda _text, widget=discount: (
+                widget.setProperty("discount_group_id", None),
+                widget.setProperty("discount_source", "manual_override")
+            )
+        )
+        tax.textEdited.connect(
+            lambda _text, widget=tax: (
+                widget.setProperty("tax_group_id", None),
+                widget.setProperty("tax_source", "manual_override")
+            )
+        )
         
     
 
@@ -5722,3 +5869,39 @@ class QtyValidationFilter(QObject):
    
 
     
+    def _recalculate_sales_table_row(self, row):
+        qty_widget = self.table.cellWidget(row, 2)
+        rate_widget = self.table.cellWidget(row, 3)
+        discount_widget = self.table.cellWidget(row, 4)
+        tax_widget = self.table.cellWidget(row, 5)
+        total_widget = self.table.cellWidget(row, 6)
+
+        if not all([qty_widget, rate_widget, discount_widget, tax_widget, total_widget]):
+            return
+
+        qty_value = max(0.0, self._float_or_default(qty_widget.text(), 0.0))
+        rate_value = max(0.0, self._float_or_default(rate_widget.text(), 0.0))
+        discount_text = discount_widget.text().strip() or "0"
+        tax_text = tax_widget.text().strip() or "0"
+        discount_mode = str(discount_widget.property("discount_input_mode") or "percent")
+
+        resolved = self.resolve_line_pricing(
+            qty_value,
+            rate_value,
+            discount_text,
+            discount_mode,
+            tax_text,
+            discount_widget.property("discount_fixed_amount_applied") or 0.0,
+            bool(discount_widget.property("discount_apply_on_sale") if discount_widget.property("discount_apply_on_sale") is not None else True),
+            tax_widget.property("tax_fixed_amount_applied") or 0.0,
+            bool(tax_widget.property("tax_apply_on_sale") if tax_widget.property("tax_apply_on_sale") is not None else True),
+        )
+
+        total_widget.setText(f"{resolved['line_total']:.2f}")
+        discount_widget.setProperty("discount_percent_applied", resolved["discount_percent"])
+        discount_widget.setProperty("discount_fixed_amount_applied", resolved["discount_fixed_amount"])
+        discount_widget.setProperty("discount_amount_applied", resolved["discount_amount"])
+        tax_widget.setProperty("tax_percent_applied", resolved["tax_percent"])
+        tax_widget.setProperty("tax_fixed_amount_applied", resolved["tax_fixed_amount"])
+        tax_widget.setProperty("tax_amount_applied", resolved["tax_amount"])
+        self.update_total_amount()

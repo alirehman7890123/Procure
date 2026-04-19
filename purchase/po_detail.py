@@ -4,6 +4,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QDate
 from PySide6.QtSql import QSqlQuery
+from PySide6.QtGui import QPdfWriter, QPainter, QPageSize, QFont, QTextOption, QPen, QColor
+import os
+import platform
+import subprocess
 from utilities.activity_logger import log_activity
 from utilities.permissions import Permissions
 from utilities.stylus import load_stylesheets
@@ -192,12 +196,19 @@ class PODetailWidget(QWidget):
         self.update_status_btn.setFixedWidth(150)
         self.update_status_btn.clicked.connect(self.on_update_status)
 
+        self.print_po_btn = QPushButton("Print PO")
+        self.print_po_btn.setObjectName("TopRightButton")
+        self.print_po_btn.setCursor(Qt.PointingHandCursor)
+        self.print_po_btn.setFixedWidth(150)
+        self.print_po_btn.clicked.connect(self.on_print_po)
+
         self.close_po_btn = QPushButton("Close PO")
         self.close_po_btn.setObjectName("TopRightButton")
         self.close_po_btn.setCursor(Qt.PointingHandCursor)
         self.close_po_btn.setFixedWidth(150)
         self.close_po_btn.clicked.connect(self.on_close_po)
 
+        action_layout.addWidget(self.print_po_btn)
         action_layout.addWidget(self.update_status_btn)
         action_layout.addWidget(self.close_po_btn)
 
@@ -381,6 +392,174 @@ class PODetailWidget(QWidget):
             "If some quantity is received, the PO becomes Partial Received.\n"
             "When the ordered quantity is fully received, the PO becomes Received.",
         )
+
+    def export_po_pdf(self, filename="purchase_order.pdf"):
+        if not self.current_po_id:
+            raise Exception("No purchase order is loaded.")
+
+        business_name = "Business"
+        business_address = "-"
+        business_contact = "-"
+
+        business_query = QSqlQuery()
+        business_query.prepare("""
+            SELECT businessname, address, contact
+            FROM business
+            WHERE id = 1
+            LIMIT 1
+        """)
+        if business_query.exec() and business_query.next():
+            business_name = str(business_query.value(0) or business_name)
+            business_address = str(business_query.value(1) or business_address)
+            business_contact = str(business_query.value(2) or business_contact)
+
+        header_query = QSqlQuery()
+        header_query.prepare("""
+            SELECT
+                po.po_number,
+                po.po_date,
+                po.expected_delivery_date,
+                po.total_value,
+                po.notes,
+                COALESCE(s.name, 'Unknown Supplier')
+            FROM purchase_order po
+            LEFT JOIN supplier s ON s.id = po.supplier
+            WHERE po.id = ?
+            LIMIT 1
+        """)
+        header_query.addBindValue(int(self.current_po_id))
+        if not header_query.exec() or not header_query.next():
+            raise Exception(f"Failed to load PO header: {header_query.lastError().text()}")
+
+        po_number = str(header_query.value(0) or "")
+        po_date = str(header_query.value(1) or "")
+        expected_delivery = str(header_query.value(2) or "")
+        total_value = float(header_query.value(3) or 0.0)
+        notes = str(header_query.value(4) or "").strip()
+        supplier_name = str(header_query.value(5) or "Unknown Supplier")
+
+        line_query = QSqlQuery()
+        line_query.prepare("""
+            SELECT
+                p.display_name,
+                pol.qty_ordered,
+                pol.unit_price,
+                pol.total_price
+            FROM purchase_order_line pol
+            JOIN product p ON p.id = pol.product
+            WHERE pol.po_id = ?
+            ORDER BY pol.id ASC
+        """)
+        line_query.addBindValue(int(self.current_po_id))
+        if not line_query.exec():
+            raise Exception(f"Failed to load PO line items: {line_query.lastError().text()}")
+
+        items = []
+        while line_query.next():
+            items.append(
+                (
+                    str(line_query.value(0) or ""),
+                    float(line_query.value(1) or 0.0),
+                    float(line_query.value(2) or 0.0),
+                    float(line_query.value(3) or 0.0),
+                )
+            )
+
+        pdf = QPdfWriter(filename)
+        pdf.setPageSize(QPageSize(QPageSize.A4))
+        pdf.setResolution(300)
+
+        painter = QPainter(pdf)
+        painter.setPen(Qt.black)
+
+        x = 100
+        y = 200
+
+        painter.setFont(QFont("Arial", 16, QFont.Bold))
+        painter.drawText(x, y, business_name)
+
+        y += 80
+        painter.setFont(QFont("Arial", 12))
+        painter.drawText(x, y, business_address)
+        y += 70
+        painter.drawText(x, y, business_contact)
+
+        painter.setFont(QFont("Arial", 30, QFont.Bold))
+        painter.drawText(1550, 230, "Purchase Order")
+
+        painter.setFont(QFont("Arial", 12))
+        right_option = QTextOption()
+        right_option.setAlignment(Qt.AlignRight)
+        painter.drawText(QRectF(1550, 250, 650, 100), f"# {po_number}", right_option)
+        painter.drawText(QRectF(1550, 320, 650, 100), po_date, right_option)
+
+        y += 150
+        painter.setFont(QFont("Arial", 12, QFont.Bold))
+        painter.drawText(x, y, f"Supplier: {supplier_name}")
+        y += 70
+        painter.setFont(QFont("Arial", 11))
+        painter.drawText(x, y, f"Expected Delivery: {expected_delivery}")
+
+        y += 70
+        pen = QPen(QColor("black"))
+        pen.setWidth(4)
+        painter.setPen(pen)
+        painter.drawLine(x, y, pdf.width() - 200, y)
+
+        y += 70
+        painter.setFont(QFont("Arial", 11, QFont.Bold))
+        painter.drawText(x + 20, y, "Item")
+        painter.drawText(x + 1100, y, "Qty")
+        painter.drawText(x + 1450, y, "Unit Price")
+        painter.drawText(x + 1850, y, "Total")
+
+        y += 40
+        painter.drawLine(x, y, pdf.width() - 200, y)
+        y += 90
+
+        painter.setFont(QFont("Arial", 11))
+        for product_name, qty_ordered, unit_price, total_price in items:
+            painter.drawText(x + 20, y, product_name)
+            painter.drawText(x + 1100, y, f"{qty_ordered:g}")
+            painter.drawText(x + 1450, y, f"{unit_price:.2f}")
+            painter.drawText(x + 1850, y, f"{total_price:.2f}")
+            y += 80
+
+        y += 30
+        painter.drawLine(x + 1450, y, pdf.width() - 200, y)
+        y += 80
+        painter.setFont(QFont("Arial", 14, QFont.Bold))
+        painter.drawText(x + 1450, y, "Total Value:")
+        painter.drawText(x + 1900, y, f"{total_value:.2f}")
+
+        if notes:
+            y += 120
+            painter.setFont(QFont("Arial", 11, QFont.Bold))
+            painter.drawText(x, y, "Notes:")
+            y += 55
+            painter.setFont(QFont("Arial", 11))
+            painter.drawText(QRectF(x, y, pdf.width() - 300, 220), notes)
+
+        painter.end()
+        return filename
+
+    def print_pdf(self, filename):
+        system = platform.system()
+        if system in ("Linux", "Darwin"):
+            subprocess.run(["lp", filename], check=False)
+        elif system == "Windows":
+            os.startfile(filename, "print")
+
+    def on_print_po(self):
+        if not self.current_po_id:
+            AppMessageBox.warning(self, "Print PO", "No purchase order is loaded.")
+            return
+        try:
+            filename = self.export_po_pdf(filename=f"purchase_order_{self.current_po_id}.pdf")
+            self.print_pdf(filename)
+            AppMessageBox.information(self, "Print PO", "Purchase Order sent for printing.")
+        except Exception as exc:
+            AppMessageBox.error(self, "Print PO", f"Failed to print Purchase Order: {exc}")
 
     @Permissions.require_permission('po.update')
     def on_close_po(self):

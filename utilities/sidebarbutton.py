@@ -23,9 +23,9 @@ class SideBarButton(QPushButton):
 
         self.setContentsMargins(0, 0, 0, 0)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.setFixedHeight(42)
+        self.setFixedHeight(40)
         self.setFlat(True)
-        self.setIconSize(QSize(18, 18))
+        self.setIconSize(QSize(17, 17))
         self.setAttribute(Qt.WA_Hover, True)
         self.setCursor(Qt.PointingHandCursor)
         self.setText(self._display_text)
@@ -59,7 +59,7 @@ class SideBarButton(QPushButton):
 
     def set_collapsed(self, collapsed: bool):
         self._is_collapsed = bool(collapsed)
-        self.setFixedHeight(38 if self._is_collapsed else 42)
+        self.setFixedHeight(40 if self._is_collapsed else 40)
         if self._is_collapsed:
             self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             self.setFixedWidth(40)
@@ -93,8 +93,8 @@ class SideBarButton(QPushButton):
         left_pad = "0px" if self._is_collapsed else "18px"
         right_pad = "0px" if self._is_collapsed else "14px"
         min_width = "40px" if self._is_collapsed else "0px"
-        margin = "4px" if self._is_collapsed else "3px 0px"
-        padding = "0px" if self._is_collapsed else "0px"
+        margin = "4px" if self._is_collapsed else "2px 0px"
+        padding = "4px 0px" if self._is_collapsed else "0px"
         radius = "10px" if self._is_collapsed else "5px"
 
         self.setStyleSheet(f"""

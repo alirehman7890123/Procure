@@ -5,7 +5,7 @@ ProductSearchBox
 ----------------
 A QComboBox subclass with a pre-wired QCompleter that runs the standard
 product name search (SELECT id, display_name FROM product WHERE display_name
-LIKE ? LIMIT 15) on every keystroke and emits product_selected(int, str)
+LIKE ? LIMIT 50) on every keystroke and emits product_selected(int, str)
 when the user picks an item.
 
 Usage
@@ -90,7 +90,7 @@ class ProductSearchBox(QComboBox):
         self._completer = QCompleter(self)
         self._completer.setCompletionMode(QCompleter.PopupCompletion)
         self._completer.setCaseSensitivity(Qt.CaseInsensitive)
-        self._completer.setFilterMode(Qt.MatchContains)
+        self._completer.setFilterMode(Qt.MatchStartsWith)
 
         popup = self._completer.popup()
         if popup is not None:
@@ -300,10 +300,11 @@ class ProductSearchBox(QComboBox):
                 ), 0) AS pack_size
             FROM product p
             WHERE p.display_name LIKE ?
-            LIMIT 15
+            ORDER BY p.display_name ASC
+            LIMIT 50
             """
         )
-        query.addBindValue(f"%{search_text}%")
+        query.addBindValue(f"{search_text}%")
         results = []
         if not query.exec():
             return results

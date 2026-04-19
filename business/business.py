@@ -122,12 +122,15 @@ class BusinessWidget(QWidget):
        
         
         self.setStyleSheet(load_stylesheets())
+        self._business_loaded_once = False
 
     
     def showEvent(self, event):
         super().showEvent(event)
-        print("Widget shown — refreshing data")
-        self.load_business_data()
+        if not self._business_loaded_once:
+            print("Widget shown — refreshing data")
+            self.load_business_data()
+            self._business_loaded_once = True
         
         
 

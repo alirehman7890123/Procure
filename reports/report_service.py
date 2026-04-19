@@ -154,11 +154,68 @@ class ReportService:
 
     def get_inventory_overview_snapshot(self):
         inventory = self.get_current_inventory_snapshot()
+        sale_snapshot = self.get_current_inventory_sale_snapshot()
         return {
             "inventory": inventory,
             "opening_estimate_amount": float(self.get_opening_estimate_amount() or 0.0),
             "known_stock_cost_amount": float(self.get_total_purchase_amount() or 0.0),
+            "potential_stock_sale_amount": float(sale_snapshot.get("known_sale_value", 0.0) or 0.0),
+            "unknown_sale_price_units": float(sale_snapshot.get("unknown_price_units", 0.0) or 0.0),
+            "projected_stock_margin_amount": (
+                float(sale_snapshot.get("known_sale_value", 0.0) or 0.0)
+                - float(inventory.get("known_inventory_value", 0.0) or 0.0)
+            ),
             "stock_alerts": self.get_stock_count_alerts(),
+        }
+
+    def get_current_inventory_sale_snapshot(self):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                COALESCE(SUM(
+                    COALESCE(b.quantity_remaining, 0) * COALESCE((
+                        SELECT pp.unit_price
+                        FROM price_pack pp
+                        WHERE pp.product_id = b.product_id
+                        ORDER BY pp.is_default DESC, pp.id DESC
+                        LIMIT 1
+                    ), 0)
+                ), 0) AS known_sale_value,
+                COALESCE(SUM(
+                    CASE
+                        WHEN COALESCE((
+                            SELECT pp.unit_price
+                            FROM price_pack pp
+                            WHERE pp.product_id = b.product_id
+                            ORDER BY pp.is_default DESC, pp.id DESC
+                            LIMIT 1
+                        ), 0) <= 0
+                        THEN COALESCE(b.quantity_remaining, 0)
+                        ELSE 0
+                    END
+                ), 0) AS unknown_price_units
+            FROM batch b
+            WHERE COALESCE(b.quantity_remaining, 0) > 0
+            """
+        )
+
+        if not query.exec():
+            print("Current inventory sale snapshot query failed:", query.lastError().text())
+            return {
+                "known_sale_value": 0.0,
+                "unknown_price_units": 0.0,
+            }
+
+        if query.next():
+            return {
+                "known_sale_value": float(query.value(0) or 0.0),
+                "unknown_price_units": float(query.value(1) or 0.0),
+            }
+
+        return {
+            "known_sale_value": 0.0,
+            "unknown_price_units": 0.0,
         }
 
     def get_balance_sheet_snapshot(self):
@@ -1366,6 +1423,83 @@ class ReportService:
                 "stock_qty": float(query.value(2) or 0.0),
                 "known_stock_value": float(query.value(3) or 0.0),
                 "unknown_cost_units": float(query.value(4) or 0.0),
+            })
+        return rows
+
+    def get_stock_sale_value_rows(self, limit=1000):
+        query = QSqlQuery()
+        sql = f"""
+            SELECT
+                COALESCE(p.id, 0),
+                COALESCE(p.display_name, 'Unknown Product') AS product_name,
+                COALESCE(SUM(CASE WHEN COALESCE(b.quantity_remaining, 0) > 0 THEN COALESCE(b.quantity_remaining, 0) ELSE 0 END), 0) AS stock_qty,
+                COALESCE(SUM(CASE
+                    WHEN COALESCE(b.quantity_remaining, 0) > 0
+                     AND COALESCE((
+                        SELECT pp.unit_price
+                        FROM price_pack pp
+                        WHERE pp.product_id = p.id
+                        ORDER BY pp.is_default DESC, pp.id DESC
+                        LIMIT 1
+                     ), 0) > 0
+                    THEN COALESCE(b.quantity_remaining, 0) * COALESCE((
+                        SELECT pp.unit_price
+                        FROM price_pack pp
+                        WHERE pp.product_id = p.id
+                        ORDER BY pp.is_default DESC, pp.id DESC
+                        LIMIT 1
+                    ), 0)
+                    ELSE 0
+                END), 0) AS sale_value,
+                COALESCE(SUM(CASE
+                    WHEN COALESCE(b.quantity_remaining, 0) > 0
+                     AND b.unit_cost IS NOT NULL
+                    THEN COALESCE(b.quantity_remaining, 0) * COALESCE(b.unit_cost, 0)
+                    ELSE 0
+                END), 0) AS known_cost_value,
+                COALESCE(SUM(CASE
+                    WHEN COALESCE(b.quantity_remaining, 0) > 0
+                     AND COALESCE((
+                        SELECT pp.unit_price
+                        FROM price_pack pp
+                        WHERE pp.product_id = p.id
+                        ORDER BY pp.is_default DESC, pp.id DESC
+                        LIMIT 1
+                     ), 0) <= 0
+                    THEN COALESCE(b.quantity_remaining, 0)
+                    ELSE 0
+                END), 0) AS unknown_sale_price_units,
+                COALESCE(SUM(CASE
+                    WHEN COALESCE(b.quantity_remaining, 0) > 0
+                     AND b.unit_cost IS NULL
+                    THEN COALESCE(b.quantity_remaining, 0)
+                    ELSE 0
+                END), 0) AS unknown_cost_units
+            FROM product p
+            LEFT JOIN batch b ON b.product_id = p.id
+            WHERE p.status = 'used'
+            GROUP BY p.id, p.display_name
+            HAVING stock_qty > 0
+            ORDER BY sale_value DESC, stock_qty DESC
+            LIMIT {int(limit)}
+        """
+        if not query.exec(sql):
+            print("Stock sale value query failed:", query.lastError().text())
+            return []
+
+        rows = []
+        while query.next():
+            sale_value = float(query.value(3) or 0.0)
+            known_cost_value = float(query.value(4) or 0.0)
+            rows.append({
+                "product_id": int(query.value(0) or 0),
+                "product_name": str(query.value(1) or ""),
+                "stock_qty": float(query.value(2) or 0.0),
+                "sale_value": sale_value,
+                "known_cost_value": known_cost_value,
+                "projected_margin": sale_value - known_cost_value,
+                "unknown_sale_price_units": float(query.value(5) or 0.0),
+                "unknown_cost_units": float(query.value(6) or 0.0),
             })
         return rows
 

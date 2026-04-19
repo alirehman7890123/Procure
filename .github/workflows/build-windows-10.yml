@@ -1,0 +1,65 @@
+name: Build PyInstaller App (Windows)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Create virtual environment
+        run: |
+          python -m venv venv
+          .\venv\Scripts\Activate.ps1
+          python -m pip install --upgrade pip setuptools wheel
+
+      - name: Install project dependencies
+        run: |
+          .\venv\Scripts\Activate.ps1
+          pip install -r requirements.txt PyInstaller
+
+      - name: Ensure public key exists
+        run: |
+          .\venv\Scripts\Activate.ps1
+          @'
+          import json
+          from pathlib import Path
+          path = Path("licensing/public_key.json")
+          if not path.exists():
+            raise SystemExit("public_key.json is missing")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          if not isinstance(data, dict) or not data.get("n") or not data.get("e"):
+            raise SystemExit("public_key.json is not configured with a valid public key")
+          print("public_key.json is present and configured")
+          '@ | python -
+
+      - name: Build executable with PyInstaller
+        run: |
+          .\venv\Scripts\Activate.ps1
+          python -m PyInstaller --noconfirm --clean ProcureMedic.spec
+
+      - name: Create ZIP artifact
+        run: |
+          if (Test-Path ProcureMedic-windows.zip) {
+            Remove-Item ProcureMedic-windows.zip -Force
+          }
+          Compress-Archive -Path dist\* -DestinationPath ProcureMedic-windows.zip -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: procure-medics-windows
+          path: ProcureMedic-windows.zip

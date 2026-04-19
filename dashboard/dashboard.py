@@ -18,6 +18,7 @@ from dashboard.daily_session import DailySession
 import os
 import sys
 from utilities.app_messagebox import AppMessageBox
+from functools import lru_cache
 
 
 def resource_path(relative_path):
@@ -30,6 +31,7 @@ def resource_path(relative_path):
 
 
 
+@lru_cache(maxsize=1)
 def load_stylesheets():
     """Load and combine all CSS files from the styles folder."""
     styles_dir = resource_path("styles")
@@ -46,6 +48,15 @@ def load_stylesheets():
 
 
 
+
+
+class ClickableLabel(QLabel):
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
 
 
 class DashboardWidget(QWidget):
@@ -68,9 +79,24 @@ class DashboardWidget(QWidget):
 
         header_layout.addStretch()
 
-        self.dashboard_datetime = QLabel("")
+        self.dashboard_datetime = ClickableLabel("")
         self.dashboard_datetime.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.dashboard_datetime.setStyleSheet("color: #2F5D7C; font-weight: 600;")
+        self.dashboard_datetime.setCursor(Qt.PointingHandCursor)
+        self.dashboard_datetime.setStyleSheet("""
+            QLabel {
+                color: #2F5D7C;
+                font-weight: 600;
+                padding: 2px 4px;
+                border-radius: 4px;
+            }
+            QLabel:hover {
+                color: #1F445D;
+                background-color: #E7F1F8;
+                text-decoration: underline;
+            }
+        """)
+        self.dashboard_datetime.setToolTip("Click to view previous logins")
+        self.dashboard_datetime.clicked.connect(self.show_login_history_dialog)
         header_layout.addWidget(self.dashboard_datetime, 0, Qt.AlignRight)
 
         self.layout.addLayout(header_layout)
@@ -202,7 +228,9 @@ class DashboardWidget(QWidget):
         
         self.add_dashboard_alerts()
 
-        QTimer.singleShot(0, self.run_scheduled_backup_cycle)
+        # Let the first paint complete before loading heavier dashboard work.
+        QTimer.singleShot(180, self.refresh_dashboard_alerts)
+        QTimer.singleShot(4000, self.run_scheduled_backup_cycle)
 
         # set stylesheets
         self.setStyleSheet(load_stylesheets())
@@ -264,8 +292,6 @@ class DashboardWidget(QWidget):
         alerts_layout.addWidget(self.backup_card)
 
         self.layout.addWidget(self.alerts_container, 0, Qt.AlignTop)
-
-        self.load_inventory_alerts()
 
     def build_quick_links_card(self):
         card = QFrame()
@@ -760,6 +786,223 @@ class DashboardWidget(QWidget):
             self.dashboard_datetime.setText(f"Login Time: {formatted}")
         else:
             self.dashboard_datetime.setText("Login Time: Not available")
+
+    def show_login_history_dialog(self):
+        app = QApplication.instance()
+        username = (app.property("username") or "") if app else ""
+        if not username:
+            AppMessageBox.information(self, "Login History", "User context is not available.")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Previous Logins")
+        dialog.setMinimumSize(760, 520)
+        dialog.setStyleSheet("""
+            QDialog { background: #EEF4F8; }
+            QFrame#loginHistoryHeader {
+                background-color: #325D7B;
+                border: 1px solid #284B63;
+                border-radius: 8px;
+            }
+            QFrame#loginHistoryContent, QFrame#loginHistoryFooter {
+                background: #FFFFFF;
+                border: 1px solid #D3DEE7;
+                border-radius: 8px;
+            }
+        """)
+
+        root = QVBoxLayout(dialog)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(10)
+
+        header_frame = QFrame()
+        header_frame.setObjectName("loginHistoryHeader")
+        header_layout = QVBoxLayout(header_frame)
+        header_layout.setContentsMargins(14, 12, 14, 12)
+        header_layout.setSpacing(4)
+
+        title = QLabel("Previous Logins")
+        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #FFFFFF;")
+        header_layout.addWidget(title)
+
+        subtitle = QLabel("Login history for the current user. Default view shows the last week.")
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet("font-size: 11px; color: #DDEAF3;")
+        header_layout.addWidget(subtitle)
+        root.addWidget(header_frame)
+
+        content_frame = QFrame()
+        content_frame.setObjectName("loginHistoryContent")
+        content_layout = QVBoxLayout(content_frame)
+        content_layout.setContentsMargins(14, 12, 14, 12)
+        content_layout.setSpacing(8)
+
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(8)
+        filter_row.addWidget(QLabel("Period"))
+
+        period_combo = QComboBox()
+        period_combo.addItem("Today", "today")
+        period_combo.addItem("Last Week", "week")
+        period_combo.addItem("Last Month", "month")
+        period_combo.addItem("All", "all")
+        period_combo.setCurrentIndex(period_combo.findData("week"))
+        filter_row.addWidget(period_combo)
+        filter_row.addStretch()
+
+        reload_btn = QPushButton("Reload", objectName="TopRightButton")
+        filter_row.addWidget(reload_btn)
+        content_layout.addLayout(filter_row)
+
+        table = QTableWidget()
+        table.setColumnCount(5)
+        table.setHorizontalHeaderLabels(["Login Date", "Login Time", "Logout Time", "Duration", "Daily Session"])
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.setAlternatingRowColors(True)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        content_layout.addWidget(table)
+
+        summary_label = QLabel("Rows: 0")
+        summary_label.setStyleSheet("font-weight: 600; color: #223746;")
+        content_layout.addWidget(summary_label)
+        root.addWidget(content_frame)
+
+        footer_frame = QFrame()
+        footer_frame.setObjectName("loginHistoryFooter")
+        footer_layout = QHBoxLayout(footer_frame)
+        footer_layout.setContentsMargins(14, 10, 14, 10)
+        footer_layout.setSpacing(8)
+        footer_layout.addStretch()
+
+        close_btn = QPushButton("Close", objectName="TopRightButton")
+        close_btn.clicked.connect(dialog.accept)
+        footer_layout.addWidget(close_btn)
+        root.addWidget(footer_frame)
+
+        def load_rows():
+            period_key = period_combo.currentData()
+            date_filter_sql = ""
+
+            if period_key == "today":
+                date_filter_sql = " AND DATE(timestamp) = DATE('now') "
+            elif period_key == "week":
+                date_filter_sql = " AND DATE(timestamp) >= DATE('now', '-6 days') "
+            elif period_key == "month":
+                date_filter_sql = " AND DATE(timestamp) >= DATE('now', '-29 days') "
+
+            query = QSqlQuery()
+            query.prepare(
+                f"""
+                SELECT
+                    COALESCE(al.timestamp, ''),
+                    COALESCE(al.login_session_id, ''),
+                    COALESCE(al.daily_session_id, ''),
+                    COALESCE(ds.session_date, ''),
+                    COALESCE((
+                        SELECT lo.timestamp
+                        FROM activity_log lo
+                        WHERE lo.category = 'login'
+                          AND lo.action = 'logout'
+                          AND COALESCE(lo.login_session_id, '') = COALESCE(al.login_session_id, '')
+                        ORDER BY datetime(lo.timestamp) DESC
+                        LIMIT 1
+                    ), '')
+                FROM activity_log al
+                LEFT JOIN daily_session ds ON ds.id = al.daily_session_id
+                WHERE al.category = 'login'
+                  AND al.action = 'login'
+                  AND al.username = ?
+                  {date_filter_sql}
+                ORDER BY datetime(al.timestamp) DESC
+                LIMIT 500
+                """
+            )
+            query.addBindValue(username)
+
+            rows = []
+            if query.exec():
+                while query.next():
+                    raw_timestamp = str(query.value(0) or "").strip()
+                    logout_timestamp = str(query.value(4) or "").strip()
+                    login_dt = QDateTime.fromString(raw_timestamp, "yyyy-MM-dd HH:mm:ss")
+                    if not login_dt.isValid():
+                        login_dt = QDateTime.fromString(raw_timestamp, Qt.ISODate)
+
+                    logout_dt = QDateTime.fromString(logout_timestamp, "yyyy-MM-dd HH:mm:ss")
+                    if not logout_dt.isValid():
+                        logout_dt = QDateTime.fromString(logout_timestamp, Qt.ISODate)
+
+                    if login_dt.isValid():
+                        if login_dt.timeSpec() == Qt.LocalTime:
+                            login_dt.setTimeSpec(Qt.UTC)
+                        login_dt = login_dt.toLocalTime()
+                        login_date = login_dt.toString("ddd, dd MMM yyyy")
+                        login_time = login_dt.toString("hh:mm AP")
+                    else:
+                        login_date = raw_timestamp
+                        login_time = ""
+
+                    if logout_dt.isValid():
+                        if logout_dt.timeSpec() == Qt.LocalTime:
+                            logout_dt.setTimeSpec(Qt.UTC)
+                        logout_dt = logout_dt.toLocalTime()
+                        logout_time = logout_dt.toString("hh:mm AP")
+                    else:
+                        logout_time = "Active / Unknown"
+
+                    duration_text = "-"
+                    if login_dt.isValid() and logout_dt.isValid():
+                        total_seconds = max(0, login_dt.secsTo(logout_dt))
+                        hours = total_seconds // 3600
+                        minutes = (total_seconds % 3600) // 60
+                        if hours > 0:
+                            duration_text = f"{hours}h {minutes}m"
+                        else:
+                            duration_text = f"{minutes}m"
+
+                    daily_session_id = str(query.value(2) or "").strip()
+                    session_date = str(query.value(3) or "").strip()
+                    if daily_session_id and session_date:
+                        daily_session_label = f"Session #{daily_session_id} | {session_date}"
+                    elif daily_session_id:
+                        daily_session_label = f"Session #{daily_session_id}"
+                    else:
+                        daily_session_label = "-"
+
+                    rows.append({
+                        "login_date": login_date,
+                        "login_time": login_time,
+                        "logout_time": logout_time,
+                        "duration": duration_text,
+                        "daily_session_label": daily_session_label,
+                    })
+
+            table.setRowCount(len(rows))
+            for row_index, row in enumerate(rows):
+                values = [
+                    row["login_date"],
+                    row["login_time"],
+                    row["logout_time"],
+                    row["duration"],
+                    row["daily_session_label"],
+                ]
+                for col, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    item.setFlags(item.flags() ^ Qt.ItemIsEditable)
+                    table.setItem(row_index, col, item)
+
+            summary_label.setText(f"Rows: {len(rows)} | User: {username} | Period: {period_combo.currentText()}")
+
+        reload_btn.clicked.connect(load_rows)
+        period_combo.currentIndexChanged.connect(lambda _: load_rows())
+        load_rows()
+        dialog.exec()
 
     def build_session_card(self):
         card = QFrame()
@@ -2275,9 +2518,9 @@ class DashboardWidget(QWidget):
     def showEvent(self, event):
         
         super().showEvent(event)
-        # Refresh alerts each time dashboard becomes visible.
-        # singleShot avoids blocking paint/show in some parent layouts.
-        QTimer.singleShot(0, self.refresh_dashboard_alerts)
+        # Refresh shortly after the dashboard becomes visible without blocking
+        # the first paint.
+        QTimer.singleShot(150, self.refresh_dashboard_alerts)
         
         
 
