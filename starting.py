@@ -103,7 +103,7 @@ class AuthWindow(QMainWindow):
         companyinfo.setLayout(companyinfo_layout)
         companyinfo_layout.setContentsMargins(44, 42, 44, 42)
         companyinfo_layout.setSpacing(18)
-        companyinfo.setMinimumWidth(600)
+        companyinfo.setMinimumWidth(480)
         companyinfo.setStyleSheet("""
             background-color: #163B5C;
             color: #EAF3FB;
@@ -119,7 +119,7 @@ class AuthWindow(QMainWindow):
         authinfo.setLayout(auth_layout)
         auth_layout.setContentsMargins(56, max(32, int(height * 0.10)), 56, 44)
         auth_layout.setSpacing(0)
-        authinfo.setMinimumWidth(600)
+        authinfo.setMinimumWidth(480)
         authinfo.setStyleSheet("background-color: #F5F8FB;")
 
         login_card = QFrame()
@@ -130,8 +130,8 @@ class AuthWindow(QMainWindow):
                 border-radius: 8px;
             }
         """)
-        login_card.setMinimumWidth(520)
-        login_card.setMaximumWidth(680)
+        login_card.setMinimumWidth(440)
+        login_card.setMaximumWidth(620)
 
         login_card_layout = QVBoxLayout(login_card)
         login_card_layout.setContentsMargins(38, 34, 38, 30)
@@ -835,6 +835,9 @@ class AuthWindow(QMainWindow):
 
             if self._ensure_sqlite_column(conn, "accounting_settings", "minimum_margin_percent", "REAL DEFAULT 15.0"):
                 changed.append("accounting_settings.minimum_margin_percent")
+
+            if self._ensure_sqlite_column(conn, "price_pack", "margin_percent", "REAL DEFAULT 14.5"):
+                changed.append("price_pack.margin_percent")
 
             if changed:
                 conn.commit()
@@ -1708,6 +1711,7 @@ class AuthWindow(QMainWindow):
                 pack_size INTEGER NOT NULL,      -- e.g. 5 tablets
                 pack_price REAL NOT NULL,        -- e.g. 50
                 unit_price REAL GENERATED ALWAYS AS (pack_price / pack_size),
+                margin_percent REAL DEFAULT 14.5,
                 reorder_level INTEGER DEFAULT 0,
                 is_default BOOLEAN DEFAULT 1
             );

@@ -73,7 +73,7 @@ class ExpenseListWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)   
 
-        self.table.setMinimumWidth(900)
+        self.table.setMinimumWidth(700)
         
         # Hide vertical header (row numbers)
         self.table.verticalHeader().setVisible(False)

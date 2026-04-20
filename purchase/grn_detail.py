@@ -146,7 +146,7 @@ class GRNDetailWidget(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.setStyleSheet("QTableWidget::item { color: #333; border: none; }")
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.table.setMinimumWidth(900)
+        self.table.setMinimumWidth(700)
         self.table.setFixedHeight(360)
         self.layout.addWidget(self.table)
 

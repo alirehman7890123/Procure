@@ -81,6 +81,7 @@ class SelectAllLineEdit(QLineEdit):
 
 
 class SalesQuickProductDialog(QDialog):
+    DEFAULT_MARGIN_PERCENT = 14.5
     FORM_OPTIONS = sorted([
         f.title() for f in [
             "AEROSOL","BALM","BUBBLE GUM","CAP","CAPLET","CAPS SR","CREAM","DRAGEES","DROPS",
@@ -103,7 +104,8 @@ class SalesQuickProductDialog(QDialog):
         self.existing_product_id = None
         self.setWindowTitle("Quick Add Product")
         self.setModal(True)
-        self.setMinimumWidth(640)
+        self.setMinimumWidth(520)
+        self.setMinimumHeight(420)
 
         self.setStyleSheet("""
             QDialog {
@@ -120,8 +122,8 @@ class SalesQuickProductDialog(QDialog):
                 border-radius: 8px;
             }
             QLineEdit, QComboBox {
-                min-height: 28px;
-                padding: 3px 7px;
+                min-height: 26px;
+                padding: 2px 6px;
                 border: 1px solid #C7D4DF;
                 border-radius: 6px;
                 background: #FFFFFF;
@@ -163,12 +165,12 @@ class SalesQuickProductDialog(QDialog):
         content_frame = QFrame()
         content_frame.setObjectName("quickAddContent")
         content_layout = QVBoxLayout(content_frame)
-        content_layout.setContentsMargins(10, 8, 10, 8)
-        content_layout.setSpacing(6)
+        content_layout.setContentsMargins(12, 10, 12, 10)
+        content_layout.setSpacing(10)
 
         grid = QGridLayout()
         grid.setHorizontalSpacing(7)
-        grid.setVerticalSpacing(5)
+        grid.setVerticalSpacing(11)
 
         def form_label(text):
             lbl = QLabel(text)
@@ -213,8 +215,13 @@ class SalesQuickProductDialog(QDialog):
         self.sale_price_input = SelectAllLineEdit()
         self.sale_price_input.setPlaceholderText("Sale price")
 
+        self.margin_input = SelectAllLineEdit()
+        self.margin_input.setPlaceholderText("Margin %")
+        self.margin_input.setText(f"{self.DEFAULT_MARGIN_PERCENT:.1f}")
+
         self.cost_price_input = SelectAllLineEdit()
-        self.cost_price_input.setPlaceholderText("Cost price (optional)")
+        self.cost_price_input.setPlaceholderText("Cost price (derived)")
+        self.cost_price_input.setReadOnly(True)
 
         self.qty_input = SelectAllLineEdit()
         self.qty_input.setPlaceholderText("Opening qty")
@@ -228,7 +235,8 @@ class SalesQuickProductDialog(QDialog):
         self.expiry_input.setInputMask("99-99;_")
 
         row = 0
-        grid.addWidget(self.product_name_input, row, 0, 1, 2)
+        grid.addWidget(form_label("Product"), row, 0)
+        grid.addWidget(self.product_name_input, row, 1)
         grid.addWidget(self.dose_input, row, 2, 1, 2)
         grid.addWidget(self.form_input, row, 4, 1, 2)
         row += 1
@@ -236,21 +244,23 @@ class SalesQuickProductDialog(QDialog):
         grid.addWidget(self.formula_input, row, 1, 1, 5)
         row += 1
         grid.addWidget(form_label("Manufacturer"), row, 0)
-        grid.addWidget(self.manufacturer_combo, row, 1, 1, 5)
+        grid.addWidget(self.manufacturer_combo, row, 1, 1, 3)
+        grid.addWidget(form_label("Pack Size"), row, 4)
+        grid.addWidget(self.pack_size_input, row, 5)
         row += 1
-        grid.addWidget(form_label("Pack Size"), row, 0)
-        grid.addWidget(self.pack_size_input, row, 1)
-        grid.addWidget(form_label("Opening Qty"), row, 2)
-        grid.addWidget(self.qty_input, row, 3)
+        grid.addWidget(form_label("Sale Price"), row, 0)
+        grid.addWidget(self.sale_price_input, row, 1)
+        grid.addWidget(form_label("Margin %"), row, 2)
+        grid.addWidget(self.margin_input, row, 3)
         grid.addWidget(form_label("Cost Price"), row, 4)
         grid.addWidget(self.cost_price_input, row, 5)
         row += 1
-        grid.addWidget(form_label("Batch"), row, 0)
-        grid.addWidget(self.batch_input, row, 1)
-        grid.addWidget(form_label("Expiry"), row, 2)
-        grid.addWidget(self.expiry_input, row, 3)
-        grid.addWidget(form_label("Sale Price"), row, 4)
-        grid.addWidget(self.sale_price_input, row, 5)
+        grid.addWidget(form_label("Opening Qty"), row, 0)
+        grid.addWidget(self.qty_input, row, 1)
+        grid.addWidget(form_label("Batch"), row, 2)
+        grid.addWidget(self.batch_input, row, 3)
+        grid.addWidget(form_label("Expiry"), row, 4)
+        grid.addWidget(self.expiry_input, row, 5)
 
         grid.setColumnStretch(1, 2)
         grid.setColumnStretch(3, 2)
@@ -266,6 +276,7 @@ class SalesQuickProductDialog(QDialog):
         footer.addStretch()
         cancel_btn = QPushButton("Cancel", objectName="TopRightButton")
         save_btn = QPushButton("Save Product", objectName="TopRightButton")
+        self.save_btn = save_btn
         cancel_btn.clicked.connect(self.reject)
         save_btn.clicked.connect(self.save_product)
         footer.addWidget(cancel_btn)
@@ -278,14 +289,18 @@ class SalesQuickProductDialog(QDialog):
             self.form_input.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.formula_input))
         self.formula_input.returnPressed.connect(lambda: self.focus_next_field(self.manufacturer_combo))
         self.manufacturer_combo.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.pack_size_input))
-        self.pack_size_input.returnPressed.connect(lambda: self.focus_next_field(self.qty_input))
-        self.qty_input.returnPressed.connect(lambda: self.focus_next_field(self.cost_price_input))
+        self.pack_size_input.returnPressed.connect(lambda: self.focus_next_field(self.sale_price_input))
+        self.sale_price_input.returnPressed.connect(lambda: self.focus_next_field(self.margin_input))
+        self.margin_input.returnPressed.connect(lambda: self.focus_next_field(self.qty_input))
+        self.qty_input.returnPressed.connect(lambda: self.focus_next_field(self.batch_input))
         self.cost_price_input.returnPressed.connect(lambda: self.focus_next_field(self.batch_input))
         self.batch_input.returnPressed.connect(lambda: self.focus_next_field(self.expiry_input))
-        self.expiry_input.returnPressed.connect(lambda: self.focus_next_field(self.sale_price_input))
-        self.sale_price_input.returnPressed.connect(self.save_product)
+        self.expiry_input.returnPressed.connect(lambda: self.focus_next_field(self.save_btn))
 
         self.try_prefill_existing_product(initial_name)
+        self.sale_price_input.textChanged.connect(self.calculate_pack_cost_from_margin)
+        self.margin_input.textChanged.connect(self.calculate_pack_cost_from_margin)
+        self.calculate_pack_cost_from_margin()
         self.product_name_input.setFocus()
         self.product_name_input.selectAll()
 
@@ -358,6 +373,16 @@ class SalesQuickProductDialog(QDialog):
         except Exception:
             return float(default)
 
+    def calculate_pack_cost_from_margin(self):
+        sale_price = self._float_or_default(self.sale_price_input.text(), 0.0)
+        margin_percent = self._float_or_default(self.margin_input.text(), self.DEFAULT_MARGIN_PERCENT)
+        if sale_price <= 0:
+            self.cost_price_input.clear()
+            return
+        margin_percent = max(0.0, min(99.99, margin_percent))
+        pack_cost = sale_price * (1 - (margin_percent / 100.0))
+        self.cost_price_input.setText(f"{pack_cost:.2f}")
+
     def _find_existing_product_id(self, display_name):
         normalized_name = re.sub(r"\s*\[\d+s\]\s*$", "", str(display_name or "").strip(), flags=re.IGNORECASE)
         query = QSqlQuery()
@@ -400,7 +425,14 @@ class SalesQuickProductDialog(QDialog):
                     WHERE pp.product_id = p.id
                     ORDER BY pp.is_default DESC, pp.id DESC
                     LIMIT 1
-                ), 0)
+                ), 0),
+                COALESCE((
+                    SELECT pp.margin_percent
+                    FROM price_pack pp
+                    WHERE pp.product_id = p.id
+                    ORDER BY pp.is_default DESC, pp.id DESC
+                    LIMIT 1
+                ), 14.5)
             FROM product p
             WHERE LOWER(TRIM(p.display_name)) = LOWER(TRIM(?))
               AND COALESCE(p.status, 'active') <> 'used'
@@ -420,6 +452,7 @@ class SalesQuickProductDialog(QDialog):
             "manufacturer_id": int(query.value(6) or 0) or None,
             "pack_size": float(query.value(7) or 0.0),
             "pack_price": float(query.value(8) or 0.0),
+            "margin_percent": float(query.value(9) or 14.5),
         }
 
     def try_prefill_existing_product(self, initial_name):
@@ -449,6 +482,8 @@ class SalesQuickProductDialog(QDialog):
                 self.pack_size_input.setText(f"{pack_size:.2f}")
         if record["pack_price"] > 0:
             self.sale_price_input.setText(f"{record['pack_price']:.2f}")
+        self.margin_input.setText(f"{float(record.get('margin_percent', self.DEFAULT_MARGIN_PERCENT) or self.DEFAULT_MARGIN_PERCENT):.2f}")
+        self.calculate_pack_cost_from_margin()
 
     def save_product(self):
         product_name = str(self.product_name_input.text() or "").strip()
@@ -460,7 +495,7 @@ class SalesQuickProductDialog(QDialog):
         manufacturer_id = int(manufacturer_id) if manufacturer_id not in (None, "") else None
         pack_size_text = str(self.pack_size_input.text() or "").strip()
         sale_price_text = str(self.sale_price_input.text() or "").strip()
-        cost_price_text = str(self.cost_price_input.text() or "").strip()
+        margin_text = str(self.margin_input.text() or "").strip()
         qty_text = str(self.qty_input.text() or "").strip()
         batch_no = str(self.batch_input.text() or "").strip() or None
         expiry_text = str(self.expiry_input.text() or "").strip()
@@ -488,7 +523,8 @@ class SalesQuickProductDialog(QDialog):
         pack_size = self._float_or_default(pack_size_text, 0.0)
         sale_price = self._float_or_default(sale_price_text, 0.0)
         opening_qty = self._float_or_default(qty_text, 0.0)
-        pack_cost = self._float_or_default(cost_price_text, 0.0) if cost_price_text else None
+        margin_percent = self._float_or_default(margin_text, self.DEFAULT_MARGIN_PERCENT)
+        pack_cost = sale_price * (1 - (margin_percent / 100.0)) if sale_price > 0 else None
 
         if pack_size <= 0:
             AppMessageBox.information(self, "Missing Data", "Pack size must be greater than 0.")
@@ -501,6 +537,11 @@ class SalesQuickProductDialog(QDialog):
         if opening_qty <= 0:
             AppMessageBox.information(self, "Missing Data", "Opening qty must be greater than 0.")
             self.qty_input.setFocus()
+            return
+        if margin_percent < 0 or margin_percent >= 100:
+            AppMessageBox.information(self, "Missing Data", "Margin % must be between 0 and 99.99.")
+            self.margin_input.setFocus()
+            self.margin_input.selectAll()
             return
         if pack_cost is not None and pack_cost < 0:
             AppMessageBox.information(self, "Missing Data", "Cost price cannot be negative.")
@@ -620,21 +661,23 @@ class SalesQuickProductDialog(QDialog):
                 price_query = QSqlQuery(db)
                 price_query.prepare("""
                     UPDATE price_pack
-                    SET pack_size = ?, pack_price = ?, is_default = 1
+                    SET pack_size = ?, pack_price = ?, margin_percent = ?, is_default = 1
                     WHERE id = ?
                 """)
                 price_query.addBindValue(pack_size)
                 price_query.addBindValue(sale_price)
+                price_query.addBindValue(margin_percent)
                 price_query.addBindValue(existing_default_id)
             else:
                 price_query = QSqlQuery(db)
                 price_query.prepare("""
-                    INSERT INTO price_pack (product_id, pack_size, pack_price, reorder_level, is_default)
-                    VALUES (?, ?, ?, 0, 1)
+                    INSERT INTO price_pack (product_id, pack_size, pack_price, margin_percent, reorder_level, is_default)
+                    VALUES (?, ?, ?, ?, 0, 1)
                 """)
                 price_query.addBindValue(product_id)
                 price_query.addBindValue(pack_size)
                 price_query.addBindValue(sale_price)
+                price_query.addBindValue(margin_percent)
             if not price_query.exec():
                 raise Exception(price_query.lastError().text())
 
@@ -794,7 +837,7 @@ class CreateSalesWidget(QWidget):
         customerlabel = QLabel("CUSTOMER")
         
         self.customer = QComboBox()
-        self.customer.setMinimumWidth(200) 
+        self.customer.setMinimumWidth(200)
                
         self.customer.setEditable(True)
         self.customer.completer().setCaseSensitivity(Qt.CaseInsensitive)
@@ -1263,7 +1306,6 @@ class CreateSalesWidget(QWidget):
         self.qty_edit = QLineEdit()
         self.qty_edit.setPlaceholderText("qty")
         self.qty_edit.setStyleSheet(field_style)
-        
         qty_box_layout.addWidget(qty_label)
         qty_box_layout.addWidget(self.qty_edit)
         
@@ -1280,8 +1322,6 @@ class CreateSalesWidget(QWidget):
         self.rate_edit = QLineEdit()
         self.rate_edit.setPlaceholderText("rate")
         self.rate_edit.setStyleSheet(field_style)
-        
-        
         rate_box_layout.addWidget(rate_label)
         rate_box_layout.addWidget(self.rate_edit)
         
@@ -1298,7 +1338,6 @@ class CreateSalesWidget(QWidget):
         self.discount = KeyUpLineEdit()
         self.discount.setPlaceholderText("Disc %")
         self.discount.setStyleSheet(field_style)
-
         self.discount_mode_combo = QComboBox()
         self.discount_mode_combo.addItem("%", "percent")
         self.discount_mode_combo.addItem("Amt", "amount")
@@ -1323,7 +1362,6 @@ class CreateSalesWidget(QWidget):
         self.tax = KeyUpLineEdit()
         self.tax.setPlaceholderText("Tax %")
         self.tax.setStyleSheet(field_style)
-
         tax_box_layout.addWidget(tax_label)
         tax_box_layout.addWidget(self.tax)
 
@@ -1341,7 +1379,6 @@ class CreateSalesWidget(QWidget):
         self.amount_edit.setReadOnly(True)
         self.amount_edit.setText("0.00")
         self.amount_edit.setStyleSheet(field_style)
-
         total_box_layout.addWidget(total_label)
         total_box_layout.addWidget(self.amount_edit)
 
@@ -1466,25 +1503,22 @@ class CreateSalesWidget(QWidget):
         # -----------------------------
         # Create labels
         # -----------------------------
-        gross_label = QLabel("Sub Total")
-        discount_label = QLabel("Header Discount")
-        tax_label = QLabel("Header Tax")
-        additional_label = QLabel("Additional Charges")
+        gross_label = QLabel("Subtotal")
+        discount_label = QLabel("Discount")
+        tax_label = QLabel("Tax")
+        additional_label = QLabel("Extra Charges")
         taxable_label = QLabel("Taxable")
-        net_amount_label = QLabel("Net Amount")
-        line_discount_label = QLabel("Line Discount Total")
-        line_tax_label = QLabel("Line Tax Total")
-
-        final_amount_label = QLabel("Final Amount")
-        final_amount_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        final_amount_label.setStyleSheet("font-size: 14px; font-weight:600; color: #666;")
+        net_amount_label = QLabel("Net")
+        line_discount_label = QLabel("Line Disc")
+        line_tax_label = QLabel("Line Tax")
 
         received_label = QLabel("Received")
         received_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         received_label.setStyleSheet("font-size: 14px; font-weight: 600;")
 
         payment_method_label = QLabel("Payment Method")
-        remaining_label = QLabel("Remaining Amount")
+        due_date_label = QLabel("Due Date")
+        remaining_label = QLabel("Remaining")
         change_label = QLabel("Change")
 
         gross_label.setStyleSheet(label_style)
@@ -1496,8 +1530,35 @@ class CreateSalesWidget(QWidget):
         line_discount_label.setStyleSheet(label_style)
         line_tax_label.setStyleSheet(label_style)
         payment_method_label.setStyleSheet(label_style)
+        due_date_label.setStyleSheet(label_style)
+        remaining_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         remaining_label.setStyleSheet(label_style)
         change_label.setStyleSheet(label_style)
+
+        # Top-row alignment: first label remains left, next three align right.
+        discount_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        tax_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        additional_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        # Second-row alignment: keep first label left, right-align the next three.
+        line_tax_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        taxable_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        net_amount_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        # Keep a consistent footprint across the left 700px section.
+        for lbl in (
+            gross_label,
+            discount_label,
+            tax_label,
+            additional_label,
+            line_discount_label,
+            line_tax_label,
+            taxable_label,
+            net_amount_label,
+            due_date_label,
+            payment_method_label,
+        ):
+            lbl.setMinimumWidth(80)
 
         # -----------------------------
         # Create fields
@@ -1511,6 +1572,11 @@ class CreateSalesWidget(QWidget):
 
         self.additional_entry = QLineEdit()
 
+        self.gross_entry.setMinimumWidth(60)
+        self.discount_entry.setMinimumWidth(60)
+        self.tax_entry.setMinimumWidth(60)
+        self.additional_entry.setMinimumWidth(60)
+
         self.taxable_entry = QLineEdit("0.00")
         self.taxable_entry.setReadOnly(True)
 
@@ -1523,6 +1589,11 @@ class CreateSalesWidget(QWidget):
         self.line_tax_total_entry = QLineEdit("0.00")
         self.line_tax_total_entry.setReadOnly(True)
 
+        self.line_discount_total_entry.setMinimumWidth(60)
+        self.line_tax_total_entry.setMinimumWidth(60)
+        self.taxable_entry.setMinimumWidth(60)
+        self.net_amount_entry.setMinimumWidth(60)
+
         self.header_discount_source_label = QLabel("Source: Manual / None")
         self.header_discount_source_label.setStyleSheet("color: #6B7F8F; font-size: 10px; font-weight: 600; padding-left: 0;")
         self.header_tax_source_label = QLabel("Source: Manual / None")
@@ -1530,6 +1601,12 @@ class CreateSalesWidget(QWidget):
 
         self.final_amount_entry = QLabel("0.00")
         self.final_amount_entry.setObjectName("FinalAmount")
+        self.final_amount_entry.setAlignment(Qt.AlignCenter)
+        self.final_amount_entry.setMinimumHeight(38)
+        self.final_amount_entry.setStyleSheet(
+            "font-size: 18px; font-weight: 700; color: #1F2933; "
+            "background-color: #EEF4F8; border-radius: 10px; padding: 6px 12px;"
+        )
 
         self.received_entry = QLineEdit("0.00")
         self.received_entry.setObjectName("ReceivedAmount")
@@ -1552,6 +1629,7 @@ class CreateSalesWidget(QWidget):
         self.payment_method = QComboBox()
         self.payment_method.addItems(["Cash", "Bank Transfer", "EasyPaisa", "JazzCash"])
         self.payment_method.currentTextChanged.connect(self.on_payment_method_changed)
+        self.payment_method.setMinimumWidth(60)
 
         self.due_date_combo = QComboBox()
         self.due_date_combo.addItems(["None", "+15 days", "+30 days", "+45 days", "+60 days", "+90 days"])
@@ -1561,8 +1639,11 @@ class CreateSalesWidget(QWidget):
         self.gross_entry.setAlignment(Qt.AlignRight)
         self.discount_entry.setAlignment(Qt.AlignRight)
         self.tax_entry.setAlignment(Qt.AlignRight)
+        self.additional_entry.setAlignment(Qt.AlignRight)
         self.line_discount_total_entry.setAlignment(Qt.AlignRight)
         self.line_tax_total_entry.setAlignment(Qt.AlignRight)
+        self.taxable_entry.setAlignment(Qt.AlignRight)
+        self.net_amount_entry.setAlignment(Qt.AlignRight)
         self.received_entry.setAlignment(Qt.AlignRight)
         self.remainingdata.setAlignment(Qt.AlignRight)
 
@@ -1580,7 +1661,8 @@ class CreateSalesWidget(QWidget):
         self.writeoff_check.toggled.connect(self.update_due_date_availability)
 
         left_grid = QGridLayout()
-        left_grid.setHorizontalSpacing(10)
+        left_grid.setContentsMargins(10, 10, 10, 10)
+        left_grid.setHorizontalSpacing(6)
         left_grid.setVerticalSpacing(8)
         left_grid.addWidget(gross_label, 0, 0)
         left_grid.addWidget(self.gross_entry, 0, 1)
@@ -1590,22 +1672,26 @@ class CreateSalesWidget(QWidget):
         left_grid.addWidget(self.tax_entry, 0, 5)
         left_grid.addWidget(additional_label, 0, 6)
         left_grid.addWidget(self.additional_entry, 0, 7)
-        left_grid.addWidget(self.header_discount_source_label, 1, 2, 1, 2)
-        left_grid.addWidget(self.header_tax_source_label, 1, 4, 1, 2)
-        left_grid.addWidget(line_discount_label, 2, 0)
-        left_grid.addWidget(self.line_discount_total_entry, 2, 1)
-        left_grid.addWidget(line_tax_label, 2, 2)
-        left_grid.addWidget(self.line_tax_total_entry, 2, 3)
-        left_grid.addWidget(taxable_label, 2, 4)
-        left_grid.addWidget(self.taxable_entry, 2, 5)
-        left_grid.addWidget(net_amount_label, 2, 6)
-        left_grid.addWidget(self.net_amount_entry, 2, 7)
-        left_grid.addWidget(payment_method_label, 3, 6)
-        left_grid.addWidget(self.payment_method, 3, 7)
-        left_grid.setColumnMinimumWidth(0, 54)
-        left_grid.setColumnMinimumWidth(2, 54)
-        left_grid.setColumnMinimumWidth(4, 54)
-        left_grid.setColumnMinimumWidth(6, 110)
+        left_grid.addWidget(line_discount_label, 1, 0)
+        left_grid.addWidget(self.line_discount_total_entry, 1, 1)
+        left_grid.addWidget(line_tax_label, 1, 2)
+        left_grid.addWidget(self.line_tax_total_entry, 1, 3)
+        left_grid.addWidget(taxable_label, 1, 4)
+        left_grid.addWidget(self.taxable_entry, 1, 5)
+        left_grid.addWidget(net_amount_label, 1, 6)
+        left_grid.addWidget(self.net_amount_entry, 1, 7)
+        left_grid.addWidget(due_date_label, 2, 4)
+        left_grid.addWidget(self.due_date_combo, 2, 5)
+        left_grid.addWidget(payment_method_label, 2, 6)
+        left_grid.addWidget(self.payment_method, 2, 7)
+        left_grid.setColumnMinimumWidth(0, 80)
+        left_grid.setColumnMinimumWidth(1, 60)
+        left_grid.setColumnMinimumWidth(2, 80)
+        left_grid.setColumnMinimumWidth(3, 60)
+        left_grid.setColumnMinimumWidth(4, 80)
+        left_grid.setColumnMinimumWidth(5, 60)
+        left_grid.setColumnMinimumWidth(6, 80)
+        left_grid.setColumnMinimumWidth(7, 60)
         left_grid.setColumnStretch(1, 1)
         left_grid.setColumnStretch(3, 1)
         left_grid.setColumnStretch(5, 1)
@@ -1614,15 +1700,10 @@ class CreateSalesWidget(QWidget):
         right_grid = QGridLayout()
         right_grid.setHorizontalSpacing(10)
         right_grid.setVerticalSpacing(8)
-        right_grid.addWidget(final_amount_label, 0, 0)
-        right_grid.addWidget(self.final_amount_entry, 0, 1)
+        right_grid.addWidget(self.final_amount_entry, 0, 0, 1, 2)
         right_grid.addWidget(received_label, 0, 2)
         right_grid.addWidget(self.received_entry, 0, 3)
 
-        due_date_label = QLabel("Due Date")
-        due_date_label.setStyleSheet(label_style)
-        right_grid.addWidget(due_date_label, 1, 0)
-        right_grid.addWidget(self.due_date_combo, 1, 1)
         right_grid.addWidget(remaining_label, 1, 2)
         right_grid.addWidget(self.remainingdata, 1, 3)
 
@@ -1638,12 +1719,30 @@ class CreateSalesWidget(QWidget):
         right_grid.setColumnStretch(1, 1)
         right_grid.setColumnStretch(3, 1)
 
-        main_grid.addLayout(left_grid, 0, 0)
-        section_gap = QSpacerItem(28, 10, QSizePolicy.Fixed, QSizePolicy.Minimum)
+        left_section = QFrame()
+        left_section.setObjectName("TotalsLeftSection")
+        left_section.setMinimumWidth(700)
+        left_section.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        left_section_layout = QVBoxLayout(left_section)
+        left_section_layout.setContentsMargins(0, 0, 0, 0)
+        left_section_layout.setSpacing(0)
+        left_section_layout.addLayout(left_grid)
+
+        right_section = QFrame()
+        right_section.setObjectName("TotalsRightSection")
+        right_section.setMinimumWidth(300)
+        right_section.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        right_section_layout = QVBoxLayout(right_section)
+        right_section_layout.setContentsMargins(10, 10, 10, 10)
+        right_section_layout.setSpacing(0)
+        right_section_layout.addLayout(right_grid)
+
+        main_grid.addWidget(left_section, 0, 0)
+        section_gap = QSpacerItem(8, 10, QSizePolicy.Fixed, QSizePolicy.Minimum)
         main_grid.addItem(section_gap, 0, 1)
-        main_grid.addLayout(right_grid, 0, 2)
-        main_grid.setColumnStretch(0, 3)
-        main_grid.setColumnStretch(2, 2)
+        main_grid.addWidget(right_section, 0, 2)
+        main_grid.setColumnStretch(0, 7)
+        main_grid.setColumnStretch(2, 3)
 
         totals_layout.addLayout(main_grid)
 
@@ -2054,6 +2153,15 @@ class CreateSalesWidget(QWidget):
             "margin_percent": margin_percent,
         }
 
+    def _current_line_target_margin_percent(self):
+        product_target = self.current_line_product_defaults.get("target_margin_percent")
+        try:
+            if product_target not in (None, ""):
+                return float(product_target)
+        except (TypeError, ValueError):
+            pass
+        return float(self.minimum_margin_percent or 0.0)
+
     def _set_line_info_labels(self, *, formula_text, cost_sale_text, profit_text, margin_text):
         if not hasattr(self, "line_info_formula_label"):
             return
@@ -2061,7 +2169,7 @@ class CreateSalesWidget(QWidget):
         formula_text = str(formula_text or "").strip() or "Formula: -"
         cost_sale_text = str(cost_sale_text or "").strip() or "Cost: - | Sale: -"
         profit_text = str(profit_text or "").strip() or "Profit: -"
-        margin_text = str(margin_text or "").strip() or f"Margin: - (Target: {self.minimum_margin_percent:.0f}%)"
+        margin_text = str(margin_text or "").strip() or f"Margin: - (Target: {self._current_line_target_margin_percent():.1f}%)"
 
         metrics = QFontMetrics(self.line_info_formula_label.font())
         available_width = max(self.line_info_formula_label.width() - 6, 220)
@@ -2081,6 +2189,7 @@ class CreateSalesWidget(QWidget):
         formula = str(product_data.get("generic_name") or "").strip()
         cost_price = self._float_or_default(product_data.get("cost_price"), 0.0)
         sale_price = self._float_or_default(self.rate_edit.text(), 0.0)
+        target_margin_percent = self._current_line_target_margin_percent()
         formula_text = f"Formula: {formula}" if formula else "Formula: -"
 
         if cost_price <= 0:
@@ -2088,7 +2197,7 @@ class CreateSalesWidget(QWidget):
                 formula_text=formula_text,
                 cost_sale_text=f"Cost: - | Sale: {sale_price:.2f}" if sale_price > 0 else "Cost: - | Sale: -",
                 profit_text="Profit: -",
-                margin_text=f"Margin: - (Target: {self.minimum_margin_percent:.0f}%)",
+                margin_text=f"Margin: - (Target: {target_margin_percent:.1f}%)",
             )
             return
 
@@ -2101,7 +2210,7 @@ class CreateSalesWidget(QWidget):
                 formula_text=formula_text,
                 cost_sale_text=f"Cost: {cost_price:.2f} | Sale: -",
                 profit_text="Profit: -",
-                margin_text=f"Margin: - (Target: {self.minimum_margin_percent:.0f}%)",
+                margin_text=f"Margin: - (Target: {target_margin_percent:.1f}%)",
             )
             return
 
@@ -2109,7 +2218,7 @@ class CreateSalesWidget(QWidget):
             formula_text=formula_text,
             cost_sale_text=f"Cost: {cost_price:.2f} | Sale: {sale_price:.2f}",
             profit_text=f"Profit: {profit_amount:.2f}",
-            margin_text=f"Margin: {margin_percent:.2f}% (Target: {self.minimum_margin_percent:.0f}%)",
+            margin_text=f"Margin: {margin_percent:.2f}% (Target: {target_margin_percent:.1f}%)",
         )
 
     def _sales_tax_policy_label(self):
@@ -4397,6 +4506,7 @@ class CreateSalesWidget(QWidget):
                  , COALESCE(tg.fixed_amount, 0)
                  , COALESCE(tg.apply_on_sale, 1)
                  , COALESCE(tg.name, '')
+                 , COALESCE(pp.margin_percent, 0)
                  , COALESCE(p.status, 'active')
             FROM product p
             LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
@@ -4435,7 +4545,8 @@ class CreateSalesWidget(QWidget):
             tax_fixed_amount = query.value(13) or 0.0
             tax_apply_on_sale = bool(int(query.value(14) or 0))
             tax_group_name = str(query.value(15) or "").strip()
-            status = str(query.value(16) or "active").strip()
+            target_margin_percent = float(query.value(16) or 0.0)
+            status = str(query.value(17) or "active").strip()
             results.append((visible_name, {
                 "product_id": product_id,
                 "display_name": name,
@@ -4453,6 +4564,7 @@ class CreateSalesWidget(QWidget):
                 "tax_fixed_amount": tax_fixed_amount,
                 "tax_apply_on_sale": tax_apply_on_sale,
                 "tax_group_name": tax_group_name,
+                "target_margin_percent": target_margin_percent,
                 "status": status,
             }))
         return results
@@ -4487,6 +4599,7 @@ class CreateSalesWidget(QWidget):
                  , COALESCE(tg.fixed_amount, 0)
                  , COALESCE(tg.apply_on_sale, 1)
                  , COALESCE(tg.name, '')
+                 , COALESCE(pp.margin_percent, 0)
                  , COALESCE(p.status, 'active')
             FROM product p
             LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
@@ -4524,7 +4637,8 @@ class CreateSalesWidget(QWidget):
             "tax_fixed_amount": float(query.value(13) or 0.0),
             "tax_apply_on_sale": bool(int(query.value(14) or 0)),
             "tax_group_name": str(query.value(15) or "").strip(),
-            "status": str(query.value(16) or "active").strip(),
+            "target_margin_percent": float(query.value(16) or 0.0),
+            "status": str(query.value(17) or "active").strip(),
         }
 
     def find_sales_product_id_by_name(self, display_name):
@@ -4628,6 +4742,7 @@ class CreateSalesWidget(QWidget):
         tax_percent = float(product_data.get("tax_percent") or 0.0)
         tax_fixed_amount = float(product_data.get("tax_fixed_amount") or 0.0)
         tax_apply_on_sale = bool(product_data.get("tax_apply_on_sale", True))
+        target_margin_percent = self._current_line_target_margin_percent()
         discount_mode = self.discount_mode_combo.currentData() if hasattr(self, "discount_mode_combo") else "percent"
         discount_source = "Manual Override" if self.line_discount_manual_override else "Product Default"
         tax_source = "Manual Override" if self.line_tax_manual_override else "Product Default"
@@ -4645,11 +4760,11 @@ class CreateSalesWidget(QWidget):
         if cost_price <= 0:
             margin_text = "Margin unavailable (no cost basis)"
         elif margin_snapshot["margin_percent"] is None:
-            margin_text = f"Margin waiting for sale price | Cost {cost_price:.2f}"
+            margin_text = f"Margin waiting for sale price | Cost {cost_price:.2f} | Target {target_margin_percent:.1f}%"
         else:
             margin_text = (
                 f"Margin {margin_snapshot['margin_percent']:.2f}% "
-                f"(Profit {margin_snapshot['profit_amount']:.2f} on Cost {cost_price:.2f})"
+                f"(Target {target_margin_percent:.1f}% | Profit {margin_snapshot['profit_amount']:.2f} on Cost {cost_price:.2f})"
             )
 
         badge = "Manual Override Active" if has_manual_override else "Defaults Active"
@@ -4771,7 +4886,8 @@ class CreateSalesWidget(QWidget):
                 CASE WHEN COALESCE(tg.apply_on_sale, 1) = 1 THEN COALESCE(tg.tax_percent, 0) ELSE 0 END,
                 COALESCE(tg.fixed_amount, 0),
                 COALESCE(tg.apply_on_sale, 1),
-                COALESCE(tg.name, '')
+                COALESCE(tg.name, ''),
+                COALESCE(pp.margin_percent, 0)
             FROM product p
             LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
             LEFT JOIN tax_group tg ON tg.id = p.tax_group_id
@@ -4805,6 +4921,7 @@ class CreateSalesWidget(QWidget):
             "tax_fixed_amount": float(query.value(9) or 0.0),
             "tax_apply_on_sale": bool(int(query.value(10) or 0)),
             "tax_group_name": str(query.value(11) or "").strip(),
+            "target_margin_percent": float(query.value(12) or 0.0),
         }
 
     def insert_sale_row_widget(

@@ -18,7 +18,7 @@ class ReceiptListWidget(QWidget):
         self._sales_barcode_filter = None
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setContentsMargins(6, 6, 6, 6)
         self.layout.setSpacing(10)
 
         # Header
@@ -103,7 +103,7 @@ class ReceiptListWidget(QWidget):
         self.table.verticalHeader().setFixedWidth(0)
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)
-        self.table.setMinimumWidth(900)
+        self.table.setMinimumWidth(700)
 
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)

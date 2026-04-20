@@ -72,7 +72,7 @@ class ProductListWidget(QWidget):
         self.current_search_text = ""
 
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setContentsMargins(6, 6, 6, 6)
         self.layout.setSpacing(6)
 
         # === Header Row ===
@@ -115,7 +115,7 @@ class ProductListWidget(QWidget):
         info_layout.setSpacing(10)
         
         total_products_label = QLabel("Resulted Records: ")
-        total_products_label.setFixedWidth(200)
+        total_products_label.setFixedWidth(160)
         self.total_products_value = QLabel("0")
         
         # push to the left
@@ -173,12 +173,12 @@ class ProductListWidget(QWidget):
         
         self.search_category = QComboBox()
         self.search_category.addItems(["Product", "Brand", "All"])
-        self.search_category.setFixedWidth(150)
+        self.search_category.setFixedWidth(120)
         search_layout.addWidget(self.search_category, 1)
 
         self.stock_status = QComboBox()
         self.stock_status.addItems(["All", "Available", "In Stock", "Out of Stock"])
-        self.stock_status.setFixedWidth(150)
+        self.stock_status.setFixedWidth(120)
         self.stock_status.currentTextChanged.connect(self.apply_filters_on_current_input)
         search_layout.addWidget(self.stock_status)
 
@@ -208,7 +208,7 @@ class ProductListWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)   
 
-        self.table.setMinimumWidth(900)
+        self.table.setMinimumWidth(700)
         
         
         # Hide vertical header (row numbers)
@@ -1090,7 +1090,7 @@ class PriceChangeDialog(QDialog):
             "Variance",
             "Remove",
         ])
-        self.table.setMinimumWidth(900)
+        self.table.setMinimumWidth(700)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -1445,7 +1445,7 @@ class ImportDialog(QDialog):
         header = self.stocktable.horizontalHeader()
         header.setStretchLastSection(True)   
 
-        self.stocktable.setMinimumWidth(900)
+        self.stocktable.setMinimumWidth(700)
         
         # Hide vertical header (row numbers)
         self.stocktable.verticalHeader().setVisible(False)

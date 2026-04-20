@@ -776,7 +776,7 @@ class DailySession(QWidget):
         self.session_table.setAlternatingRowColors(True)
         self.session_table.setWordWrap(False)
         self.session_table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.session_table.setMinimumWidth(900)
+        self.session_table.setMinimumWidth(700)
         self.session_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         history_layout.addWidget(self.session_table)
         self.layout.addWidget(history_frame)

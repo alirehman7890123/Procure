@@ -103,6 +103,8 @@ class MainWindow(QMainWindow):
         self._is_history_navigation = False
         self._nested_history_connections = []
         self.sidebar_force_hidden = False
+        self._sidebar_responsive_breakpoint = 1000
+        self._effective_sidebar_collapsed = False
         self._background_warmup_started = False
         self._background_warmup_queue = []
         self._background_warmup_token = 0
@@ -129,7 +131,7 @@ class MainWindow(QMainWindow):
         
         
         # SIDE-BAR SCROLL
-        self.sidebar_expanded_width = 224
+        self.sidebar_expanded_width = 200
         self.sidebar_collapsed_width = 60
         self.sidebar_scroll = QScrollArea()
         self.sidebar_scroll.setFixedWidth(self.sidebar_expanded_width)
@@ -1897,7 +1899,7 @@ class MainWindow(QMainWindow):
                 border-radius: 5px;
                 color: %s;
                 font-family: arial;
-                font-size: 14px;
+                font-size: 13px;
                 font-weight: %s;
                 padding: 4px 10px;
                 text-align: left;
@@ -1940,7 +1942,7 @@ class MainWindow(QMainWindow):
                 border-radius: 5px;
                 padding: 4px 10px;
                 font-family: arial;
-                font-size: 14px;
+                font-size: 13px;
                 font-weight: %s;
             }
             QToolButton:hover {
@@ -1968,6 +1970,7 @@ class MainWindow(QMainWindow):
                 border-radius: 12px;
                 padding: 6px 0px;
                 margin-top: 6px;
+                font-size: 13px;
             }
             QMenu::item {
                 padding: 10px 18px;
@@ -2142,11 +2145,19 @@ class MainWindow(QMainWindow):
         self._sync_shell_layout()
         QTimer.singleShot(0, self._sync_shell_layout)
 
+    def _is_sidebar_effectively_collapsed(self):
+        if bool(getattr(self, "sidebar_force_hidden", False)):
+            return True
+        if bool(getattr(self, "sidebar_collapsed", False)):
+            return True
+        return self.width() <= int(getattr(self, "_sidebar_responsive_breakpoint", 1000) or 1000)
+
     def _update_navigation_mode_visibility(self):
+        effective_collapsed = self._is_sidebar_effectively_collapsed()
         if hasattr(self, "top_nav_widget"):
-            self.top_nav_widget.setVisible(bool(getattr(self, "sidebar_collapsed", False) or getattr(self, "sidebar_force_hidden", False)))
+            self.top_nav_widget.setVisible(bool(effective_collapsed or getattr(self, "sidebar_force_hidden", False)))
         if hasattr(self, "header_widget"):
-            self.header_widget.setVisible(not bool(getattr(self, "sidebar_collapsed", False) or getattr(self, "sidebar_force_hidden", False)))
+            self.header_widget.setVisible(not bool(effective_collapsed or getattr(self, "sidebar_force_hidden", False)))
         if hasattr(self, "sidebar_scroll"):
             self.sidebar_scroll.setVisible(not bool(getattr(self, "sidebar_force_hidden", False)))
         if hasattr(self, "sidebar_rail_scroll"):
@@ -2157,11 +2168,37 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "header_sidebar_slot"):
             return
 
-        slot_width = 0 if (getattr(self, "sidebar_collapsed", False) or getattr(self, "sidebar_force_hidden", False)) else int(getattr(self, "sidebar_expanded_width", 0) or 0)
+        effective_collapsed = self._is_sidebar_effectively_collapsed()
+        slot_width = 0 if (effective_collapsed or getattr(self, "sidebar_force_hidden", False)) else int(getattr(self, "sidebar_expanded_width", 0) or 0)
         self.header_sidebar_slot.setFixedWidth(slot_width)
         self.header_sidebar_slot.setMinimumWidth(slot_width)
         self.header_sidebar_slot.setMaximumWidth(slot_width)
         self.header_sidebar_slot.setVisible(slot_width > 0)
+
+    def _enforce_current_page_table_widths(self, sidebar_width):
+        if not hasattr(self, "main_content_layout"):
+            return
+
+        current = self.main_content_layout.currentWidget()
+        if current is None:
+            return
+
+        available_width = max(360, int(self.width()) - int(max(0, sidebar_width)) - 96)
+        tables = list(current.findChildren(QTableWidget))
+        if isinstance(current, QTableWidget):
+            tables.append(current)
+
+        for table in tables:
+            original_min = table.property("_procure_original_min_width")
+            if original_min is None:
+                original_min = int(table.minimumWidth())
+                table.setProperty("_procure_original_min_width", original_min)
+            else:
+                original_min = int(original_min)
+
+            target_min = max(0, min(original_min, available_width))
+            if int(table.minimumWidth()) != int(target_min):
+                table.setMinimumWidth(int(target_min))
 
     def _set_rail_button_active(self, btn, active=False):
         if btn is None:
@@ -2384,12 +2421,17 @@ class MainWindow(QMainWindow):
         self.sidebar_scroll.setMaximumWidth(width)
 
     def _sync_shell_layout(self):
+        effective_collapsed = self._is_sidebar_effectively_collapsed()
+        if bool(getattr(self, "_effective_sidebar_collapsed", False)) != bool(effective_collapsed):
+            self._set_sidebar_collapsed(bool(effective_collapsed))
+            self._effective_sidebar_collapsed = bool(effective_collapsed)
+
         rail_width = self.sidebar_rail_width if getattr(self, "sidebar_force_hidden", False) else 0
         self.sidebar_rail_scroll.setFixedWidth(rail_width)
         self.sidebar_rail_scroll.setMinimumWidth(rail_width)
         self.sidebar_rail_scroll.setMaximumWidth(rail_width)
 
-        target_width = 0 if getattr(self, "sidebar_force_hidden", False) else (self.sidebar_collapsed_width if self.sidebar_collapsed else self.sidebar_expanded_width)
+        target_width = 0 if getattr(self, "sidebar_force_hidden", False) else (self.sidebar_collapsed_width if effective_collapsed else self.sidebar_expanded_width)
         self._set_sidebar_column_width(target_width)
         if getattr(self, "sidebar_force_hidden", False):
             self.sidebar_scroll.hide()
@@ -2397,6 +2439,8 @@ class MainWindow(QMainWindow):
         else:
             self.sidebar_scroll.show()
             self.sidebar_rail_scroll.hide()
+
+        self._enforce_current_page_table_widths(target_width)
 
         if hasattr(self, "content_area_widget"):
             self.content_area_widget.setMinimumWidth(0)

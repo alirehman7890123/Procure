@@ -603,7 +603,7 @@ class AddPOWidget(QWidget):
             QLineEdit:read-only { background: #efefef; }
         """)
         self.items_table.horizontalHeader().setStretchLastSection(True)
-        self.items_table.setMinimumWidth(900)
+        self.items_table.setMinimumWidth(700)
         self.items_table.setFixedHeight(400)
 
         frame_layout.addWidget(self.items_table)

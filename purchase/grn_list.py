@@ -101,7 +101,7 @@ class GRNListWidget(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.table.setMinimumWidth(900)
+        self.table.setMinimumWidth(700)
         self.table.setFixedHeight(400)
         self.layout.addWidget(self.table)
         self.layout.addStretch()

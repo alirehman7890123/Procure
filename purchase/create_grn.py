@@ -333,7 +333,7 @@ class CreateGRNWidget(QWidget):
         self.items_table.setHorizontalHeaderLabels(headers)
         self.items_table.verticalHeader().setVisible(False)
         self.items_table.setAlternatingRowColors(True)
-        self.items_table.setMinimumWidth(900)
+        self.items_table.setMinimumWidth(700)
         self.items_table.setMinimumHeight(360)
         self.items_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.items_table.setStyleSheet("""

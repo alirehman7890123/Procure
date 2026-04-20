@@ -99,7 +99,7 @@ class AddPurchaseWidget(QWidget):
         
         
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setContentsMargins(6, 6, 6, 6)
         self.layout.setSpacing(10)
         self.layout.setAlignment(Qt.AlignTop)
         self.current_purchase_draft_id = None
@@ -168,12 +168,13 @@ class AddPurchaseWidget(QWidget):
         supplier_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
 
         supplier_layout = QVBoxLayout(supplier_frame)
-        supplier_layout.setContentsMargins(10, 10, 10, 10)
-        supplier_layout.setSpacing(10)
+        supplier_layout.setContentsMargins(8, 8, 8, 8)
+        supplier_layout.setSpacing(8)
 
         # Top Row Layout
         top_row = QHBoxLayout()
-        top_row.setSpacing(10)
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(8)
 
         supplier = QLabel("Supplier")
         rep = QLabel("Seller Rep")
@@ -199,25 +200,25 @@ class AddPurchaseWidget(QWidget):
         self.rep_edit.setPlaceholderText("Select rep")
         self.invoice_edit.setPlaceholderText("Invoice number")
 
+        for label in (supplier, rep, seller_invoice):
+            label.setFixedWidth(100)
+            label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        self.supplier_edit.setFixedWidth(200)
+        self.rep_edit.setFixedWidth(200)
+        self.invoice_edit.setFixedWidth(200)
+
         # Add widgets
-        top_row.addWidget(supplier, 1)
-        top_row.addWidget(self.supplier_edit, 2)
-        top_row.addWidget(self.new_supplier_btn, 1)
-        
-        
-        spacer = QLabel()
-        top_row.addWidget(spacer)
-           
-        
-        top_row.addWidget(rep, 1)
-        top_row.addWidget(self.rep_edit, 2)
-        top_row.addWidget(self.new_rep_btn, 1)
-        
-        spacer = QLabel()
-        
-        top_row.addWidget(spacer, 3)
-        top_row.addWidget(seller_invoice, 1)
-        top_row.addWidget(self.invoice_edit, 2)
+        top_row.addWidget(supplier)
+        top_row.addWidget(self.supplier_edit)
+        top_row.addWidget(self.new_supplier_btn)
+        top_row.addWidget(rep)
+        top_row.addWidget(self.rep_edit)
+        top_row.addWidget(self.new_rep_btn)
+        top_row.addSpacing(100)
+        top_row.addWidget(seller_invoice)
+        top_row.addWidget(self.invoice_edit)
+        top_row.addStretch(1)
 
         supplier_layout.addLayout(top_row)
 
@@ -603,9 +604,9 @@ class AddPurchaseWidget(QWidget):
         totals_layout.setContentsMargins(10, 10, 10, 10)
         totals_layout.setSpacing(10)
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(10)
+        main_grid = QGridLayout()
+        main_grid.setHorizontalSpacing(10)
+        main_grid.setVerticalSpacing(0)
 
         # -----------------------------
         # Row 1: Invoice math
@@ -634,13 +635,14 @@ class AddPurchaseWidget(QWidget):
 
         sales_tax_label = QLabel("Sales Tax")
         self.sales_tax_entry = QLineEdit()
+        self.sales_tax_entry.setStyleSheet(field_style)
 
         net_amount_label = QLabel("Net Amount")
         self.net_amount_entry = QLineEdit("0.00")
         self.net_amount_entry.setReadOnly(True)
+        self.net_amount_entry.setStyleSheet(field_style)
         
         payment_method_label = QLabel("Payment Method")
-        payment_method_label.setMinimumWidth(180)
         
         self.payment_handler = PaymentMethodHandler(self)
 
@@ -652,69 +654,195 @@ class AddPurchaseWidget(QWidget):
         self.due_date_combo.addItems(["None", "+15 days", "+30 days", "+45 days", "+60 days", "+90 days"])
         self.due_date_combo.setCurrentText("None")
         self.due_date_combo.setEnabled(False)
+        self.due_date_combo.setStyleSheet(field_style)
+        self.payment_method.setStyleSheet(field_style)
         
-
-        grid.addWidget(gross_label,        0, 0)
-        grid.addWidget(discount_label,     0, 1)
-        grid.addWidget(taxable_label,      0, 2)
-        grid.addWidget(tax_236g_label,     0, 3)
-        grid.addWidget(tax_236h_label,     0, 4)
-        grid.addWidget(sales_tax_label,    0, 5)
-        grid.addWidget(net_amount_label,   0, 6)
-        grid.addWidget(payment_method_label, 0, 7)
-        grid.addWidget(self.payment_method, 0 , 8)
-
-        grid.addWidget(self.gross_entry,       1, 0)
-        grid.addWidget(self.discount_entry,    1, 1)
-        grid.addWidget(self.taxable_entry,     1, 2)
-        grid.addWidget(self.tax_236g_entry,    1, 3)
-        grid.addWidget(self.tax_236h_entry,    1, 4)
-        grid.addWidget(self.sales_tax_entry,   1, 5)
-        grid.addWidget(self.net_amount_entry,  1, 6)
 
         # -----------------------------
         # Row 2: Settlement
         # -----------------------------
         cn_adjust_label = QLabel("CN Adjustment")
         self.cn_adjustment_entry = QLineEdit()
+        self.cn_adjustment_entry.setStyleSheet(field_style)
 
-        final_label = QLabel("Final Amount")
-        self.final_amount = QLineEdit("0.00")
-        self.final_amount.setReadOnly(True)
+        self.final_amount = QLabel("0.00")
+        self.final_amount.setAlignment(Qt.AlignCenter)
+        self.final_amount.setMinimumHeight(38)
+        self.final_amount.setStyleSheet(
+            "font-size: 18px; font-weight: 700; color: #1F2933; "
+            "background-color: #EEF4F8; border-radius: 10px; padding: 6px 12px;"
+        )
 
-        self.paid_label = QLabel("Paid Amount")
+        self.paid_label = QLabel("Paid")
         self.paid_amount = QLineEdit()
+        self.paid_amount.setStyleSheet("""
+            QLineEdit {
+                margin: 0;
+                padding: 5px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                font-size: 16px;
+                font-weight: 700;
+                background-color: #f9f9f9;
+                color: #333333;
+            }
+            QLineEdit:focus {
+                border: 2px solid #5B8FB8;
+                background: #F2F8FC;
+                color: #333333;
+            }
+        """)
 
-        self.remaining_label = QLabel("Remaining Amount")
+        self.remaining_label = QLabel("Remaining")
         self.remainingdata = QLineEdit("0.00")
         self.remainingdata.setReadOnly(True)
+        self.remainingdata.setStyleSheet(field_style)
 
         self.writeoff_check = QCheckBox("Write-off Remaining")
         self.writeoff_check.setStyleSheet("QCheckBox { color: #333; }")
 
-        grid.addWidget(cn_adjust_label,    2, 4)
-        grid.addWidget(final_label,        2, 5)
-        grid.addWidget(self.paid_label,    2, 6)
-        grid.addWidget(self.remaining_label, 2, 7)
-
         due_date_label = QLabel("Due Date")
-        grid.addWidget(due_date_label, 2, 0)
 
-        grid.addWidget(self.cn_adjustment_entry, 3, 4)
-        grid.addWidget(self.final_amount,        3, 5)
-        grid.addWidget(self.paid_amount,         3, 6)
-        grid.addWidget(self.remainingdata,       3, 7)
-        grid.addWidget(self.due_date_combo,      3, 0)
+        left_label_widgets = [
+            gross_label,
+            discount_label,
+            taxable_label,
+            tax_236g_label,
+            tax_236h_label,
+            sales_tax_label,
+            net_amount_label,
+            cn_adjust_label,
+            due_date_label,
+            payment_method_label,
+        ]
+        for label in left_label_widgets:
+            label.setMinimumWidth(82)
+            label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            label.setStyleSheet("font-weight: 600; font-size: 11px; color: #444;")
 
-        grid.addWidget(self.writeoff_check,      3, 8)
+        right_label_widgets = [self.paid_label, self.remaining_label]
+        for label in right_label_widgets:
+            label.setMinimumWidth(82)
+            label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            label.setStyleSheet("font-weight: 600; font-size: 14px; color: #333;")
+        self.paid_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-        # -----------------------------
-        # Stretch
-        # -----------------------------
-        for col in range(9):
-            grid.setColumnStretch(col, 1)
+        numeric_fields = [
+            self.gross_entry,
+            self.discount_entry,
+            self.taxable_entry,
+            self.tax_236g_entry,
+            self.tax_236h_entry,
+            self.sales_tax_entry,
+            self.net_amount_entry,
+            self.cn_adjustment_entry,
+            self.paid_amount,
+            self.remainingdata,
+        ]
+        for field in numeric_fields:
+            field.setMinimumWidth(60)
+            field.setAlignment(Qt.AlignRight)
 
-        totals_layout.addLayout(grid)
+        self.final_amount.setMinimumWidth(60)
+
+        # Keep paid entry a bit wider in the right section.
+        self.paid_amount.setMinimumWidth(90)
+
+        # Keep right section values visually prominent.
+        for field in (self.remainingdata,):
+            right_font = field.font()
+            right_font.setPointSize(max(right_font.pointSize(), 14))
+            field.setFont(right_font)
+
+        self.due_date_combo.setMinimumWidth(60)
+        self.payment_method.setMinimumWidth(60)
+
+        left_grid = QGridLayout()
+        left_grid.setContentsMargins(10, 10, 10, 10)
+        left_grid.setHorizontalSpacing(6)
+        left_grid.setVerticalSpacing(8)
+        left_grid.addWidget(gross_label, 0, 0)
+        left_grid.addWidget(self.gross_entry, 0, 1)
+        left_grid.addWidget(discount_label, 0, 2)
+        left_grid.addWidget(self.discount_entry, 0, 3)
+        left_grid.addWidget(taxable_label, 0, 4)
+        left_grid.addWidget(self.taxable_entry, 0, 5)
+        left_grid.addWidget(tax_236h_label, 0, 6)
+        left_grid.addWidget(self.tax_236h_entry, 0, 7)
+
+        left_grid.addWidget(tax_236g_label, 1, 0)
+        left_grid.addWidget(self.tax_236g_entry, 1, 1)
+        left_grid.addWidget(sales_tax_label, 1, 2)
+        left_grid.addWidget(self.sales_tax_entry, 1, 3)
+        left_grid.addWidget(net_amount_label, 1, 4)
+        left_grid.addWidget(self.net_amount_entry, 1, 5)
+        left_grid.addWidget(cn_adjust_label, 1, 6)
+        left_grid.addWidget(self.cn_adjustment_entry, 1, 7)
+
+        left_grid.addWidget(due_date_label, 2, 4)
+        left_grid.addWidget(self.due_date_combo, 2, 5)
+        left_grid.addWidget(payment_method_label, 2, 6)
+        left_grid.addWidget(self.payment_method, 2, 7)
+
+        left_grid.setColumnMinimumWidth(0, 82)
+        left_grid.setColumnMinimumWidth(1, 60)
+        left_grid.setColumnMinimumWidth(2, 82)
+        left_grid.setColumnMinimumWidth(3, 60)
+        left_grid.setColumnMinimumWidth(4, 82)
+        left_grid.setColumnMinimumWidth(5, 60)
+        left_grid.setColumnMinimumWidth(6, 82)
+        left_grid.setColumnMinimumWidth(7, 60)
+        left_grid.setColumnStretch(1, 1)
+        left_grid.setColumnStretch(3, 1)
+        left_grid.setColumnStretch(5, 1)
+        left_grid.setColumnStretch(7, 1)
+
+        right_grid = QGridLayout()
+        right_grid.setHorizontalSpacing(10)
+        right_grid.setVerticalSpacing(8)
+        right_grid.addWidget(self.final_amount, 0, 0, 1, 2)
+        right_grid.addWidget(self.paid_label, 0, 2)
+        right_grid.addWidget(self.paid_amount, 0, 3)
+        right_grid.addWidget(self.remaining_label, 1, 2)
+        right_grid.addWidget(self.remainingdata, 1, 3)
+
+        checkbox_layout = QHBoxLayout()
+        checkbox_layout.setContentsMargins(0, 0, 0, 0)
+        checkbox_layout.setSpacing(10)
+        checkbox_layout.addStretch()
+        checkbox_layout.addWidget(self.writeoff_check)
+        right_grid.addLayout(checkbox_layout, 2, 0, 1, 4)
+        right_grid.setColumnMinimumWidth(0, 96)
+        right_grid.setColumnMinimumWidth(2, 124)
+        right_grid.setColumnStretch(1, 1)
+        right_grid.setColumnStretch(3, 1)
+
+        left_section = QFrame()
+        left_section.setObjectName("TotalsLeftSection")
+        left_section.setMinimumWidth(700)
+        left_section.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        left_section_layout = QVBoxLayout(left_section)
+        left_section_layout.setContentsMargins(0, 0, 0, 0)
+        left_section_layout.setSpacing(0)
+        left_section_layout.addLayout(left_grid)
+
+        right_section = QFrame()
+        right_section.setObjectName("TotalsRightSection")
+        right_section.setMinimumWidth(300)
+        right_section.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        right_section_layout = QVBoxLayout(right_section)
+        right_section_layout.setContentsMargins(10, 10, 10, 10)
+        right_section_layout.setSpacing(0)
+        right_section_layout.addLayout(right_grid)
+
+        main_grid.addWidget(left_section, 0, 0)
+        section_gap = QSpacerItem(8, 10, QSizePolicy.Fixed, QSizePolicy.Minimum)
+        main_grid.addItem(section_gap, 0, 1)
+        main_grid.addWidget(right_section, 0, 2)
+        main_grid.setColumnStretch(0, 7)
+        main_grid.setColumnStretch(2, 3)
+
+        totals_layout.addLayout(main_grid)
 
         # -----------------------------
         # Signals
@@ -745,7 +873,7 @@ class AddPurchaseWidget(QWidget):
 
         addpurchase = QPushButton("Save Purchase Invoice", objectName="SaveButton")
         addpurchase.setCursor(Qt.PointingHandCursor)
-        addpurchase.setMinimumWidth(220)
+        addpurchase.setMinimumWidth(180)
         save_row.addWidget(addpurchase)
         self.save_purchase_button = addpurchase
 
@@ -787,7 +915,7 @@ class AddPurchaseWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)   
         
-        self.table.setMinimumWidth(900)
+        self.table.setMinimumWidth(700)
         self.table.setMinimumHeight(0)
         
         # Hide vertical header (row numbers)
@@ -815,7 +943,7 @@ class AddPurchaseWidget(QWidget):
         self.label_entry_frame = label_entry_frame
 
         label_entry_layout = QVBoxLayout(label_entry_frame)
-        label_entry_layout.setContentsMargins(10, 10, 10, 10)
+        label_entry_layout.setContentsMargins(8, 8, 8, 8)
         label_entry_layout.setSpacing(10)
         self.label_entry_layout = label_entry_layout
 
@@ -1374,8 +1502,11 @@ class AddPurchaseWidget(QWidget):
         cn_adjust = max(0.0, self._float_or_default(self.cn_adjustment_entry.text(), 0.0))
         final_amount = max(0.0, net_amount - cn_adjust)
         self.final_amount.setText(f"{final_amount:.2f}")
-        
-        self.final_amount.setStyleSheet("font-weight: bold;")
+
+        self.final_amount.setStyleSheet(
+            "font-size: 18px; font-weight: 700; color: #1F2933; "
+            "background-color: #EEF4F8; border-radius: 10px; padding: 6px 12px;"
+        )
         self.calculate_payment()
         self.update_due_date_availability()
         

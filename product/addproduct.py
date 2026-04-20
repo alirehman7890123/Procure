@@ -19,6 +19,7 @@ from services.accounting_settings_service import (
 
 class AddProductWidget(QWidget):
     detailpagesignal = Signal(int)
+    DEFAULT_MARGIN_PERCENT = 14.5
 
     def __init__(self, parent=None):
 
@@ -94,6 +95,9 @@ class AddProductWidget(QWidget):
         # connect keyup events to calculate unit price
         self.pack_price_input.textChanged.connect(self.calculate_unit_price)
         self.pack_size_input.textChanged.connect(self.calculate_unit_price)
+        self.pack_price_input.textChanged.connect(self.calculate_pack_cost_from_margin)
+        self.margin_input.textChanged.connect(self.calculate_pack_cost_from_margin)
+        self.calculate_pack_cost_from_margin()
         
         
         # === Action Buttons ===
@@ -682,11 +686,19 @@ class AddProductWidget(QWidget):
         batch_grid.addWidget(quantity_label, 0, 6)
         batch_grid.addWidget(self.quantity_input, 0, 7)
 
-        unit_cost_label = self.field_label("Cost (Purchase)")
+        unit_cost_label = self.field_label("Cost (Derived)")
         self.unit_cost_input = QLineEdit()
-        self.unit_cost_input.setPlaceholderText("purchase price per pack")
+        self.unit_cost_input.setPlaceholderText("auto-derived from sale price")
+        self.unit_cost_input.setReadOnly(True)
         batch_grid.addWidget(unit_cost_label, 1, 0)
         batch_grid.addWidget(self.unit_cost_input, 1, 1)
+
+        margin_label = self.field_label("Margin %", align_right=True)
+        self.margin_input = QLineEdit()
+        self.margin_input.setPlaceholderText("Margin %")
+        self.margin_input.setText(f"{self.DEFAULT_MARGIN_PERCENT:.1f}")
+        batch_grid.addWidget(margin_label, 1, 2)
+        batch_grid.addWidget(self.margin_input, 1, 3)
 
         batch_grid.setColumnStretch(1, 3)
         batch_grid.setColumnStretch(3, 3)
@@ -696,7 +708,7 @@ class AddProductWidget(QWidget):
         section_layout.addLayout(batch_grid)
         self.register_section_focus(section_frame, [
             self.batch_input, self.expiry_input, self.pack_price_input, self.quantity_input,
-            self.unit_cost_input
+            self.unit_cost_input, self.margin_input
         ])
         
         
@@ -893,8 +905,9 @@ class AddProductWidget(QWidget):
         self.rack_input.returnPressed.connect(lambda: self.focus_next_field(self.batch_input))
         self.batch_input.returnPressed.connect(lambda: self.focus_next_field(self.expiry_input))
         self.expiry_input.returnPressed.connect(lambda: self.focus_next_field(self.pack_price_input))
-        self.pack_price_input.returnPressed.connect(lambda: self.focus_next_field(self.quantity_input))
-        self.quantity_input.returnPressed.connect(lambda: self.focus_next_field(self.unit_cost_input))
+        self.pack_price_input.returnPressed.connect(lambda: self.focus_next_field(self.margin_input))
+        self.margin_input.returnPressed.connect(lambda: self.focus_next_field(self.quantity_input))
+        self.quantity_input.returnPressed.connect(lambda: self.focus_next_field(self.code_input))
         self.unit_cost_input.returnPressed.connect(lambda: self.focus_next_field(self.code_input))
         self.code_input.returnPressed.connect(lambda: self.focus_next_field(self.reorder_level))
         self.reorder_level.returnPressed.connect(self.save_button.click)
@@ -969,7 +982,14 @@ class AddProductWidget(QWidget):
                     WHERE product_id = product.id
                     ORDER BY is_default DESC, id DESC
                     LIMIT 1
-                ) AS pack_price
+                ) AS pack_price,
+                (
+                    SELECT margin_percent
+                    FROM price_pack
+                    WHERE product_id = product.id
+                    ORDER BY is_default DESC, id DESC
+                    LIMIT 1
+                ) AS margin_percent
             FROM product
             WHERE id = ?
             LIMIT 1
@@ -988,6 +1008,7 @@ class AddProductWidget(QWidget):
         rack = str(query.value(5) or "").strip()
         pack_size = query.value(6)
         pack_price = query.value(7)
+        margin_percent = query.value(8)
 
         # Autofill formula if available, otherwise clear stale text.
         self.formula_input.setText(generic_name)
@@ -999,6 +1020,11 @@ class AddProductWidget(QWidget):
 
         # Autofill pack sale price when available and clear stale value otherwise.
         self.pack_price_input.setText(str(pack_price) if pack_price not in (None, "") else "")
+        if margin_percent not in (None, ""):
+            self.margin_input.setText(f"{float(margin_percent or self.DEFAULT_MARGIN_PERCENT):.2f}")
+        else:
+            self.margin_input.setText(f"{self.DEFAULT_MARGIN_PERCENT:.1f}")
+        self.calculate_pack_cost_from_margin()
 
         # Autofill manufacturer when available.
         if manufacturer_id is None:
@@ -1050,6 +1076,25 @@ class AddProductWidget(QWidget):
         
         self.unit_price_input.setText(f"{unit_price:.2f}")
 
+    def _float_or_default(self, value, default=0.0):
+        try:
+            text = str(value or "").strip()
+            if not text:
+                return float(default)
+            return float(text)
+        except Exception:
+            return float(default)
+
+    def calculate_pack_cost_from_margin(self):
+        sale_price = self._float_or_default(self.pack_price_input.text(), 0.0)
+        margin_percent = self._float_or_default(self.margin_input.text(), self.DEFAULT_MARGIN_PERCENT)
+        if sale_price <= 0:
+            self.unit_cost_input.clear()
+            return
+        margin_percent = max(0.0, min(99.99, margin_percent))
+        pack_cost = sale_price * (1 - (margin_percent / 100.0))
+        self.unit_cost_input.setText(f"{pack_cost:.2f}")
+
     
     
 
@@ -1072,14 +1117,15 @@ class AddProductWidget(QWidget):
         rack = self.rack_input.text().strip()
 
         qty_text = self.quantity_input.text().strip()
-        unit_cost_text = self.unit_cost_input.text().strip()
         batch_no = self.batch_input.text().strip() or None
         pack_size = self.pack_size_input.text().strip() or None
         pack_price_text = self.pack_price_input.text().strip()
+        margin_text = self.margin_input.text().strip()
         reorder_level = self.reorder_level.text()
         quantity = float(qty_text) if qty_text else 0.0
-        pack_cost_entered = float(unit_cost_text) if unit_cost_text else None
         pack_price = float(pack_price_text) if pack_price_text else 0.0
+        margin_percent = self._float_or_default(margin_text, self.DEFAULT_MARGIN_PERCENT)
+        pack_cost_entered = pack_price * (1 - (margin_percent / 100.0)) if pack_price > 0 else None
         reorder_level = float(reorder_level) if reorder_level else 0
         
 
@@ -1131,6 +1177,12 @@ class AddProductWidget(QWidget):
 
         if pack_price <= 0:
             AppMessageBox.information(None, "Missing Data", "Sale price must be greater than 0.")
+            return
+
+        if margin_percent < 0 or margin_percent >= 100:
+            AppMessageBox.information(None, "Missing Data", "Margin % must be between 0 and 99.99.")
+            self.margin_input.setFocus()
+            self.margin_input.selectAll()
             return
 
         db = QSqlDatabase.database()
@@ -1292,22 +1344,24 @@ class AddProductWidget(QWidget):
                 price_query = QSqlQuery(db)
                 price_query.prepare("""
                     UPDATE price_pack
-                    SET pack_size = ?, pack_price = ?, reorder_level = ?, is_default = 1
+                    SET pack_size = ?, pack_price = ?, margin_percent = ?, reorder_level = ?, is_default = 1
                     WHERE id = ?
                 """)
                 price_query.addBindValue(pack_size)
                 price_query.addBindValue(pack_price)
+                price_query.addBindValue(margin_percent)
                 price_query.addBindValue(reorder_level)
                 price_query.addBindValue(default_price_pack_id)
             else:
                 price_query = QSqlQuery(db)
                 price_query.prepare("""
-                    INSERT INTO price_pack (product_id, pack_size, pack_price, reorder_level, is_default)
-                    VALUES (?, ?, ?, ?, 1)
+                    INSERT INTO price_pack (product_id, pack_size, pack_price, margin_percent, reorder_level, is_default)
+                    VALUES (?, ?, ?, ?, ?, 1)
                 """)
                 price_query.addBindValue(product_id)
                 price_query.addBindValue(pack_size)
                 price_query.addBindValue(pack_price)
+                price_query.addBindValue(margin_percent)
                 price_query.addBindValue(reorder_level)
 
             if not price_query.exec():
@@ -1350,10 +1404,12 @@ class AddProductWidget(QWidget):
         
         self.unit_cost_input.clear()
         self.pack_price_input.clear()
+        self.margin_input.setText(f"{self.DEFAULT_MARGIN_PERCENT:.1f}")
         self.unit_price_input.setText('0.0')
         self.discount_group_combo.setCurrentIndex(0)
         self.tax_group_combo.setCurrentIndex(0)
         self.reorder_level.clear()
+        self.calculate_pack_cost_from_margin()
         self.name_input.setFocus()
         if self.name_input.lineEdit() is not None:
             self.name_input.lineEdit().selectAll()

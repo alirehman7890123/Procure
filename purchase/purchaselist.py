@@ -154,7 +154,7 @@ class PurchaseListWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)   
 
-        self.table.setMinimumWidth(900)
+        self.table.setMinimumWidth(700)
         self.table.setFixedHeight(400)
         
         # Hide vertical header (row numbers)
