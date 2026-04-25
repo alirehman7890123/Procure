@@ -2,8 +2,8 @@ from PySide6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QL
 from PySide6.QtCore import QSize, Qt, QFile, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 import bcrypt
-from utilities.permissions import Permissions
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.permissions import Permissions
+from medic.utilities.app_messagebox import AppMessageBox
 
 
 def load_stylesheet(filename):

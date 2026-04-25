@@ -7,12 +7,12 @@ from PySide6.QtGui import QRegularExpressionValidator
 
 from PySide6.QtGui import QKeySequence, QShortcut
 
-from utilities.stylus import load_stylesheets
-from utilities.payment_handler import PaymentMethodHandler
-from utilities.permissions import Permissions
-from utilities.session_gate import require_open_session
-from utilities.session_service import get_active_session_id
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.payment_handler import PaymentMethodHandler
+from medic.utilities.permissions import Permissions
+from medic.utilities.session_gate import require_open_session
+from medic.utilities.session_service import get_active_session_id
+from medic.utilities.app_messagebox import AppMessageBox
 
 
 

@@ -3,9 +3,9 @@ from PySide6.QtWidgets import QWidget, QStackedLayout, QScrollArea
 from salesreturn.create_sales_return import AddSalesReturnWidget
 from salesreturn.sales_return_list import SalesReturnListWidget
 from salesreturn.sales_return_detail import SalesReturnDetailWidget
-from utilities.basepage import BasePage
+from medic.utilities.basepage import BasePage
 
-from utilities.permissions import Permissions
+from medic.utilities.permissions import Permissions
 
 class BaseSalesReturnWidget(BasePage):
 

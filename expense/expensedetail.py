@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QDate, QDateTime
 from PySide6.QtSql import QSqlQuery
 
-from utilities.stylus import load_stylesheets
+from medic.utilities.stylus import load_stylesheets
 
 
 class ExpenseDetailWidget(QWidget):

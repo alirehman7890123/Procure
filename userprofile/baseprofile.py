@@ -5,8 +5,8 @@ from userprofile.userprofile import ProfileWidget
 from userprofile.userslist import UserListWidget
 from userprofile.userdetail import UserDetailWidget
 from userprofile.adduser import AddUserWidget
-from utilities.basepage import BasePage
-from utilities.permissions import Permissions
+from medic.utilities.basepage import BasePage
+from medic.utilities.permissions import Permissions
 
 class Profile:
         

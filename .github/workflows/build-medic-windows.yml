@@ -1,0 +1,89 @@
+name: Build Procure Medics (Windows 10)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2019
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Create virtual environment
+        run: |
+          python -m venv venv
+          venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+
+      - name: Install project dependencies
+        run: |
+          venv\Scripts\pip.exe install -r medic/requirements.txt
+
+      - name: Ensure public key exists
+        run: |
+          venv\Scripts\python.exe - << 'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("medic/licensing/public_key.json")
+          if not path.exists():
+              raise SystemExit("public_key.json is missing")
+
+          data = json.loads(path.read_text(encoding="utf-8"))
+          if not isinstance(data, dict) or not data.get("n") or not data.get("e"):
+              raise SystemExit("public_key.json is not configured with a valid public key")
+
+          print("public_key.json is present and configured")
+          PY
+
+      - name: Build packaged app
+        run: |
+          $QtPluginDir = venv\Scripts\python.exe -c "from PySide6.QtCore import QLibraryInfo; print(QLibraryInfo.path(QLibraryInfo.PluginsPath))"
+
+          $ExtraBinaries = @()
+
+          $QsvgPlugin = Join-Path $QtPluginDir "imageformats\qsvg.dll"
+          if (Test-Path $QsvgPlugin) {
+            $ExtraBinaries += "--add-binary"
+            $ExtraBinaries += "${QsvgPlugin}:PySide6/Qt/plugins/imageformats"
+          } else {
+            Write-Warning "Qt SVG image plugin not found at $QsvgPlugin"
+          }
+
+          $QsvgIconEngine = Join-Path $QtPluginDir "iconengines\qsvgicon.dll"
+          if (Test-Path $QsvgIconEngine) {
+            $ExtraBinaries += "--add-binary"
+            $ExtraBinaries += "${QsvgIconEngine}:PySide6/Qt/plugins/iconengines"
+          } else {
+            Write-Warning "Qt SVG icon engine plugin not found at $QsvgIconEngine"
+          }
+
+          $PyInstallerArgs = @(
+            "--clean", "--noconfirm", "--onedir", "--windowed",
+            "--name", "procure-medics",
+            "--hidden-import", "PySide6.QtSvg",
+            "--add-data", "medic/licensing/public_key.json;licensing",
+            "--add-data", "medic/manufacturers.csv;.",
+            "--add-data", "medic/master_products.csv;.",
+            "--add-data", "medic/purchase/med-template.ods;purchase",
+            "--add-data", "medic/res;res",
+            "--add-data", "medic/styles;styles"
+          ) + $ExtraBinaries + @("medic/starting.py")
+
+          venv\Scripts\python.exe -m PyInstaller @PyInstallerArgs
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: procure-medics-windows
+          path: dist/procure-medics/

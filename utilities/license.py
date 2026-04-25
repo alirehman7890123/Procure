@@ -14,8 +14,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from utilities.app_messagebox import AppMessageBox
-from utilities.license_core import (
+from medic.utilities.app_messagebox import AppMessageBox
+from medic.utilities.license_core import (
     LICENSE_PATH,
     LicenseError,
     get_machine_id_short,

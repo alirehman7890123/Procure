@@ -1,21 +1,29 @@
 import re
 
-from PySide6.QtWidgets import QWidget, QApplication, QCompleter,QAbstractItemView, QVBoxLayout, QHBoxLayout, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget, QStyledItemDelegate
+from PySide6.QtWidgets import QWidget, QApplication, QCompleter,QAbstractItemView, QVBoxLayout, QHBoxLayout, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget, QStyledItemDelegate, QFileDialog
 from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, QTimer, Signal, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtGui import QPalette, QColor, QKeyEvent
 from functools import partial
 from PySide6.QtGui import QKeySequence, QShortcut
 
-from utilities.session_gate import require_open_session
-from utilities.session_service import get_active_session_id
+from medic.utilities.session_gate import require_open_session
+from medic.utilities.session_service import get_active_session_id
 
-from utilities.stylus import load_stylesheets
-from utilities.payment_handler import PaymentMethodHandler
-from utilities.activity_logger import log_activity
-from utilities.permissions import Permissions
-from utilities.app_messagebox import AppMessageBox
-from utilities.product_search_widget import ProductSearchBox
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.payment_handler import PaymentMethodHandler
+from medic.utilities.activity_logger import log_activity
+from medic.utilities.permissions import Permissions
+from medic.utilities.app_messagebox import AppMessageBox
+from medic.utilities.file_preview import preview_file
+from medic.utilities.product_form_options import get_product_form_options
+from medic.utilities.product_search_widget import ProductSearchBox
+from services.product_media_service import (
+    ensure_product_media_schema,
+    save_product_media,
+    update_product_media_fields,
+)
+from services.sales_transaction_service import ensure_prescription_schema
 from services.purchase_posting_service import (
     build_purchase_header_payload,
     build_supplier_transaction_payload,
@@ -41,6 +49,10 @@ from services.purchase_draft_service import (
     delete_purchase_draft,
     load_latest_purchase_draft,
     save_purchase_draft,
+)
+from services.scheduled_price_service import (
+    ensure_scheduled_price_schema,
+    save_scheduled_price_change,
 )
 
 
@@ -1495,7 +1507,7 @@ class AddPurchaseWidget(QWidget):
         tax_236g = max(0.0, self._float_or_default(self.tax_236g_entry.text(), 0.0))
         tax_236h = max(0.0, self._float_or_default(self.tax_236h_entry.text(), 0.0))
         sales_tax = max(0.0, self._float_or_default(self.sales_tax_entry.text(), 0.0))
-        tax_amount = tax_236h + sales_tax - tax_236g
+        tax_amount = tax_236g + tax_236h + sales_tax
         net_amount = max(0.0, taxable + tax_amount)
         self.net_amount_entry.setText(f"{net_amount:.2f}")
 
@@ -2086,8 +2098,6 @@ class AddPurchaseWidget(QWidget):
         if not require_open_session(self):
             return
 
-        self.show_price_review_dialog()
-
         # ------------------------------------------------------------
         # 1) Ask user whether they really want to save the purchase
         # ------------------------------------------------------------
@@ -2118,6 +2128,7 @@ class AddPurchaseWidget(QWidget):
             # --------------------------------------------------------
             
             purchase_data = self._collect_purchase_data()
+            price_review_rows = self.get_price_review_rows()
 
             print("Purchase data collected successfully")
             print("Purchase data:", purchase_data)
@@ -2188,7 +2199,17 @@ class AddPurchaseWidget(QWidget):
 
         print("Transaction committed successfully")
         self._discard_current_purchase_draft()
-        AppMessageBox.success(self, "Success", "Purchase saved successfully.")
+        scheduled_count = 0
+        if price_review_rows:
+            scheduled_count = self.show_price_review_dialog(purchase_id, price_review_rows)
+        if scheduled_count > 0:
+            AppMessageBox.success(
+                self,
+                "Success",
+                f"Purchase saved successfully.\n\n{scheduled_count} selling price change(s) scheduled.",
+            )
+        else:
+            AppMessageBox.success(self, "Success", "Purchase saved successfully.")
         self.clear_fields()
         
         
@@ -2241,7 +2262,7 @@ class AddPurchaseWidget(QWidget):
         tax_236h = max(0.0, self._float_or_default(tax_236h, 0.0))
         sales_tax = max(0.0, self._float_or_default(sales_tax, 0.0))
 
-        netamount = max(0.0, self._float_or_default(netamount, taxable + tax_236h + sales_tax - tax_236g))
+        netamount = max(0.0, self._float_or_default(netamount, taxable + tax_236g + tax_236h + sales_tax))
         cn_adjustment = max(0.0, self._float_or_default(cn_adjustment, 0.0))
         total = max(0.0, self._float_or_default(final_amount, netamount - cn_adjustment))
         paid = max(0.0, self._float_or_default(paid, 0.0))
@@ -2250,7 +2271,7 @@ class AddPurchaseWidget(QWidget):
         # ------------------------------------------------------------
         # 4) Calculate header net amount exactly in your style
         # ------------------------------------------------------------
-        header_net_amount = (-discount - tax_236g + tax_236h + sales_tax - cn_adjustment)
+        header_net_amount = (-discount + tax_236g + tax_236h + sales_tax - cn_adjustment)
 
         print("Header Net Amount: ", header_net_amount)
 
@@ -2788,6 +2809,8 @@ class AddPurchaseWidget(QWidget):
             if brand_name is None:
                 raise Exception("Brand is required for a new product.")
 
+            ensure_prescription_schema()
+            ensure_product_media_schema()
             product_query = QSqlQuery()
             product_query.prepare("""
                 INSERT INTO product (
@@ -2801,9 +2824,10 @@ class AddPurchaseWidget(QWidget):
                     packing,
                     rack,
                     manufacturer_id,
+                    prescription_required,
                     status
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """)
             
             code = None
@@ -2821,6 +2845,7 @@ class AddPurchaseWidget(QWidget):
             product_query.addBindValue(packing)
             product_query.addBindValue("")
             product_query.addBindValue(manufacturer)
+            product_query.addBindValue(1 if dialog.prescription_required_check.isChecked() else 0)
             product_query.addBindValue("used")
 
             if not product_query.exec():
@@ -2831,6 +2856,10 @@ class AddPurchaseWidget(QWidget):
                 AppMessageBox.information(None, "Success", "Product added successfully")
                 product_id = product_query.lastInsertId()
                 print("New Product ID is: ", product_id)
+
+                if getattr(dialog, "selected_media_path", "").strip():
+                    media_info = save_product_media(dialog.selected_media_path, product_id=product_id)
+                    update_product_media_fields(product_id=product_id, media_info=media_info)
                 
                 # Create Empty Stock Record
                 price_query = QSqlQuery()
@@ -2933,25 +2962,51 @@ class AddPurchaseWidget(QWidget):
         return len(data)
 
 
-    def show_price_review_dialog(self):
+    def _default_price_review_effective_date(self):
+        return QDate.currentDate().addDays(2)
+
+    def _format_days_left(self, selected_date):
+        if not isinstance(selected_date, QDate) or not selected_date.isValid():
+            return "-"
+        days = QDate.currentDate().daysTo(selected_date)
+        if days <= 0:
+            return "Today"
+        if days == 1:
+            return "1 day"
+        return f"{days} days"
+
+    def _update_remaining_days_label(self, table, row):
+        date_widget = table.cellWidget(row, 4)
+        days_label = table.cellWidget(row, 5)
+        if date_widget is None or days_label is None:
+            return
+        selected_date = date_widget.date() if hasattr(date_widget, "date") else QDate.currentDate()
+        days_label.setText(self._format_days_left(selected_date))
+
+    def show_price_review_dialog(self, purchase_id, review_rows=None):
     
         dialog = QDialog(self)
-        dialog.setWindowTitle("Review Selling Prices")
-        dialog.resize(700, 400)
+        dialog.setWindowTitle("Schedule Selling Price Changes")
+        dialog.resize(860, 420)
+        dialog.scheduled_count = 0
 
         main_layout = QVBoxLayout(dialog)
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
 
-        title = QLabel("Review Sale Price")
+        title = QLabel("Schedule Selling Price Changes")
         title.setObjectName("SectionTitle")
         title.setAlignment(Qt.AlignLeft)
         main_layout.addWidget(title)
 
+        note = QLabel("Choose when each new selling price should become active.")
+        note.setWordWrap(True)
+        main_layout.addWidget(note)
+
         table = QTableWidget()
-        table.setColumnCount(4)
+        table.setColumnCount(6)
         table.setHorizontalHeaderLabels([
-            "ID", "Medicine Name", "Previous Price", "New Price"
+            "ID", "Medicine Name", "Previous Price", "New Price", "Effective Date", "Days Left"
         ])
         table.setItemDelegateForColumn(3, LivePriceDelegate(self.reveal_price_save_button, table))
 
@@ -2970,14 +3025,14 @@ class AddPurchaseWidget(QWidget):
         header = table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Stretch)
 
-        ratios = [1, 5, 2, 2]
+        ratios = [1, 5, 2, 2, 2, 2]
         total = sum(ratios)
-        table_width = 640
+        table_width = 800
 
         for col, ratio in enumerate(ratios):
             header.resizeSection(col, int(table_width * ratio / total))
 
-        row_count = self.populate_price_review_table(table)
+        row_count = self.populate_price_review_table(table, review_rows)
 
         if row_count == 0:
             AppMessageBox.information(
@@ -2985,7 +3040,7 @@ class AddPurchaseWidget(QWidget):
                 "No Items",
                 "No purchased items were found to review prices for."
             )
-            return
+            return 0
 
         main_layout.addWidget(table)
 
@@ -2997,7 +3052,7 @@ class AddPurchaseWidget(QWidget):
 
         self.save_btn.hide()
 
-        self.save_btn.clicked.connect(lambda: self.save_price_review_changes(dialog, table))
+        self.save_btn.clicked.connect(lambda: self.save_price_review_changes(dialog, table, purchase_id))
         self.skip_btn.clicked.connect(dialog.reject)
 
         btn_layout.addWidget(self.save_btn)
@@ -3007,11 +3062,13 @@ class AddPurchaseWidget(QWidget):
 
         table.itemChanged.connect(self.on_price_changed)
 
-        dialog.exec() 
+        dialog.exec()
+        return int(getattr(dialog, "scheduled_count", 0) or 0)
 
 
-    def save_price_review_changes(self, dialog, table):
+    def save_price_review_changes(self, dialog, table, purchase_id):
         db = QSqlDatabase.database()
+        ensure_scheduled_price_schema()
 
         if not db.transaction():
             AppMessageBox.critical(self, "Database Error", "Could not start price update transaction.")
@@ -3028,6 +3085,7 @@ class AddPurchaseWidget(QWidget):
                 product_name_item = table.item(row, 1)
                 previous_price_item = table.item(row, 2)
                 new_price_item = table.item(row, 3)
+                effective_date_widget = table.cellWidget(row, 4)
 
                 if product_id_item is None or new_price_item is None:
                     continue
@@ -3048,57 +3106,34 @@ class AddPurchaseWidget(QWidget):
                 if new_price < 0:
                     raise Exception(f"New price cannot be negative in row {row + 1}.")
 
-                price_query = QSqlQuery()
-                price_query.prepare("""
-                    UPDATE price_pack
-                    SET pack_price = ?
-                    WHERE id = (
-                        SELECT id
-                        FROM price_pack
-                        WHERE product_id = ?
-                        ORDER BY is_default DESC, id ASC
-                        LIMIT 1
-                    )
-                """)
-                price_query.addBindValue(new_price)
-                price_query.addBindValue(product_id)
+                if effective_date_widget is None or not hasattr(effective_date_widget, "date"):
+                    raise Exception(f"Effective date is missing in row {row + 1}.")
+                effective_date = effective_date_widget.date()
+                if not effective_date.isValid():
+                    raise Exception(f"Effective date is invalid in row {row + 1}.")
+                if effective_date < QDate.currentDate():
+                    raise Exception(f"Effective date cannot be in the past in row {row + 1}.")
 
-                if not price_query.exec():
-                    raise Exception(f"Failed to update price in row {row + 1}: {price_query.lastError().text()}")
-
-                if price_query.numRowsAffected() == 0:
-                    raise Exception(f"No price_pack row found for product ID {product_id}.")
-
-                change_query = QSqlQuery()
-                change_query.prepare("""
-                    INSERT INTO price_changes (
-                        product_id,
-                        previous_price,
-                        new_price,
-                        source,
-                        user_id,
-                        username
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """)
-                change_query.addBindValue(product_id)
-                change_query.addBindValue(previous_price)
-                change_query.addBindValue(new_price)
-                change_query.addBindValue("purchase_price_review")
-                change_query.addBindValue(change_user_id)
-                change_query.addBindValue(change_username)
-
-                if not change_query.exec():
-                    raise Exception(f"Failed to log price change in row {row + 1}: {change_query.lastError().text()}")
+                save_scheduled_price_change(
+                    product_id=product_id,
+                    purchase_id=purchase_id,
+                    previous_price=previous_price,
+                    new_price=new_price,
+                    effective_date=effective_date.toString("yyyy-MM-dd"),
+                    created_by=change_user_id,
+                    created_by_username=change_username,
+                    notes="Scheduled from purchase price review.",
+                )
 
                 log_activity(
                     category="price",
-                    action="price_updated",
+                    action="price_change_scheduled",
                     entity_type="product",
                     entity_id=product_id,
                     note=(
-                        f"Selling price updated for {product_name} (Product ID {product_id}). "
-                        f"Pack price changed from {previous_price} to {new_price} during purchase price review."
+                        f"Selling price scheduled for {product_name} (Product ID {product_id}). "
+                        f"Pack price will change from {previous_price} to {new_price} on "
+                        f"{effective_date.toString('yyyy-MM-dd')}."
                     ),
                     previous_value=str(previous_price),
                     new_value=str(new_price)
@@ -3112,6 +3147,7 @@ class AddPurchaseWidget(QWidget):
             if not db.commit():
                 raise Exception("Could not commit price changes.")
 
+            dialog.scheduled_count = updated_rows
             dialog.accept()
 
         except Exception as e:
@@ -3125,6 +3161,39 @@ class AddPurchaseWidget(QWidget):
 
         if item.column() == NEW_PRICE_COL:
             self.reveal_price_save_button()
+
+    def populate_price_review_table(self, table, review_rows=None):
+        data = list(review_rows or self.get_price_review_rows())
+        table.setRowCount(len(data))
+
+        for row, (product_id, name, prev_price, new_price) in enumerate(data):
+            values = [str(product_id), str(name), str(prev_price), str(new_price)]
+
+            for col, value in enumerate(values):
+                item = QTableWidgetItem(value)
+
+                if col == 3:
+                    item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsEditable)
+                else:
+                    item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+
+                table.setItem(row, col, item)
+
+            effective_date_edit = QDateEdit()
+            effective_date_edit.setCalendarPopup(True)
+            effective_date_edit.setDisplayFormat("dd MMM yyyy")
+            effective_date_edit.setDate(self._default_price_review_effective_date())
+            effective_date_edit.setMinimumDate(QDate.currentDate())
+            effective_date_edit.dateChanged.connect(lambda _date, tbl=table, r=row: self._update_remaining_days_label(tbl, r))
+            effective_date_edit.dateChanged.connect(lambda _date: self.reveal_price_save_button())
+            table.setCellWidget(row, 4, effective_date_edit)
+
+            remaining_days = QLabel()
+            remaining_days.setAlignment(Qt.AlignCenter)
+            table.setCellWidget(row, 5, remaining_days)
+            self._update_remaining_days_label(table, row)
+
+        return len(data)
 
 
     def reveal_price_save_button(self):
@@ -3170,6 +3239,8 @@ class ImportDialog(QDialog):
     def __init__(self, parent=None):
         
         super().__init__(parent)
+        ensure_product_media_schema()
+        self.selected_media_path = ""
         self.setWindowTitle("Add New Product")
         self.resize(600, 360)
         self.setMinimumWidth(560)
@@ -3214,12 +3285,15 @@ class ImportDialog(QDialog):
             save_button.setCursor(Qt.PointingHandCursor)
             save_button.setMinimumHeight(30)
             save_button.setMinimumWidth(116)
+            save_button.setAutoDefault(False)
+            save_button.setDefault(False)
         if cancel_button is not None:
             cancel_button.setText("Cancel")
             cancel_button.setObjectName("TopRightButton")
             cancel_button.setCursor(Qt.PointingHandCursor)
             cancel_button.setMinimumHeight(30)
             cancel_button.setMinimumWidth(88)
+            cancel_button.setAutoDefault(False)
         button_box.accepted.connect(self.accept)   # Save → dialog.accept()
         button_box.rejected.connect(self.reject)   # Cancel → dialog.reject()
         self.footer_layout.addWidget(self.footer_hint, 1)
@@ -3311,6 +3385,9 @@ class ImportDialog(QDialog):
                 font-weight: 600;
             }
         """)
+
+        self.setup_enter_navigation()
+        self._prime_item_field_focus()
     
     
 
@@ -3341,6 +3418,50 @@ class ImportDialog(QDialog):
         subheader_layout.addWidget(badge, 0, Qt.AlignTop)
         subheader_layout.addWidget(title_wrap, 1)
         self.layout.addWidget(self.header_card)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Run after dialog is shown so focus is not stolen by default buttons.
+        self._prime_item_field_focus()
+
+    def _prime_item_field_focus(self):
+        QTimer.singleShot(0, self._focus_item_field)
+
+    def _focus_item_field(self):
+        if not hasattr(self, "name_input") or self.name_input is None:
+            return
+        self.name_input.setFocus(Qt.OtherFocusReason)
+        self.name_input.selectAll()
+
+    def browse_media_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Product File",
+            "",
+            "Images and PDF Files (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.pdf);;Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif);;PDF Files (*.pdf);;All Files (*)",
+        )
+        if not file_path:
+            return
+        self.selected_media_path = file_path
+        self.update_media_display()
+
+    def preview_media_file(self):
+        if not str(self.selected_media_path or "").strip():
+            AppMessageBox.information(self, "Preview File", "No product file is selected yet.")
+            return
+        preview_file(self, self.selected_media_path)
+
+    def clear_media_file(self):
+        self.selected_media_path = ""
+        self.update_media_display()
+
+    def update_media_display(self):
+        has_media = bool(str(self.selected_media_path or "").strip())
+        self.media_value.setText(
+            f"Selected: {self.selected_media_path.split('/')[-1]}" if has_media else "No file selected"
+        )
+        self.media_preview_btn.setEnabled(has_media)
+        self.media_clear_btn.setEnabled(has_media)
         
         
         
@@ -3365,20 +3486,7 @@ class ImportDialog(QDialog):
             lambda text: self.force_uppercase_line_edit(self.name_input, text)
         )
 
-        forms = [
-            "AEROSOL","BALM","BUBBLE GUM","CAP","CAPLET","CAPS SR","CREAM","DRAGEES","DROPS",
-            "DRY SUSP","E AND E DROPS","EAR DROPS","ELIXIR","EMUL","ENEMA","EXPC","EYE DROPS",
-            "EYE GEL","EYE OINT","EYE SUSP","FORM","GEL","GRANULES","INF","INHALER","INJ",
-            "INJ CS","INJ DS","INJ IM/IV","INJ SC","INJ SR","INJ-IM","INJ-IV","LINCTUS",
-            "LINIMENT","LIQUID","LOTION","LOZENGES","MIXTURE","MOUTH SPRAY","MOUTH WASH",
-            "NASAL DROPS","NASAL SPRAY","NEBULISER","OIL","OINT","ORAL SOLN","PAINT",
-            "PASTE","PATCHES","PELLETS","POULTICE","POWDER","ROTA CAPS","SACHET","SCRUB",
-            "SHAMPOO","SOAP","SOFT CAPS","SOLN","SPRAY","SUPPOSITORIES","SUSP","SUSP DS",
-            "SYP","SYRINGE","TAB","TAB ENTERIC COATED","TABS CHEWABLE","TABS DS","TABS EFR",
-            "TABS SL","TABS SR","TINC","TOOTH PASTE","VAG CREAM","VAG OVULE","VAG PESSARIES","VAG TABS"
-        ]
-
-        forms = sorted([f.title() for f in forms])
+        forms = get_product_form_options()
         self.form_input = QComboBox()
         self.form_input.setObjectName("importField")
         self.form_input.setEditable(True)
@@ -3402,6 +3510,8 @@ class ImportDialog(QDialog):
         self.saleprice_input = SelectAllLineEdit()
         self.saleprice_input.setObjectName("importField")
         self.saleprice_input.setPlaceholderText("Sale price")
+        self.prescription_required_check = QCheckBox("Prescription Required")
+        self.prescription_required_check.setObjectName("ImportFieldLabel")
 
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
@@ -3425,10 +3535,31 @@ class ImportDialog(QDialog):
 
         grid.addWidget(price_label, 3, 0)
         grid.addWidget(self.saleprice_input, 3, 1)
+        grid.addWidget(self.prescription_required_check, 4, 1)
+        media_label = QLabel("Product File")
+        media_label.setObjectName("ImportFieldLabel")
+        grid.addWidget(media_label, 5, 0)
+        media_row = QHBoxLayout()
+        media_row.setSpacing(8)
+        self.media_value = QLabel("No file selected")
+        self.media_value.setObjectName("ImportFieldLabel")
+        self.media_value.setStyleSheet("color: #5D6E7D; font-weight: 600;")
+        self.media_browse_btn = QPushButton("Select File", objectName="TopRightButton")
+        self.media_preview_btn = QPushButton("Preview", objectName="TopRightButton")
+        self.media_clear_btn = QPushButton("Clear", objectName="TopRightButton")
+        self.media_browse_btn.clicked.connect(self.browse_media_file)
+        self.media_preview_btn.clicked.connect(self.preview_media_file)
+        self.media_clear_btn.clicked.connect(self.clear_media_file)
+        media_row.addWidget(self.media_value, 1)
+        media_row.addWidget(self.media_browse_btn)
+        media_row.addWidget(self.media_preview_btn)
+        media_row.addWidget(self.media_clear_btn)
+        grid.addLayout(media_row, 5, 1)
 
         grid.setColumnStretch(0, 0)
         grid.setColumnStretch(1, 1)
         self.form_layout.addLayout(grid)
+        self.update_media_display()
         
         
     def populate_manufacturer_combobox(self, combo: QComboBox):
@@ -3499,3 +3630,65 @@ class ImportDialog(QDialog):
         combo.addItem(name, new_id)
         combo.setCurrentIndex(combo.count() - 1)
         print("New Manufacturer added .. right about now...")
+
+    def _focus_next_field(self, widget):
+        line_edit = widget.lineEdit() if hasattr(widget, "lineEdit") else None
+        if line_edit is not None:
+            line_edit.setFocus()
+            line_edit.selectAll()
+            return
+
+        widget.setFocus()
+        if hasattr(widget, "selectAll"):
+            widget.selectAll()
+
+    def setup_enter_navigation(self):
+        # Use an event filter instead of returnPressed connections because
+        # editable comboboxes and dialog default buttons can consume Enter.
+        self._enter_nav_order = []
+        self._enter_nav_next = {}
+
+        for widget in (
+            self.name_input,
+            self.form_input,
+            self.form_input.lineEdit(),
+            self.packing_input,
+            self.brand_input,
+            self.brand_input.lineEdit(),
+            self.packsize_input,
+            self.saleprice_input,
+        ):
+            if widget is None:
+                continue
+            widget.installEventFilter(self)
+            self._enter_nav_order.append(widget)
+
+        # Explicit next-step mapping (handles both combo and line edit focus states).
+        self._enter_nav_next = {
+            self.name_input: self.form_input,
+            self.form_input: self.packing_input,
+            self.form_input.lineEdit(): self.packing_input,
+            self.packing_input: self.brand_input,
+            self.brand_input: self.packsize_input,
+            self.brand_input.lineEdit(): self.packsize_input,
+            self.packsize_input: self.saleprice_input,
+        }
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if watched in getattr(self, "_enter_nav_order", []):
+                if watched is self.brand_input.lineEdit():
+                    self.handle_new_manufacturer_entry(self.brand_input)
+                elif watched is self.brand_input:
+                    self.handle_new_manufacturer_entry(self.brand_input)
+
+                if watched is self.saleprice_input:
+                    self.accept()
+                    return True
+
+                next_widget = self._enter_nav_next.get(watched)
+                if next_widget is not None:
+                    self._focus_next_field(next_widget)
+                    return True
+
+        return super().eventFilter(watched, event)

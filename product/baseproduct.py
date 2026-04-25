@@ -3,8 +3,8 @@ from PySide6.QtWidgets import QWidget, QStackedLayout
 from product.addproduct import AddProductWidget
 from product.productlist import ProductListWidget
 from product.productdetail import ProductDetailWidget
-from utilities.basepage import BasePage
-from utilities.permissions import Permissions
+from medic.utilities.basepage import BasePage
+from medic.utilities.permissions import Permissions
 
 
 class BaseProductWidget(BasePage):

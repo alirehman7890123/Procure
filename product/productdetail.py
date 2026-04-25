@@ -1,14 +1,23 @@
-from PySide6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QDialog, QApplication, QHBoxLayout, QButtonGroup, QCheckBox, QFrame,QMessageBox,QTableWidget, QHeaderView, QTableWidgetItem, QLabel, QLineEdit, QGridLayout, QTableWidgetItem, QSpacerItem, QSizePolicy, QComboBox
+from PySide6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QDialog, QApplication, QHBoxLayout, QButtonGroup, QCheckBox, QFrame,QMessageBox,QTableWidget, QHeaderView, QTableWidgetItem, QLabel, QLineEdit, QGridLayout, QTableWidgetItem, QSpacerItem, QSizePolicy, QComboBox, QFileDialog
 from PySide6.QtCore import QFile, Qt, QDate, QDateTime, Signal
 from PySide6.QtSql import  QSqlQuery, QSqlDatabase
 from PySide6.QtGui import QColor
 from functools import partial
 from datetime import datetime
 
-from utilities.stylus import load_stylesheets
-from utilities.activity_logger import log_activity
-from utilities.permissions import Permissions
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.file_preview import preview_file
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.activity_logger import log_activity
+from medic.utilities.permissions import Permissions
+from medic.utilities.app_messagebox import AppMessageBox
+from services.product_media_service import (
+    clear_product_media_fields,
+    ensure_product_media_schema,
+    fetch_product_media,
+    save_product_media,
+    update_product_media_fields,
+)
+from services.sales_transaction_service import ensure_prescription_schema
 
 
 class ProductDetailWidget(QWidget):
@@ -18,8 +27,13 @@ class ProductDetailWidget(QWidget):
     def __init__(self, parent=None):
 
         super().__init__(parent)
+        ensure_prescription_schema()
+        ensure_product_media_schema()
         
         self.edit_mode = False
+        self.selected_product_media_path = ""
+        self.product_media_info = None
+        self.product_media_removed = False
 
 
         self.layout = QVBoxLayout(self)
@@ -61,7 +75,7 @@ class ProductDetailWidget(QWidget):
         self.layout.addSpacing(20)
         
         labels = ["Product Name", "Code/Barcode", "Brand", 
-                   "Formula", "Pack Size", "Units", "Pack Price", "Unit Price", "Discount Group", "Tax Group"]
+                   "Formula", "Pack Size", "Units", "Pack Price", "Unit Price", "Discount Group", "Tax Group", "Prescription"]
 
         self.product = QLabel() ; self.productedit = QLineEdit()
         self.code = QLabel() ; self.codeedit = QLineEdit()
@@ -77,6 +91,8 @@ class ProductDetailWidget(QWidget):
         self.populate_discount_groups()
         self.tax_group = QLabel() ; self.tax_group_edit = QComboBox()
         self.populate_tax_groups()
+        self.prescription_required = QLabel()
+        self.prescription_required_edit = QCheckBox("Prescription Required")
         
         self.field_pairs = [
             (self.product, self.productedit),
@@ -88,7 +104,8 @@ class ProductDetailWidget(QWidget):
             (self.sale_price, self.sale_price_edit),
             (self.unit_price, None),
             (self.discount_group, self.discount_group_edit),
-            (self.tax_group, self.tax_group_edit)
+            (self.tax_group, self.tax_group_edit),
+            (self.prescription_required, self.prescription_required_edit)
             
         ]
         
@@ -114,6 +131,34 @@ class ProductDetailWidget(QWidget):
                 row.addWidget(edit_field, 8)
 
             self.layout.addLayout(row)
+
+        media_row = QHBoxLayout()
+        media_label = QLabel("Product File")
+        media_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        media_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        media_label.setMinimumWidth(200)
+        media_label.setStyleSheet("font-weight: normal; color: #444;")
+        media_row.addWidget(media_label, 2)
+
+        self.product_media_label = QLabel("No file attached")
+        self.product_media_label.setWordWrap(True)
+        media_row.addWidget(self.product_media_label, 5)
+
+        self.preview_media_btn = QPushButton("Preview", objectName="TopRightButton")
+        self.preview_media_btn.clicked.connect(self.preview_product_media)
+        media_row.addWidget(self.preview_media_btn, 0)
+
+        self.select_media_btn = QPushButton("Select File", objectName="TopRightButton")
+        self.select_media_btn.clicked.connect(self.browse_product_media)
+        self.select_media_btn.hide()
+        media_row.addWidget(self.select_media_btn, 0)
+
+        self.clear_media_btn = QPushButton("Clear", objectName="TopRightButton")
+        self.clear_media_btn.clicked.connect(self.clear_product_media)
+        self.clear_media_btn.hide()
+        media_row.addWidget(self.clear_media_btn, 0)
+
+        self.layout.addLayout(media_row)
             
         
         
@@ -173,6 +218,7 @@ class ProductDetailWidget(QWidget):
 
         
         self.setStyleSheet(load_stylesheets())
+        self.update_product_media_display()
 
     def populate_discount_groups(self):
         self.discount_group_edit.clear()
@@ -227,6 +273,50 @@ class ProductDetailWidget(QWidget):
         if hasattr(widget, "setText"):
             widget.setText(str(text))
 
+    def browse_product_media(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Product File",
+            "",
+            "Images and PDF Files (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.pdf);;Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif);;PDF Files (*.pdf);;All Files (*)",
+        )
+        if not file_path:
+            return
+        self.selected_product_media_path = file_path
+        self.product_media_removed = False
+        self.update_product_media_display()
+
+    def clear_product_media(self):
+        self.selected_product_media_path = ""
+        self.product_media_info = None
+        self.product_media_removed = True
+        self.update_product_media_display()
+
+    def preview_product_media(self):
+        media_path = str(self.selected_product_media_path or "").strip()
+        mime_type = ""
+        if not media_path and self.product_media_info:
+            media_path = str(self.product_media_info.get("absolute_path") or "").strip()
+            mime_type = str(self.product_media_info.get("mime_type") or "").strip()
+        if not media_path:
+            AppMessageBox.information(self, "Preview File", "No product file is attached yet.")
+            return
+        preview_file(self, media_path, mime_type=mime_type)
+
+    def update_product_media_display(self):
+        text = "No file attached"
+        if str(self.selected_product_media_path or "").strip():
+            text = f"Selected: {self.selected_product_media_path.split('/')[-1]}"
+        elif self.product_media_info:
+            text = f"Stored: {self.product_media_info.get('original_filename') or 'Attached file'}"
+        elif self.product_media_removed:
+            text = "Existing file will be cleared"
+
+        self.product_media_label.setText(text)
+        has_media = bool(str(self.selected_product_media_path or "").strip() or self.product_media_info)
+        self.preview_media_btn.setEnabled(has_media)
+        self.clear_media_btn.setEnabled(has_media or self.product_media_removed)
+
 
 
         
@@ -243,6 +333,8 @@ class ProductDetailWidget(QWidget):
                     self.set_edit_widget_text(edit, lbl.text())
                     lbl.hide()
                     edit.show()
+            self.select_media_btn.show()
+            self.clear_media_btn.show()
         else:
             self.save_changes()
             self.edit_btn.setText("Edit")
@@ -252,6 +344,8 @@ class ProductDetailWidget(QWidget):
                     lbl.setText(self.get_edit_widget_text(edit))
                     edit.hide()
                     lbl.show()
+            self.select_media_btn.hide()
+            self.clear_media_btn.hide()
     
             
             
@@ -268,6 +362,8 @@ class ProductDetailWidget(QWidget):
                     lbl.setText(self.get_edit_widget_text(edit))
                     edit.hide()
                     lbl.show()
+            self.select_media_btn.hide()
+            self.clear_media_btn.hide()
 
         super().hideEvent(event)
         
@@ -279,7 +375,7 @@ class ProductDetailWidget(QWidget):
         self.product_id = id
         print("Loading Detail ID:", self.product_id)
         query = QSqlQuery()
-        query.prepare("SELECT display_name, code, generic_name, brand, discount_group_id, tax_group_id FROM product WHERE id = ?")
+        query.prepare("SELECT display_name, code, generic_name, brand, discount_group_id, tax_group_id, COALESCE(prescription_required, 0) FROM product WHERE id = ?")
         query.addBindValue(self.product_id)
         
         if query.exec() and query.next():
@@ -296,6 +392,13 @@ class ProductDetailWidget(QWidget):
             tax_index = self.tax_group_edit.findData(tax_group_id)
             self.tax_group_edit.setCurrentIndex(tax_index if tax_index >= 0 else 0)
             self.tax_group.setText(self.tax_group_edit.currentText() or "None")
+            prescription_required = bool(int(query.value(6) or 0))
+            self.prescription_required.setText("Required" if prescription_required else "Not Required")
+            self.prescription_required_edit.setChecked(prescription_required)
+            self.product_media_info = fetch_product_media(self.product_id)
+            self.selected_product_media_path = ""
+            self.product_media_removed = False
+            self.update_product_media_display()
             
         
         else:
@@ -533,7 +636,7 @@ class ProductDetailWidget(QWidget):
             product_query = QSqlQuery()
             product_query.prepare("""
                 UPDATE product
-                SET display_name = ?, code = ?, brand = ?, generic_name = ?, discount_group_id = ?, tax_group_id = ?
+                SET display_name = ?, code = ?, brand = ?, generic_name = ?, discount_group_id = ?, tax_group_id = ?, prescription_required = ?
                 WHERE id = ?
             """)
 
@@ -546,6 +649,7 @@ class ProductDetailWidget(QWidget):
             product_query.addBindValue(formula)
             product_query.addBindValue(self.discount_group_edit.currentData())
             product_query.addBindValue(self.tax_group_edit.currentData())
+            product_query.addBindValue(1 if self.prescription_required_edit.isChecked() else 0)
             product_query.addBindValue(self.product_id)
 
             if not product_query.exec():
@@ -554,6 +658,7 @@ class ProductDetailWidget(QWidget):
             print(f"[OK] Product updated. Rows affected: {product_query.numRowsAffected()}")
             self.discount_group.setText(self.discount_group_edit.currentText() or "None")
             self.tax_group.setText(self.tax_group_edit.currentText() or "None")
+            self.prescription_required.setText("Required" if self.prescription_required_edit.isChecked() else "Not Required")
             
             
             
@@ -576,6 +681,16 @@ class ProductDetailWidget(QWidget):
                 raise Exception("No stock rows were updated. Invalid product_id link ?")
 
             print(f"[OK] Stock updated. Rows affected: {pricing_query.numRowsAffected()}")
+
+            if self.product_media_removed:
+                clear_product_media_fields(product_id=self.product_id)
+                self.product_media_info = None
+            elif self.selected_product_media_path:
+                media_info = save_product_media(self.selected_product_media_path, product_id=self.product_id)
+                update_product_media_fields(product_id=self.product_id, media_info=media_info)
+                self.product_media_info = media_info
+                self.selected_product_media_path = ""
+                self.product_media_removed = False
             
             
 
@@ -584,6 +699,7 @@ class ProductDetailWidget(QWidget):
                 raise Exception(f"Commit failed: {db.lastError().text()}")
 
             print("[SUCCESS] Transaction committed.")
+            self.update_product_media_display()
 
             if old_pack_price is not None and old_pack_price != sale:
                 price_change_query = QSqlQuery()

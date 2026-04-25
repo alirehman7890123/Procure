@@ -225,9 +225,10 @@ class ProductSearchBox(QComboBox):
         self._load_suggestions()
 
     def _load_suggestions(self):
-        current_text = self.lineEdit().text().strip()
+        current_text = self.lineEdit().text()
+        normalized_text = current_text.strip()
 
-        if self._defer_numeric_to_enter and current_text.isdigit():
+        if self._defer_numeric_to_enter and normalized_text and normalized_text == current_text and normalized_text.isdigit():
             self.blockSignals(True)
             self.clear()
             self.setCurrentIndex(-1)
@@ -240,7 +241,7 @@ class ProductSearchBox(QComboBox):
                 popup.hide()
             return
 
-        if not current_text:
+        if not normalized_text:
             self.blockSignals(True)
             self.clear()
             self.setCurrentIndex(-1)

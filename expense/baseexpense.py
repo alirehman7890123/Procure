@@ -3,8 +3,8 @@ from PySide6.QtWidgets import QWidget, QStackedLayout, QScrollArea
 from expense.addexpense import AddExpenseWidget
 from expense.expenselist import ExpenseListWidget
 from expense.expensedetail import ExpenseDetailWidget
-from utilities.basepage import BasePage
-from utilities.permissions import Permissions
+from medic.utilities.basepage import BasePage
+from medic.utilities.permissions import Permissions
 
 
 class BaseExpenseWidget(BasePage):

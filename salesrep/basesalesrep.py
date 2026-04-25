@@ -3,9 +3,9 @@ from PySide6.QtWidgets import QWidget, QStackedLayout
 from salesrep.addsalesrep import AddSalesRepWidget
 from salesrep.salesreplist import SalesRepListWidget
 from salesrep.salesrepdetail import SalesRepDetailWidget
-from utilities.basepage import BasePage
+from medic.utilities.basepage import BasePage
 
-from utilities.permissions import Permissions
+from medic.utilities.permissions import Permissions
 
 
 class SalesRep:

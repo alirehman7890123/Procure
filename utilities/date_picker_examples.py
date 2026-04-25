@@ -9,7 +9,7 @@ Copy-paste these snippets into your code.
 
 from PySide6.QtWidgets import QPushButton, QLabel, QVBoxLayout, QWidget, QDialog
 from PySide6.QtCore import Qt
-from utilities.modern_date_picker import ModernDatePickerDialog
+from medic.utilities.modern_date_picker import ModernDatePickerDialog
 
 
 class SimplePickerExample(QWidget):
@@ -50,7 +50,7 @@ class SimplePickerExample(QWidget):
 # ============================================================================
 
 from PySide6.QtWidgets import QFormLayout, QLineEdit
-from utilities.modern_date_picker import ModernDateEdit
+from medic.utilities.modern_date_picker import ModernDateEdit
 
 
 class PurchaseOrderForm(QWidget):

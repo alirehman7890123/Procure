@@ -4,11 +4,11 @@ from PySide6.QtSql import QSqlDatabase, QSqlQuery
 
 import os
 import sys
-import platform
 from PySide6.QtGui import QPdfWriter, QPainter, QPageSize, QFont, QTextOption, QPen, QColor
 from PySide6.QtCore import Qt, QRectF
 
-from utilities.stylus import load_stylesheets
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.file_preview import preview_file
 from services.sales_detail_service import (
     fetch_sales_detail,
     fetch_sales_detail_items,
@@ -117,6 +117,33 @@ class SalesDetailWidget(QWidget):
         self.table.setSelectionMode(QTableWidget.SingleSelection)
 
         self.layout.addWidget(self.table)
+
+        self.prescription_frame = QFrame()
+        self.prescription_frame.setObjectName("sectionCard")
+        prescription_layout = QVBoxLayout(self.prescription_frame)
+        prescription_layout.setContentsMargins(10, 10, 10, 10)
+        prescription_layout.setSpacing(8)
+
+        prescription_title = QLabel("Prescription")
+        prescription_title.setStyleSheet("font-weight: 700; color: #223746;")
+        prescription_layout.addWidget(prescription_title)
+
+        self.prescription_summary = QLabel("No prescription recorded for this invoice.")
+        self.prescription_summary.setWordWrap(True)
+        prescription_layout.addWidget(self.prescription_summary)
+
+        self.prescription_attachment_table = QTableWidget()
+        self.prescription_attachment_table.setColumnCount(4)
+        self.prescription_attachment_table.setHorizontalHeaderLabels(["File", "Type", "Size", "Preview"])
+        self.prescription_attachment_table.verticalHeader().setVisible(False)
+        self.prescription_attachment_table.horizontalHeader().setStretchLastSection(True)
+        self.prescription_attachment_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.prescription_attachment_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.prescription_attachment_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.prescription_attachment_table.setVisible(False)
+        prescription_layout.addWidget(self.prescription_attachment_table)
+
+        self.layout.addWidget(self.prescription_frame)
         
         self.layout.addStretch()    
         
@@ -220,6 +247,7 @@ class SalesDetailWidget(QWidget):
 
         print("Sales data loaded successfully for ID:", id)
         self.load_items_into_table(id)
+        self.load_prescription_section(id)
             
             
 
@@ -243,6 +271,143 @@ class SalesDetailWidget(QWidget):
             self.table.setItem(row_index, 5, QTableWidgetItem(str(item["discount_amount"])))
             self.table.setItem(row_index, 6, QTableWidgetItem(str(item["tax_percent"])))
             self.table.setItem(row_index, 7, QTableWidgetItem(str(item["line_total"])))
+
+    def load_prescription_section(self, sale_id):
+        context = fetch_sales_invoice_context(sale_id)
+        prescription = (context or {}).get("prescription")
+        attachments = list((context or {}).get("prescription_attachments") or [])
+        self._prescription_attachments = attachments
+
+        if not prescription:
+            self.prescription_summary.setText("No prescription recorded for this invoice.")
+            self.prescription_attachment_table.setRowCount(0)
+            self.prescription_attachment_table.setVisible(False)
+            return
+
+        parts = [
+            f"Doctor: {prescription['doctor_name']}",
+            f"Clinic: {prescription['clinic_name'] or 'Not provided'}",
+            f"License: {prescription['doctor_license_no'] or 'Not provided'}",
+            f"Date: {prescription['prescription_date'] or 'Not provided'}",
+            f"Notes: {prescription['notes'] or 'None'}",
+        ]
+        self.prescription_summary.setText("\n".join(parts))
+
+        self.prescription_attachment_table.setRowCount(0)
+        for row_index, attachment in enumerate(attachments):
+            self.prescription_attachment_table.insertRow(row_index)
+            self.prescription_attachment_table.setItem(row_index, 0, QTableWidgetItem(attachment["original_filename"]))
+            self.prescription_attachment_table.setItem(row_index, 1, QTableWidgetItem(attachment["mime_type"] or "file"))
+            self.prescription_attachment_table.setItem(row_index, 2, QTableWidgetItem(self._format_file_size(attachment["file_size"])))
+            preview_btn = QPushButton("Preview", objectName="TopRightButton")
+            preview_btn.clicked.connect(lambda _, r=row_index: self.open_prescription_attachment_by_row(r))
+            self.prescription_attachment_table.setCellWidget(row_index, 3, preview_btn)
+
+        has_attachments = bool(attachments)
+        self.prescription_attachment_table.setVisible(has_attachments)
+
+    def _format_file_size(self, size_bytes):
+        try:
+            size = int(size_bytes or 0)
+        except (TypeError, ValueError):
+            size = 0
+        if size >= 1024 * 1024:
+            return f"{size / (1024 * 1024):.1f} MB"
+        if size >= 1024:
+            return f"{size / 1024:.1f} KB"
+        return f"{size} B"
+
+    def open_prescription_attachment_by_row(self, row):
+        if row < 0 or row >= len(getattr(self, "_prescription_attachments", [])):
+            AppMessageBox.information(self, "Preview Attachment", "No attachment row was selected.")
+            return
+        attachment = self._prescription_attachments[row]
+        path = attachment.get("absolute_path") or ""
+        if not path or not os.path.exists(path):
+            AppMessageBox.warning(
+                self,
+                "Preview Attachment",
+                (
+                    "The attachment file could not be found.\n\n"
+                    f"Expected path:\n{path or '(missing path)'}"
+                ),
+            )
+            return
+
+        mime_type = str(attachment.get("mime_type") or "").lower()
+        extension = os.path.splitext(path)[1].lower()
+        try:
+            if mime_type.startswith("image/") or extension in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}:
+                dialog = ImagePreviewDialog(path, self)
+                if not dialog.preview_ready:
+                    AppMessageBox.warning(
+                        self,
+                        "Image Preview",
+                        (
+                            "The image file was found, but the in-app preview could not load it.\n\n"
+                            f"File:\n{path}"
+                        ),
+                    )
+                    return
+                dialog.exec()
+                return
+            if (mime_type == "application/pdf" or extension == ".pdf") and HAS_QT_PDF:
+                dialog = PdfPreviewDialog(path, self)
+                if not dialog.preview_ready:
+                    AppMessageBox.warning(
+                        self,
+                        "PDF Preview",
+                        (
+                            "The PDF file was found, but the in-app PDF viewer could not render it.\n\n"
+                            f"File:\n{path}"
+                        ),
+                    )
+                    return
+                dialog.exec()
+                return
+            self._open_attachment_externally(path, mime_type=mime_type, extension=extension)
+        except Exception as exc:
+            AppMessageBox.critical(
+                self,
+                "Preview Attachment",
+                (
+                    "The attachment could not be opened.\n\n"
+                    f"File:\n{path}\n\n"
+                    f"Reason:\n{exc}"
+                ),
+            )
+
+    def _open_attachment_externally(self, path, *, mime_type="", extension=""):
+        if platform.system() == "Windows":
+            os.startfile(path)
+            AppMessageBox.information(
+                self,
+                "Open Attachment",
+                (
+                    "Opened the attachment with the default system app.\n\n"
+                    f"File:\n{path}"
+                ),
+            )
+            return
+
+        command = ["open", path] if platform.system() == "Darwin" else ["xdg-open", path]
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode != 0:
+            reason = (result.stderr or result.stdout or "Unknown error").strip()
+            raise Exception(reason)
+
+        fallback_reason = []
+        if extension == ".pdf" and not HAS_QT_PDF:
+            fallback_reason.append("QtPdf is not available")
+        if mime_type and not mime_type.startswith("image/") and extension != ".pdf":
+            fallback_reason.append(f"unsupported preview type: {mime_type or extension}")
+
+        detail = "\n".join(fallback_reason)
+        message = "Opened the attachment with the default system app."
+        if detail:
+            message += f"\n\nPreview fallback reason:\n{detail}"
+        message += f"\n\nFile:\n{path}"
+        AppMessageBox.information(self, "Open Attachment", message)
             
         
         

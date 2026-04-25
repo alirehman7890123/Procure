@@ -1,18 +1,29 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QDialog, QPushButton,QComboBox, QDialogButtonBox, QTableWidgetItem, QCompleter,QTableWidget, QFileDialog, QMessageBox, QGridLayout, QLineEdit, QFrame, QDateEdit, QLabel, QSpacerItem, QSizePolicy, QHBoxLayout, QGraphicsDropShadowEffect, QHeaderView, QApplication
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QDialog, QPushButton,QComboBox, QDialogButtonBox, QTableWidgetItem, QCompleter,QTableWidget, QFileDialog, QMessageBox, QGridLayout, QLineEdit, QFrame, QDateEdit, QLabel, QSpacerItem, QSizePolicy, QHBoxLayout, QGraphicsDropShadowEffect, QHeaderView, QApplication, QCheckBox
 from PySide6.QtGui import QColor
 from PySide6.QtCore import QSize, Qt, QFile, QDate, QEvent, QStringListModel, Signal, QTimer
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from datetime import date, datetime
 import re
-from utilities.product_search_widget import ProductSearchBox
+from medic.utilities.product_search_widget import ProductSearchBox
+from medic.utilities.product_form_options import get_product_form_options
 import sys
 import pandas as pd  # <-- for reading CSV/Excel easily
+from services.sales_transaction_service import ensure_prescription_schema
 
-from utilities.stylus import load_stylesheets
-from utilities.permissions import Permissions
+from medic.utilities.app_messagebox import AppMessageBox
+from medic.utilities.file_preview import preview_file
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.permissions import Permissions
 from services.accounting_settings_service import (
     load_opening_inventory_value,
     save_opening_inventory_value,
+)
+from services.product_media_service import (
+    clear_product_media_fields,
+    ensure_product_media_schema,
+    fetch_product_media,
+    save_product_media,
+    update_product_media_fields,
 )
 
 
@@ -24,6 +35,11 @@ class AddProductWidget(QWidget):
     def __init__(self, parent=None):
 
         super().__init__(parent)
+        ensure_prescription_schema()
+        ensure_product_media_schema()
+        self.selected_product_media_path = ""
+        self.selected_product_media_info = None
+        self.product_media_removed = False
         
 
         self.layout = QVBoxLayout(self)
@@ -216,6 +232,58 @@ class AddProductWidget(QWidget):
         for frame, widgets in self.section_widgets.items():
             active = focus_widget in widgets
             self.apply_section_highlight(frame, active)
+
+    def browse_product_media(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Product File",
+            "",
+            "Images and PDF Files (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.pdf);;Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif);;PDF Files (*.pdf);;All Files (*)",
+        )
+        if not file_path:
+            return
+        self.selected_product_media_path = file_path
+        self.selected_product_media_info = None
+        self.product_media_removed = False
+        self.update_product_media_display()
+
+    def clear_product_media_selection(self):
+        self.selected_product_media_path = ""
+        self.selected_product_media_info = None
+        self.product_media_removed = True
+        self.update_product_media_display()
+
+    def load_existing_product_media(self, product_id):
+        self.selected_product_media_path = ""
+        self.selected_product_media_info = fetch_product_media(product_id)
+        self.product_media_removed = False
+        self.update_product_media_display()
+
+    def update_product_media_display(self):
+        media_name = "No file selected"
+        media_path = self.selected_product_media_path.strip()
+        if media_path:
+            media_name = f"Selected: {media_path.split('/')[-1]}"
+        elif self.selected_product_media_info:
+            media_name = f"Stored: {self.selected_product_media_info.get('original_filename') or 'Attached file'}"
+        elif self.product_media_removed:
+            media_name = "Existing file will be cleared"
+
+        self.product_media_value.setText(media_name)
+        has_media = bool(media_path or self.selected_product_media_info)
+        self.product_media_preview_btn.setEnabled(has_media)
+        self.product_media_clear_btn.setEnabled(has_media or self.product_media_removed)
+
+    def preview_product_media(self):
+        media_path = str(self.selected_product_media_path or "").strip()
+        mime_type = ""
+        if not media_path and self.selected_product_media_info:
+            media_path = str(self.selected_product_media_info.get("absolute_path") or "").strip()
+            mime_type = str(self.selected_product_media_info.get("mime_type") or "").strip()
+        if not media_path:
+            AppMessageBox.information(self, "Preview File", "No product file is attached yet.")
+            return
+        preview_file(self, media_path, mime_type=mime_type)
 
     def build_recent_products_section(self):
         recent_title = QLabel("Recently Added Products", objectName="SubSectionTitle")
@@ -504,20 +572,7 @@ class AddProductWidget(QWidget):
     
     def populate_product_fields(self):
         
-        forms = [
-            "AEROSOL","BALM","BUBBLE GUM","CAP","CAPLET","CAPS SR","CREAM","DRAGEES","DROPS",
-            "DRY SUSP","E AND E DROPS","EAR DROPS","ELIXIR","EMUL","ENEMA","EXPC","EYE DROPS",
-            "EYE GEL","EYE OINT","EYE SUSP","FORM","GEL","GRANULES","INF","INHALER","INJ",
-            "INJ CS","INJ DS","INJ IM/IV","INJ SC","INJ SR","INJ-IM","INJ-IV","LINCTUS",
-            "LINIMENT","LIQUID","LOTION","LOZENGES","MIXTURE","MOUTH SPRAY","MOUTH WASH",
-            "NASAL DROPS","NASAL SPRAY","NEBULISER","OIL","OINT","ORAL SOLN","PAINT",
-            "PASTE","PATCHES","PELLETS","POULTICE","POWDER","ROTA CAPS","SACHET","SCRUB",
-            "SHAMPOO","SOAP","SOFT CAPS","SOLN","SPRAY","SUPPOSITORIES","SUSP","SUSP DS",
-            "SYP","SYRINGE","TAB","TAB ENTERIC COATED","TABS CHEWABLE","TABS DS","TABS EFR",
-            "TABS SL","TABS SR","TINC","TOOTH PASTE","VAG CREAM","VAG OVULE","VAG PESSARIES","VAG TABS"
-        ]
-
-        forms = sorted([f.title() for f in forms])
+        forms = get_product_form_options()
 
         
         
@@ -603,6 +658,7 @@ class AddProductWidget(QWidget):
         self.code_input = QLineEdit()
         self.pack_size_input = QLineEdit()
         self.rack_input = QLineEdit()
+        self.prescription_required_check = QCheckBox("Prescription Required")
         
         
         self.name_input.setPlaceholderText("Product name")
@@ -642,6 +698,26 @@ class AddProductWidget(QWidget):
         main_grid.addWidget(rack_label, 1, 4)
         main_grid.addWidget(self.rack_input, 1, 5)
 
+        main_grid.addWidget(self.prescription_required_check, 2, 1, 1, 2)
+        media_label = self.field_label("Product File")
+        main_grid.addWidget(media_label, 2, 2)
+        media_row = QHBoxLayout()
+        media_row.setContentsMargins(0, 0, 0, 0)
+        media_row.setSpacing(8)
+        self.product_media_value = QLabel("No file selected")
+        self.product_media_value.setStyleSheet("color: #44576A;")
+        self.product_media_browse_btn = QPushButton("Select File", objectName="TopRightButton")
+        self.product_media_preview_btn = QPushButton("Preview", objectName="TopRightButton")
+        self.product_media_clear_btn = QPushButton("Clear", objectName="TopRightButton")
+        self.product_media_browse_btn.clicked.connect(self.browse_product_media)
+        self.product_media_preview_btn.clicked.connect(self.preview_product_media)
+        self.product_media_clear_btn.clicked.connect(self.clear_product_media_selection)
+        media_row.addWidget(self.product_media_value, 1)
+        media_row.addWidget(self.product_media_browse_btn)
+        media_row.addWidget(self.product_media_preview_btn)
+        media_row.addWidget(self.product_media_clear_btn)
+        main_grid.addLayout(media_row, 2, 3, 1, 3)
+
         main_grid.setColumnStretch(1, 5)
         main_grid.setColumnStretch(2, 2)
         main_grid.setColumnStretch(3, 2)
@@ -653,6 +729,7 @@ class AddProductWidget(QWidget):
             self.name_input, self.dosage, self.form, self.brand_input,
             self.formula_input, self.rack_input, self.pack_size_input
         ])
+        self.update_product_media_display()
         
 
     def populate_stock_and_batch_fields(self):
@@ -969,6 +1046,7 @@ class AddProductWidget(QWidget):
                 discount_group_id,
                 tax_group_id,
                 COALESCE(rack, ''),
+                COALESCE(prescription_required, 0),
                 (
                     SELECT pack_size
                     FROM price_pack
@@ -1006,14 +1084,17 @@ class AddProductWidget(QWidget):
         discount_group_id = query.value(3)
         tax_group_id = query.value(4)
         rack = str(query.value(5) or "").strip()
-        pack_size = query.value(6)
-        pack_price = query.value(7)
-        margin_percent = query.value(8)
+        prescription_required = bool(int(query.value(6) or 0))
+        pack_size = query.value(7)
+        pack_price = query.value(8)
+        margin_percent = query.value(9)
 
         # Autofill formula if available, otherwise clear stale text.
         self.formula_input.setText(generic_name)
         self.dosage.setText(strength)
         self.rack_input.setText(rack)
+        self.prescription_required_check.setChecked(prescription_required)
+        self.load_existing_product_media(product_id)
 
         # Autofill pack size when available and clear stale value otherwise.
         self.pack_size_input.setText(str(pack_size) if pack_size not in (None, "") else "")
@@ -1186,6 +1267,8 @@ class AddProductWidget(QWidget):
             return
 
         db = QSqlDatabase.database()
+        ensure_prescription_schema()
+        ensure_product_media_schema()
         if not db.transaction():
             AppMessageBox.information(None, "Error", "Failed to start transaction.")
             return
@@ -1195,6 +1278,7 @@ class AddProductWidget(QWidget):
             # 1. Resolve product_id
             # ==================================================
             created_new_product = False
+            prescription_required = 1 if self.prescription_required_check.isChecked() else 0
             if existing_product_id is not None:
                 
                 product_id = int(existing_product_id)
@@ -1221,9 +1305,10 @@ class AddProductWidget(QWidget):
                         manufacturer_id,
                         discount_group_id,
                         tax_group_id,
+                        prescription_required,
                         status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """)
                 
                 
@@ -1244,6 +1329,7 @@ class AddProductWidget(QWidget):
                 product_query.addBindValue(manufacturer_id)
                 product_query.addBindValue(discount_group_id)
                 product_query.addBindValue(tax_group_id)
+                product_query.addBindValue(prescription_required)
                 product_query.addBindValue("used")
 
                 if not product_query.exec():
@@ -1263,7 +1349,8 @@ class AddProductWidget(QWidget):
                     manufacturer_id = ?,
                     discount_group_id = ?,
                     tax_group_id = ?,
-                    rack = ?
+                    rack = ?,
+                    prescription_required = ?
                 WHERE id = ?
             """)
             status_query.addBindValue(code)
@@ -1272,6 +1359,7 @@ class AddProductWidget(QWidget):
             status_query.addBindValue(discount_group_id)
             status_query.addBindValue(tax_group_id)
             status_query.addBindValue(rack)
+            status_query.addBindValue(prescription_required)
             status_query.addBindValue(product_id)
             if not status_query.exec():
                 raise Exception(status_query.lastError().text())
@@ -1367,6 +1455,15 @@ class AddProductWidget(QWidget):
             if not price_query.exec():
                 raise Exception(price_query.lastError().text())
 
+            if self.product_media_removed:
+                clear_product_media_fields(product_id=product_id)
+            elif self.selected_product_media_path:
+                media_info = save_product_media(self.selected_product_media_path, product_id=product_id)
+                update_product_media_fields(product_id=product_id, media_info=media_info)
+                self.selected_product_media_info = media_info
+                self.selected_product_media_path = ""
+                self.product_media_removed = False
+
             print("Price stored")
 
             # ==================================================
@@ -1409,6 +1506,11 @@ class AddProductWidget(QWidget):
         self.discount_group_combo.setCurrentIndex(0)
         self.tax_group_combo.setCurrentIndex(0)
         self.reorder_level.clear()
+        self.prescription_required_check.setChecked(False)
+        self.selected_product_media_path = ""
+        self.selected_product_media_info = None
+        self.product_media_removed = False
+        self.update_product_media_display()
         self.calculate_pack_cost_from_margin()
         self.name_input.setFocus()
         if self.name_input.lineEdit() is not None:
@@ -1732,7 +1834,7 @@ class ImportDialog(QDialog):
          
 import math
 from PySide6.QtWidgets import QDialog, QDialogButtonBox
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.app_messagebox import AppMessageBox
 
 class EstimateDialog(QDialog):
     

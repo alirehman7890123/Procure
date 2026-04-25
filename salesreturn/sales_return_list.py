@@ -4,8 +4,8 @@ from PySide6.QtSql import QSqlQuery
 from functools import partial
 
 
-from utilities.stylus import load_stylesheets
-from utilities.table_helpers import centered_cell_widget, style_table_action_button
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.table_helpers import centered_cell_widget, style_table_action_button
 
 
 

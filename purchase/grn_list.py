@@ -5,10 +5,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QDate, QTimer
 from PySide6.QtSql import QSqlQuery
 
-from utilities.stylus import load_stylesheets
-from utilities.permissions import Permissions
-from utilities.app_messagebox import AppMessageBox
-from utilities.table_helpers import centered_cell_widget, style_table_action_button
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.permissions import Permissions
+from medic.utilities.app_messagebox import AppMessageBox
+from medic.utilities.table_helpers import centered_cell_widget, style_table_action_button
 
 
 class MyTable(QTableWidget):
@@ -279,7 +279,7 @@ class GRNListWidget(QWidget):
                         COALESCE(x.lines_total, 0)
                         - COALESCE(gr.header_discount, 0)
                         + COALESCE(gr.tax_236g, 0)
-                        - COALESCE(gr.tax_236h, 0)
+                        + COALESCE(gr.tax_236h, 0)
                         + COALESCE(gr.salestax, 0)
                         - COALESCE(gr.cn_adjustment, 0)
                     )

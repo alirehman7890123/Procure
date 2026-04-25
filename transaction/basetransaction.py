@@ -9,9 +9,9 @@ from transaction.customertransactionlist import CustomerTransactionListWidget
 from transaction.suppliertransactionlist import SupplierTransactionListWidget
 from transaction.customer_transaction_detail import CustomerTransactionDetailWidget
 from transaction.supplier_transaction_detail import SupplierTransactionDetailWidget
-from utilities.basepage import BasePage
+from medic.utilities.basepage import BasePage
 
-from utilities.permissions import Permissions
+from medic.utilities.permissions import Permissions
 
 
 class BaseTransactionWidget(BasePage):

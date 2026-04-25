@@ -3,8 +3,8 @@ from PySide6.QtWidgets import QWidget, QStackedLayout, QScrollArea
 from customer.addcustomer import AddCustomerWidget
 from customer.customerlist import CustomerListWidget
 from customer.customerdetail import CustomerDetailWidget
-from utilities.basepage import BasePage
-from utilities.permissions import Permissions
+from medic.utilities.basepage import BasePage
+from medic.utilities.permissions import Permissions
 
 
 class BaseCustomerWidget(BasePage):

@@ -43,6 +43,7 @@ def _read_product_listing_rows(query):
                 "display_name": str(query.value(1) or ""),
                 "manufacturer_name": str(query.value(2) or ""),
                 "total_stock": query.value(3) or 0,
+                "prescription_required": bool(int(query.value(4) or 0)),
             }
         )
     return rows
@@ -159,7 +160,8 @@ def fetch_product_by_barcode(code_text, *, stock_filter="All"):
             p.id,
             p.display_name,
             COALESCE(m.name, '') AS manufacturer_name,
-            COALESCE(bs.total_stock, 0) AS total_stock
+            COALESCE(bs.total_stock, 0) AS total_stock,
+            COALESCE(p.prescription_required, 0) AS prescription_required
         {from_clause}
         {where_clause}
         LIMIT 1
@@ -272,7 +274,8 @@ def search_products(*, text, category="Product", stock_filter="All", page=1, pag
             p.id,
             p.display_name,
             COALESCE(m.name, '') AS manufacturer_name,
-            COALESCE(bs.total_stock, 0) AS total_stock
+            COALESCE(bs.total_stock, 0) AS total_stock,
+            COALESCE(p.prescription_required, 0) AS prescription_required
         {from_clause}
         {where_clause}
         {order_clause}
@@ -331,7 +334,8 @@ def fetch_product_listing_page(*, stock_filter="All", page=1, page_size=50):
             p.id,
             p.display_name,
             COALESCE(m.name, '') AS manufacturer_name,
-            COALESCE(bs.total_stock, 0) AS total_stock
+            COALESCE(bs.total_stock, 0) AS total_stock,
+            COALESCE(p.prescription_required, 0) AS prescription_required
         {from_clause}
         {where_clause}
         ORDER BY p.id DESC

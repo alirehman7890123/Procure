@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QWidget, QPushButton, QGridLayout, QLabel, QVBoxLayout, QHBoxLayout, QFrame, QTableWidgetItem, QSpacerItem, QSizePolicy
 from PySide6.QtCore import QFile, Qt, QDate
 from PySide6.QtSql import QSqlQuery
-from utilities.stylus import load_stylesheets
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.app_messagebox import AppMessageBox
 
 
 _CARD_STYLE = """

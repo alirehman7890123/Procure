@@ -6,6 +6,15 @@ import sqlite3
 import secrets
 import time
 
+# Allow running this file directly (e.g., `python medic/starting.py`) while
+# preserving package-style imports like `from medic.utilities ...`.
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
+if CURRENT_DIR not in sys.path:
+    sys.path.insert(0, CURRENT_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 def resource_path(relative_path: str) -> str:
     base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
     return os.path.join(base_path, relative_path)
@@ -31,10 +40,10 @@ if not os.environ.get("QT_QPA_PLATFORMTHEME"):
 from PySide6.QtWidgets import QApplication, QWidget, QMainWindow, QPushButton, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QFileDialog, QFrame, QSizePolicy
 from PySide6.QtGui import QPixmap
 
-from utilities.database import SQLiteConnectionManager, QSqlDatabase
-from utilities.app_messagebox import install_messagebox_theme
-from utilities.dialog_scrolling import install_dialog_scrolling
-from utilities.mylogin import MainWindow
+from medic.utilities.database import SQLiteConnectionManager, QSqlDatabase
+from medic.utilities.app_messagebox import install_messagebox_theme
+from medic.utilities.dialog_scrolling import install_dialog_scrolling
+from medic.utilities.mylogin import MainWindow
 import bcrypt
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtSql import QSqlQuery
@@ -628,6 +637,9 @@ class AuthWindow(QMainWindow):
             self.create_holdsale_table,
             self.create_holdsale_items_table,
             self.create_activity_log_table,
+            self.create_attendance_table,
+            self.create_payroll_table,
+            self.create_salary_advance_table,
         ]
 
         for builder in table_builders:
@@ -658,6 +670,9 @@ class AuthWindow(QMainWindow):
                 ("price_changes", self.create_price_changes_table),
                 ("activity_log", self.create_activity_log_table),
                 ("customer", self.create_customer_table),
+                ("attendance", self.create_attendance_table),
+                ("payroll", self.create_payroll_table),
+                ("salary_advance", self.create_salary_advance_table),
             ]
 
             for table_name, builder in table_builders:
@@ -838,6 +853,15 @@ class AuthWindow(QMainWindow):
 
             if self._ensure_sqlite_column(conn, "price_pack", "margin_percent", "REAL DEFAULT 14.5"):
                 changed.append("price_pack.margin_percent")
+
+            if self._ensure_sqlite_column(conn, "employee", "basic_salary", "REAL DEFAULT 0.00"):
+                changed.append("employee.basic_salary")
+
+            if self._ensure_sqlite_column(conn, "employee", "advance_balance", "REAL DEFAULT 0.00"):
+                changed.append("employee.advance_balance")
+
+            if self._ensure_sqlite_column(conn, "employee", "joining_date", "DATE"):
+                changed.append("employee.joining_date")
 
             if changed:
                 conn.commit()
@@ -2657,10 +2681,104 @@ class AuthWindow(QMainWindow):
         print("Table 'grn_draft_item' created successfully.")
         return True
 
+    def create_attendance_table(self):
+        query = QSqlQuery()
+        print("Creating Attendance Table")
+
+        if not query.exec("""
+            CREATE TABLE IF NOT EXISTS attendance (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id   INTEGER NOT NULL,
+                date          TEXT NOT NULL,
+                status        TEXT NOT NULL DEFAULT 'present',
+                check_in      TEXT,
+                check_out     TEXT,
+                notes         TEXT,
+                session_id    INTEGER,
+                recorded_by   INTEGER,
+                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(employee_id, date),
+                FOREIGN KEY (employee_id) REFERENCES employee(id) ON DELETE RESTRICT,
+                FOREIGN KEY (session_id) REFERENCES daily_session(id) ON DELETE RESTRICT,
+                FOREIGN KEY (recorded_by) REFERENCES auth(id) ON DELETE RESTRICT
+            );
+        """):
+            AppMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
+            return False
+
+        print("Table 'attendance' created successfully.")
+        return True
+
+    def create_payroll_table(self):
+        query = QSqlQuery()
+        print("Creating Payroll Table")
+
+        if not query.exec("""
+            CREATE TABLE IF NOT EXISTS payroll (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id       INTEGER NOT NULL,
+                month             TEXT NOT NULL,
+                basic_salary      REAL NOT NULL DEFAULT 0.00,
+                allowances        REAL DEFAULT 0.00,
+                deductions        REAL DEFAULT 0.00,
+                advance_deduct    REAL DEFAULT 0.00,
+                net_salary        REAL NOT NULL DEFAULT 0.00,
+                payment_method    TEXT,
+                bank_name         TEXT,
+                account_no        TEXT,
+                transaction_mode  TEXT,
+                wallet_provider   TEXT,
+                wallet_no         TEXT,
+                payment_reference TEXT,
+                status            TEXT DEFAULT 'paid',
+                notes             TEXT,
+                paid_on           TEXT,
+                session_id        INTEGER,
+                paid_by           INTEGER,
+                creation_date     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(employee_id, month),
+                FOREIGN KEY (employee_id) REFERENCES employee(id) ON DELETE RESTRICT,
+                FOREIGN KEY (session_id) REFERENCES daily_session(id) ON DELETE RESTRICT,
+                FOREIGN KEY (paid_by) REFERENCES auth(id) ON DELETE RESTRICT
+            );
+        """):
+            AppMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
+            return False
+
+        print("Table 'payroll' created successfully.")
+        return True
+
+    def create_salary_advance_table(self):
+        query = QSqlQuery()
+        print("Creating Salary Advance Table")
+
+        if not query.exec("""
+            CREATE TABLE IF NOT EXISTS salary_advance (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id   INTEGER NOT NULL,
+                amount        REAL NOT NULL DEFAULT 0.00,
+                recovered     REAL DEFAULT 0.00,
+                reason        TEXT,
+                date          TEXT NOT NULL,
+                status        TEXT DEFAULT 'pending',
+                session_id    INTEGER,
+                recorded_by   INTEGER,
+                creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (employee_id) REFERENCES employee(id) ON DELETE RESTRICT,
+                FOREIGN KEY (session_id) REFERENCES daily_session(id) ON DELETE RESTRICT,
+                FOREIGN KEY (recorded_by) REFERENCES auth(id) ON DELETE RESTRICT
+            );
+        """):
+            AppMessageBox.critical(None, "Error", f"Table creation failed: {query.lastError().text()}")
+            return False
+
+        print("Table 'salary_advance' created successfully.")
+        return True
+
     
 
-from utilities.license import ensure_valid_license
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.license import ensure_valid_license
+from medic.utilities.app_messagebox import AppMessageBox
 
 if __name__ == '__main__':
 

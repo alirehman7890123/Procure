@@ -1,5 +1,10 @@
 from PySide6.QtCore import QDate, QDateTime
 from PySide6.QtSql import QSqlQuery
+from services.sales_transaction_service import (
+    ensure_prescription_schema,
+    fetch_sales_prescription_attachments,
+    fetch_sales_prescription_by_sales_id,
+)
 
 
 def _new_query():
@@ -138,8 +143,15 @@ def fetch_sales_invoice_context(sales_id):
     header = fetch_sales_detail(sales_id)
     if not header:
         return None
+    ensure_prescription_schema()
+    prescription = fetch_sales_prescription_by_sales_id(sales_id)
+    attachments = []
+    if prescription:
+        attachments = fetch_sales_prescription_attachments(prescription["id"])
     return {
         "header": header,
         "items": fetch_sales_detail_items(sales_id),
         "business": fetch_business_identity(),
+        "prescription": prescription,
+        "prescription_attachments": attachments,
     }

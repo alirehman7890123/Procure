@@ -4,8 +4,8 @@ from business.business import BusinessWidget
 from business.discount_settings import DiscountSettingsWidget
 from business.tax_settings import TaxSettingsWidget
 from business.theme_settings import ThemeSettingsWidget
-from utilities.basepage import BasePage
-from utilities.permissions import Permissions
+from medic.utilities.basepage import BasePage
+from medic.utilities.permissions import Permissions
 
 
 class BaseBusinessWidget(BasePage):

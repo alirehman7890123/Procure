@@ -5,8 +5,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QFile, Qt, QDate, QDateTime
 from PySide6.QtSql import QSqlQuery
-from utilities.stylus import load_stylesheets
-from utilities.permissions import Permissions
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.permissions import Permissions
 
 
 class SupplierDetailWidget(QWidget):

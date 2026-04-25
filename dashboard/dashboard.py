@@ -5,11 +5,11 @@ import sys, os
 from PySide6.QtSql import QSqlQuery, QSqlDatabase
 from PySide6.QtCore import QDate
 from functools import partial
-from utilities import mylogin
-from utilities.database import SQLiteConnectionManager
-from utilities.activity_logger import log_activity
-from utilities.permissions import Permissions
-from utilities.session_service import SessionErrorCode, check_active_session
+from medic.utilities.database import SQLiteConnectionManager
+from medic.utilities.activity_logger import log_activity
+from medic.utilities.permissions import Permissions
+from medic.utilities.session_service import SessionErrorCode, check_active_session
+from services.financial_closing_service import get_month_close_prompt_state
 import pyqtgraph as pg
 import bcrypt
 from dashboard.daily_session import DailySession
@@ -17,7 +17,7 @@ from dashboard.daily_session import DailySession
 
 import os
 import sys
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.app_messagebox import AppMessageBox
 from functools import lru_cache
 
 
@@ -428,6 +428,16 @@ class DashboardWidget(QWidget):
         main_window.set_purchase(main_window.purchase, main_window.main_content_layout)
         if hasattr(main_window.purchase, "set_addpurchase_widget"):
             main_window.purchase.set_addpurchase_widget()
+
+    def open_financial_close_page(self):
+        main_window = self.window()
+        if main_window is None or not hasattr(main_window, "set_financial_close"):
+            AppMessageBox.warning(self, "Navigation Unavailable", "Could not open Financial Closing from the dashboard.")
+            return
+
+        main_window.set_financial_close(None, main_window.main_content_layout)
+        if hasattr(main_window, "financial_close") and hasattr(main_window.financial_close, "set_financial_close_create_widget"):
+            main_window.financial_close.set_financial_close_create_widget()
 
     def get_today_session_sales_rows(self, session_id):
         rows = []
@@ -1052,6 +1062,31 @@ class DashboardWidget(QWidget):
         meta_row.addWidget(self.session_history_btn)
 
         layout.addLayout(meta_row)
+
+        self.month_close_reminder_wrap = QFrame()
+        self.month_close_reminder_wrap.setStyleSheet(
+            """
+            QFrame {
+                background-color: #FFF6E8;
+                border: 1px solid #E5C16F;
+                border-radius: 8px;
+            }
+            """
+        )
+        reminder_row = QHBoxLayout(self.month_close_reminder_wrap)
+        reminder_row.setContentsMargins(10, 8, 10, 8)
+        reminder_row.setSpacing(10)
+        self.month_close_reminder_label = QLabel("")
+        self.month_close_reminder_label.setWordWrap(True)
+        self.month_close_reminder_label.setStyleSheet("color:#7E5A10; font-weight:700; padding-left: 0;")
+        reminder_row.addWidget(self.month_close_reminder_label, 1)
+        self.month_close_reminder_btn = QPushButton("Close Month")
+        self.month_close_reminder_btn.setCursor(Qt.PointingHandCursor)
+        self.month_close_reminder_btn.setObjectName("TopRightButton")
+        self.month_close_reminder_btn.clicked.connect(self.open_financial_close_page)
+        reminder_row.addWidget(self.month_close_reminder_btn)
+        self.month_close_reminder_wrap.hide()
+        layout.addWidget(self.month_close_reminder_wrap)
         return card
 
 
@@ -1234,6 +1269,32 @@ class DashboardWidget(QWidget):
         if not db.isValid() or not db.isOpen():
             return
         self.load_inventory_alerts()
+        self.update_month_close_reminder()
+
+    def update_month_close_reminder(self):
+        if not hasattr(self, "month_close_reminder_wrap"):
+            return
+
+        state = get_month_close_prompt_state()
+        if not state.get("show"):
+            self.month_close_reminder_wrap.hide()
+            return
+
+        self.month_close_reminder_label.setText(str(state.get("message") or ""))
+        self.month_close_reminder_wrap.show()
+
+    def prompt_month_close_if_needed(self):
+        state = get_month_close_prompt_state()
+        if not state.get("show"):
+            return
+
+        answer = AppMessageBox.question(
+            self,
+            "Month Close Reminder",
+            str(state.get("message") or ""),
+        )
+        if answer == QMessageBox.Yes:
+            self.open_financial_close_page()
 
     def _show_session_state_error(self, result, action_label="continue"):
         return DailySession._show_session_state_error(self, result, action_label)
@@ -1375,6 +1436,7 @@ class DashboardWidget(QWidget):
             return
 
         self.refresh_dashboard_alerts()
+        self.prompt_month_close_if_needed()
 
 
     def run_scheduled_backup_cycle(self):

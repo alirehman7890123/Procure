@@ -3,10 +3,10 @@ from PySide6.QtCore import QFile, Qt, Signal
 from PySide6.QtSql import QSqlQuery, QSqlDatabase
 from functools import partial
 
-from utilities.stylus import load_stylesheets
-from utilities.permissions import Permissions
-from utilities.session_service import get_active_session_id
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.permissions import Permissions
+from medic.utilities.session_service import get_active_session_id
+from medic.utilities.app_messagebox import AppMessageBox
 
 
 

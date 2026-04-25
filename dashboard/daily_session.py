@@ -10,9 +10,10 @@ import logging
 import os
 import sys
 
-from utilities.session_service import SessionErrorCode, check_active_session, get_active_session_id
-from utilities.permissions import Permissions
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.session_service import SessionErrorCode, check_active_session, get_active_session_id
+from medic.utilities.permissions import Permissions
+from medic.utilities.app_messagebox import AppMessageBox
+from services.financial_closing_service import get_month_close_prompt_state
 
 
 logger = logging.getLogger(__name__)
@@ -609,6 +610,27 @@ class DailySession(QWidget):
         self.update_session_buttons()
         self.load_session_history()
         AppMessageBox.success(self, "Session Closed", "Daily session closed successfully.")
+
+        state = get_month_close_prompt_state()
+        if not state.get("show"):
+            return
+
+        answer = AppMessageBox.question(
+            self,
+            "Month Close Reminder",
+            str(state.get("message") or ""),
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        main_window = self.window()
+        if main_window is None or not hasattr(main_window, "set_financial_close"):
+            AppMessageBox.warning(self, "Navigation Unavailable", "Could not open Financial Closing.")
+            return
+
+        main_window.set_financial_close(None, main_window.main_content_layout)
+        if hasattr(main_window, "financial_close") and hasattr(main_window.financial_close, "set_financial_close_create_widget"):
+            main_window.financial_close.set_financial_close_create_widget()
 
     def update_session_buttons(self):
         session_check = check_active_session(strict=True)

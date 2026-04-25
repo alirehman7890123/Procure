@@ -2,7 +2,7 @@
 
 from functools import wraps
 from PySide6.QtWidgets import QApplication, QMessageBox
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.app_messagebox import AppMessageBox
 
 
 class Permissions:
@@ -45,8 +45,12 @@ class Permissions:
 
             "reports.view",
 
+            "financialclose.view", "financialclose.close", "financialclose.reopen",
+
             "inventory.adjust",
             "system.backup.external",
+
+            "payroll.view", "payroll.create", "payroll.attendance", "payroll.advance",
         },
 
         "manager": {
@@ -85,6 +89,10 @@ class Permissions:
             "expense.view", "expense.create", "expense.update", "expense.delete",            
             
             "reports.view",
+
+            "financialclose.view", "financialclose.close",
+
+            "payroll.view", "payroll.create", "payroll.attendance", "payroll.advance",
         },
 
         "accountant": {
@@ -101,6 +109,10 @@ class Permissions:
             "expense.view", "expense.create", "expense.update",
 
             "reports.view",
+
+            "financialclose.view", "financialclose.close", "financialclose.reopen",
+
+            "payroll.view",
         },
 
         "inventory": {
@@ -119,6 +131,8 @@ class Permissions:
             "purchasereturn.view", "purchasereturn.create",
 
             "reports.view",
+
+            "financialclose.view",
         },
 
         "cashier": {
@@ -167,6 +181,8 @@ class Permissions:
             "product.view",
             "customer.view",
             "employee.view",
+
+            "payroll.view",
 
             "purchase.view",
             "po.view",

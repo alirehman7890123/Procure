@@ -2,7 +2,7 @@ from PySide6.QtWidgets import QWidget,QApplication, QFrame, QPushButton, QVBoxLa
 from PySide6.QtGui import QColor
 from PySide6.QtCore import QSize, Qt, QFile, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
-from utilities.permissions import Permissions
+from medic.utilities.permissions import Permissions
 
 
 import os

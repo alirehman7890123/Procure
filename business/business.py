@@ -2,9 +2,9 @@ from PySide6.QtWidgets import QWidget,QApplication, QFrame, QPushButton, QVBoxLa
 from PySide6.QtGui import QColor
 from PySide6.QtCore import QSize, Qt, QFile, QEvent, Signal
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
-from utilities.permissions import Permissions
-from utilities.stylus import load_stylesheets
-from utilities.app_theme import get_theme_palette
+from medic.utilities.permissions import Permissions
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.app_theme import get_theme_palette
 
 
 

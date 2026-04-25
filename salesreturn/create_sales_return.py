@@ -8,13 +8,13 @@ import csv
 import os
 import math
 
-from utilities.stylus import load_stylesheets
-from utilities.activity_logger import log_activity
-from utilities.permissions import Permissions
-from utilities.session_gate import require_open_session
-from utilities.session_service import get_active_session_id
-from utilities.payment_handler import PaymentMethodHandler
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.activity_logger import log_activity
+from medic.utilities.permissions import Permissions
+from medic.utilities.session_gate import require_open_session
+from medic.utilities.session_service import get_active_session_id
+from medic.utilities.payment_handler import PaymentMethodHandler
+from medic.utilities.app_messagebox import AppMessageBox
 from services.inventory_movement_service import fetch_product_batch_numbers
 from services.sales_return_service import (
     build_sales_return_header_payload,

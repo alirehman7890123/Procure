@@ -8,13 +8,13 @@ from PySide6.QtSql import QSqlQuery, QSqlDatabase
 import re
 from PySide6.QtWidgets import QApplication
 
-from utilities.activity_logger import log_activity
-from utilities.payment_handler import PaymentMethodHandler
-from utilities.permissions import Permissions
-from utilities.session_gate import require_open_session
-from utilities.session_service import get_active_session_id
-from utilities.stylus import load_stylesheets
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.activity_logger import log_activity
+from medic.utilities.payment_handler import PaymentMethodHandler
+from medic.utilities.permissions import Permissions
+from medic.utilities.session_gate import require_open_session
+from medic.utilities.session_service import get_active_session_id
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.app_messagebox import AppMessageBox
 from services.grn_posting_service import (
     build_goods_receipt_payload,
     collect_grn_billing_data,
@@ -1207,9 +1207,9 @@ class CreateGRNWidget(QWidget):
 
         header_discount = min(header_discount, line_subtotal)
         taxable = max(0.0, line_subtotal - header_discount)
-        net_amount = max(0.0, taxable + tax_236h + sales_tax - tax_236g)
+        net_amount = max(0.0, taxable + tax_236g + tax_236h + sales_tax)
         # Keep landing-cost distribution aligned with purchase invoice behavior.
-        total_with_fees = max(0.0, line_subtotal - header_discount - tax_236g + tax_236h + sales_tax - cn_adjustment)
+        total_with_fees = max(0.0, line_subtotal - header_discount + tax_236g + tax_236h + sales_tax - cn_adjustment)
         
         # Update header displays
         self.subtotal_label.setText(f"{line_subtotal:.2f}")

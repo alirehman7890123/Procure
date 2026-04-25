@@ -1,6 +1,6 @@
-from PySide6.QtWidgets import QApplication, QWidget, QDateEdit, QVBoxLayout, QHBoxLayout, QDialog, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
+from PySide6.QtWidgets import QApplication, QWidget, QDateEdit, QVBoxLayout, QHBoxLayout, QDialog, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget, QFileDialog
 from PySide6.QtCore import QFile, Qt, QDate, Signal, QTimer, QEvent, QRectF, QSizeF
-from utilities.product_search_widget import ProductSearchBox
+from medic.utilities.product_search_widget import ProductSearchBox
 import os
 import sys
 import platform
@@ -10,16 +10,26 @@ from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtGui import QPalette, QColor, QKeyEvent, QPdfWriter, QKeySequence, QPainter, QPageSize, QFont, QTextOption, QPen, QColor, QFontMetrics
 from functools import partial
 import math
-from utilities.stylus import load_stylesheets
-from utilities.session_gate import require_open_session
-from utilities.session_service import get_active_session_id
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.session_gate import require_open_session
+from medic.utilities.session_service import get_active_session_id
 from PySide6.QtGui import QKeySequence, QShortcut
 
-from utilities.payment_handler import PaymentMethodHandler
-from utilities.permissions import Permissions
-from utilities.app_messagebox import AppMessageBox
-from utilities.app_theme import get_theme_palette
+from medic.utilities.payment_handler import PaymentMethodHandler
+from medic.utilities.permissions import Permissions
+from medic.utilities.app_messagebox import AppMessageBox
+from medic.utilities.app_theme import get_theme_palette
+from medic.utilities.file_preview import preview_file
+from medic.utilities.product_form_options import get_product_form_options
+from medic.utilities.activity_logger import log_activity
 from sales.pricing_logic import compute_header_totals, compute_line_pricing
+from services.product_media_service import (
+    clear_product_media_fields,
+    ensure_product_media_schema,
+    fetch_product_media,
+    save_product_media,
+    update_product_media_fields,
+)
 from services.accounting_settings_service import load_sales_policy_settings
 from services.sales_defaults_service import resolve_sales_header_pricing
 from services.sales_posting_service import (
@@ -35,6 +45,10 @@ from services.sales_items_service import (
 )
 from services.sales_transaction_service import (
     build_customer_transaction_payload,
+    ensure_prescription_schema,
+    fetch_prescription_required_products,
+    insert_sales_prescription_record,
+    save_sales_prescription_attachment,
     decrement_batch_quantity,
     fetch_customer_balances,
     fetch_fifo_batch_rows,
@@ -82,26 +96,18 @@ class SelectAllLineEdit(QLineEdit):
 
 class SalesQuickProductDialog(QDialog):
     DEFAULT_MARGIN_PERCENT = 14.5
-    FORM_OPTIONS = sorted([
-        f.title() for f in [
-            "AEROSOL","BALM","BUBBLE GUM","CAP","CAPLET","CAPS SR","CREAM","DRAGEES","DROPS",
-            "DRY SUSP","E AND E DROPS","EAR DROPS","ELIXIR","EMUL","ENEMA","EXPC","EYE DROPS",
-            "EYE GEL","EYE OINT","EYE SUSP","FORM","GEL","GRANULES","INF","INHALER","INJ",
-            "INJ CS","INJ DS","INJ IM/IV","INJ SC","INJ SR","INJ-IM","INJ-IV","LINCTUS",
-            "LINIMENT","LIQUID","LOTION","LOZENGES","MIXTURE","MOUTH SPRAY","MOUTH WASH",
-            "NASAL DROPS","NASAL SPRAY","NEBULISER","OIL","OINT","ORAL SOLN","PAINT",
-            "PASTE","PATCHES","PELLETS","POULTICE","POWDER","ROTA CAPS","SACHET","SCRUB",
-            "SHAMPOO","SOAP","SOFT CAPS","SOLN","SPRAY","SUPPOSITORIES","SUSP","SUSP DS",
-            "SYP","SYRINGE","TAB","TAB ENTERIC COATED","TABS CHEWABLE","TABS DS","TABS EFR",
-            "TABS SL","TABS SR","TINC","TOOTH PASTE","VAG CREAM","VAG OVULE","VAG PESSARIES","VAG TABS"
-        ]
-    ])
+    FORM_OPTIONS = get_product_form_options()
 
     def __init__(self, parent=None, initial_name=""):
         super().__init__(parent)
+        ensure_prescription_schema()
+        ensure_product_media_schema()
         self.saved_product_id = None
         self.saved_visible_name = ""
         self.existing_product_id = None
+        self.selected_media_path = ""
+        self.selected_media_info = None
+        self.media_removed = False
         self.setWindowTitle("Quick Add Product")
         self.setModal(True)
         self.setMinimumWidth(520)
@@ -201,6 +207,7 @@ class SalesQuickProductDialog(QDialog):
 
         self.formula_input = SelectAllLineEdit()
         self.formula_input.setPlaceholderText("Formula / generic name")
+        self.prescription_required_check = QCheckBox("Prescription Required")
 
         self.manufacturer_combo = QComboBox()
         self.manufacturer_combo.setEditable(True)
@@ -243,6 +250,26 @@ class SalesQuickProductDialog(QDialog):
         grid.addWidget(form_label("Formula"), row, 0)
         grid.addWidget(self.formula_input, row, 1, 1, 5)
         row += 1
+        grid.addWidget(self.prescription_required_check, row, 1, 1, 2)
+        media_label = form_label("Product File")
+        self.media_value = QLabel("No file selected")
+        self.media_value.setStyleSheet("font-size: 11px; color: #5D6E7D; font-weight: 600;")
+        self.media_browse_btn = QPushButton("Select File", objectName="TopRightButton")
+        self.media_preview_btn = QPushButton("Preview", objectName="TopRightButton")
+        self.media_clear_btn = QPushButton("Clear", objectName="TopRightButton")
+        self.media_browse_btn.clicked.connect(self.browse_media_file)
+        self.media_preview_btn.clicked.connect(self.preview_media_file)
+        self.media_clear_btn.clicked.connect(self.clear_media_file)
+        media_row = QHBoxLayout()
+        media_row.setContentsMargins(0, 0, 0, 0)
+        media_row.setSpacing(7)
+        media_row.addWidget(self.media_value, 1)
+        media_row.addWidget(self.media_browse_btn)
+        media_row.addWidget(self.media_preview_btn)
+        media_row.addWidget(self.media_clear_btn)
+        grid.addWidget(media_label, row, 3)
+        grid.addLayout(media_row, row, 4, 1, 2)
+        row += 1
         grid.addWidget(form_label("Manufacturer"), row, 0)
         grid.addWidget(self.manufacturer_combo, row, 1, 1, 3)
         grid.addWidget(form_label("Pack Size"), row, 4)
@@ -276,6 +303,9 @@ class SalesQuickProductDialog(QDialog):
         footer.addStretch()
         cancel_btn = QPushButton("Cancel", objectName="TopRightButton")
         save_btn = QPushButton("Save Product", objectName="TopRightButton")
+        cancel_btn.setAutoDefault(False)
+        save_btn.setAutoDefault(False)
+        save_btn.setDefault(False)
         self.save_btn = save_btn
         cancel_btn.clicked.connect(self.reject)
         save_btn.clicked.connect(self.save_product)
@@ -283,33 +313,97 @@ class SalesQuickProductDialog(QDialog):
         footer.addWidget(save_btn)
         layout.addWidget(footer_frame)
 
-        self.product_name_input.returnPressed.connect(lambda: self.focus_next_field(self.dose_input))
-        self.dose_input.returnPressed.connect(lambda: self.focus_next_field(self.form_input))
-        if self.form_input.lineEdit() is not None:
-            self.form_input.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.formula_input))
-        self.formula_input.returnPressed.connect(lambda: self.focus_next_field(self.manufacturer_combo))
-        self.manufacturer_combo.lineEdit().returnPressed.connect(lambda: self.focus_next_field(self.pack_size_input))
-        self.pack_size_input.returnPressed.connect(lambda: self.focus_next_field(self.sale_price_input))
-        self.sale_price_input.returnPressed.connect(lambda: self.focus_next_field(self.margin_input))
-        self.margin_input.returnPressed.connect(lambda: self.focus_next_field(self.qty_input))
-        self.qty_input.returnPressed.connect(lambda: self.focus_next_field(self.batch_input))
-        self.cost_price_input.returnPressed.connect(lambda: self.focus_next_field(self.batch_input))
-        self.batch_input.returnPressed.connect(lambda: self.focus_next_field(self.expiry_input))
-        self.expiry_input.returnPressed.connect(lambda: self.focus_next_field(self.save_btn))
-
         self.try_prefill_existing_product(initial_name)
+        self.update_media_display()
         self.sale_price_input.textChanged.connect(self.calculate_pack_cost_from_margin)
         self.margin_input.textChanged.connect(self.calculate_pack_cost_from_margin)
         self.calculate_pack_cost_from_margin()
-        self.product_name_input.setFocus()
+        self.setup_enter_navigation()
+        self._prime_item_field_focus()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Run after dialog is shown so button/default focus does not override item focus.
+        self._prime_item_field_focus()
+
+    def _prime_item_field_focus(self):
+        QTimer.singleShot(0, self._focus_item_field)
+
+    def _focus_item_field(self):
+        if getattr(self, "product_name_input", None) is None:
+            return
+        self.product_name_input.setFocus(Qt.OtherFocusReason)
         self.product_name_input.selectAll()
 
     def focus_next_field(self, widget):
+        line_edit = widget.lineEdit() if isinstance(widget, QComboBox) and widget.isEditable() else None
+        if line_edit is not None:
+            line_edit.setFocus()
+            line_edit.selectAll()
+            return
+
         widget.setFocus()
         if isinstance(widget, QLineEdit):
             widget.selectAll()
-        elif isinstance(widget, QComboBox) and widget.isEditable():
-            widget.lineEdit().selectAll()
+
+    def setup_enter_navigation(self):
+        self._enter_nav_order = []
+        self._enter_nav_next = {}
+
+        watched_widgets = (
+            self.product_name_input,
+            self.dose_input,
+            self.form_input,
+            self.form_input.lineEdit(),
+            self.formula_input,
+            self.manufacturer_combo,
+            self.manufacturer_combo.lineEdit(),
+            self.pack_size_input,
+            self.sale_price_input,
+            self.margin_input,
+            self.qty_input,
+            self.cost_price_input,
+            self.batch_input,
+            self.expiry_input,
+        )
+        for widget in watched_widgets:
+            if widget is None:
+                continue
+            widget.installEventFilter(self)
+            self._enter_nav_order.append(widget)
+
+        self._enter_nav_next = {
+            self.product_name_input: self.dose_input,
+            self.dose_input: self.form_input,
+            self.form_input: self.formula_input,
+            self.form_input.lineEdit(): self.formula_input,
+            self.formula_input: self.manufacturer_combo,
+            self.manufacturer_combo: self.pack_size_input,
+            self.manufacturer_combo.lineEdit(): self.pack_size_input,
+            self.pack_size_input: self.sale_price_input,
+            self.sale_price_input: self.margin_input,
+            self.margin_input: self.qty_input,
+            self.qty_input: self.batch_input,
+            self.cost_price_input: self.batch_input,
+            self.batch_input: self.expiry_input,
+        }
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if watched in getattr(self, "_enter_nav_order", []):
+                if watched is self.manufacturer_combo or watched is self.manufacturer_combo.lineEdit():
+                    self.handle_new_manufacturer_entry()
+
+                if watched is self.expiry_input:
+                    self.save_product()
+                    return True
+
+                next_widget = self._enter_nav_next.get(watched)
+                if next_widget is not None:
+                    self.focus_next_field(next_widget)
+                    return True
+
+        return super().eventFilter(watched, event)
 
     def force_uppercase_line_edit(self, line_edit, text):
         cursor_position = line_edit.cursorPosition()
@@ -383,6 +477,50 @@ class SalesQuickProductDialog(QDialog):
         pack_cost = sale_price * (1 - (margin_percent / 100.0))
         self.cost_price_input.setText(f"{pack_cost:.2f}")
 
+    def browse_media_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Product File",
+            "",
+            "Images and PDF Files (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.pdf);;Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif);;PDF Files (*.pdf);;All Files (*)",
+        )
+        if not file_path:
+            return
+        self.selected_media_path = file_path
+        self.selected_media_info = None
+        self.media_removed = False
+        self.update_media_display()
+
+    def preview_media_file(self):
+        media_path = str(self.selected_media_path or "").strip()
+        mime_type = ""
+        if not media_path and self.selected_media_info:
+            media_path = str(self.selected_media_info.get("absolute_path") or "").strip()
+            mime_type = str(self.selected_media_info.get("mime_type") or "").strip()
+        if not media_path:
+            AppMessageBox.information(self, "Preview File", "No product file is attached yet.")
+            return
+        preview_file(self, media_path, mime_type=mime_type)
+
+    def clear_media_file(self):
+        self.selected_media_path = ""
+        self.selected_media_info = None
+        self.media_removed = True
+        self.update_media_display()
+
+    def update_media_display(self):
+        media_name = "No file selected"
+        if str(self.selected_media_path or "").strip():
+            media_name = f"Selected: {self.selected_media_path.split('/')[-1]}"
+        elif self.selected_media_info:
+            media_name = f"Stored: {self.selected_media_info.get('original_filename') or 'Attached file'}"
+        elif self.media_removed:
+            media_name = "Existing file will be cleared"
+        self.media_value.setText(media_name)
+        has_media = bool(str(self.selected_media_path or "").strip() or self.selected_media_info)
+        self.media_preview_btn.setEnabled(has_media)
+        self.media_clear_btn.setEnabled(has_media or self.media_removed)
+
     def _find_existing_product_id(self, display_name):
         normalized_name = re.sub(r"\s*\[\d+s\]\s*$", "", str(display_name or "").strip(), flags=re.IGNORECASE)
         query = QSqlQuery()
@@ -433,6 +571,8 @@ class SalesQuickProductDialog(QDialog):
                     ORDER BY pp.is_default DESC, pp.id DESC
                     LIMIT 1
                 ), 14.5)
+                ,
+                COALESCE(p.prescription_required, 0)
             FROM product p
             WHERE LOWER(TRIM(p.display_name)) = LOWER(TRIM(?))
               AND COALESCE(p.status, 'active') <> 'used'
@@ -453,6 +593,7 @@ class SalesQuickProductDialog(QDialog):
             "pack_size": float(query.value(7) or 0.0),
             "pack_price": float(query.value(8) or 0.0),
             "margin_percent": float(query.value(9) or 14.5),
+            "prescription_required": bool(int(query.value(10) or 0)),
         }
 
     def try_prefill_existing_product(self, initial_name):
@@ -483,6 +624,11 @@ class SalesQuickProductDialog(QDialog):
         if record["pack_price"] > 0:
             self.sale_price_input.setText(f"{record['pack_price']:.2f}")
         self.margin_input.setText(f"{float(record.get('margin_percent', self.DEFAULT_MARGIN_PERCENT) or self.DEFAULT_MARGIN_PERCENT):.2f}")
+        self.prescription_required_check.setChecked(bool(record.get("prescription_required")))
+        self.selected_media_info = fetch_product_media(record["product_id"])
+        self.selected_media_path = ""
+        self.media_removed = False
+        self.update_media_display()
         self.calculate_pack_cost_from_margin()
 
     def save_product(self):
@@ -559,20 +705,23 @@ class SalesQuickProductDialog(QDialog):
             expiry_date = parsed_expiry.toString("yyyy-MM-dd")
 
         db = QSqlDatabase.database()
+        ensure_prescription_schema()
+        ensure_product_media_schema()
         if not db.transaction():
             AppMessageBox.information(self, "Error", "Failed to start transaction.")
             return
 
         try:
+            prescription_required = 1 if self.prescription_required_check.isChecked() else 0
             product_id = self.existing_product_id or self._find_existing_product_id(display_name)
             if product_id is None:
                 insert_query = QSqlQuery(db)
                 insert_query.prepare("""
                     INSERT INTO product (
                         display_name, code, reg_no, generic_name, brand, form, strength,
-                        packing, rack, manufacturer_id, status
+                        packing, rack, manufacturer_id, prescription_required, status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """)
                 insert_query.addBindValue(display_name)
                 insert_query.addBindValue(None)
@@ -584,6 +733,7 @@ class SalesQuickProductDialog(QDialog):
                 insert_query.addBindValue(None)
                 insert_query.addBindValue("")
                 insert_query.addBindValue(manufacturer_id)
+                insert_query.addBindValue(prescription_required)
                 insert_query.addBindValue("used")
                 if not insert_query.exec():
                     raise Exception(insert_query.lastError().text())
@@ -598,6 +748,7 @@ class SalesQuickProductDialog(QDialog):
                         form = COALESCE(?, form),
                         strength = COALESCE(?, strength),
                         manufacturer_id = COALESCE(?, manufacturer_id),
+                        prescription_required = ?,
                         status = 'used'
                     WHERE id = ?
                 """)
@@ -607,6 +758,7 @@ class SalesQuickProductDialog(QDialog):
                 update_query.addBindValue(form or None)
                 update_query.addBindValue(dose or None)
                 update_query.addBindValue(manufacturer_id)
+                update_query.addBindValue(prescription_required)
                 update_query.addBindValue(product_id)
                 if not update_query.exec():
                     raise Exception(update_query.lastError().text())
@@ -681,6 +833,16 @@ class SalesQuickProductDialog(QDialog):
             if not price_query.exec():
                 raise Exception(price_query.lastError().text())
 
+            if self.media_removed:
+                clear_product_media_fields(product_id=product_id)
+                self.selected_media_info = None
+                self.media_removed = False
+            elif self.selected_media_path:
+                media_info = save_product_media(self.selected_media_path, product_id=product_id)
+                update_product_media_fields(product_id=product_id, media_info=media_info)
+                self.selected_media_info = media_info
+                self.selected_media_path = ""
+
             if not db.commit():
                 raise Exception(db.lastError().text())
 
@@ -690,6 +852,236 @@ class SalesQuickProductDialog(QDialog):
         except Exception as exc:
             db.rollback()
             AppMessageBox.critical(self, "Error", f"Failed to save product.\n\n{exc}")
+
+
+class PrescriptionInfoDialog(QDialog):
+    def __init__(self, parent=None, *, product_names=None, existing_payload=None):
+        super().__init__(parent)
+        self.ignore_requested = False
+        self.setWindowTitle("Prescription Information")
+        self.setModal(True)
+        self.setMinimumWidth(520)
+
+        product_names = [str(name or "").strip() for name in (product_names or []) if str(name or "").strip()]
+
+        self.setStyleSheet("""
+            QDialog {
+                background: #EEF4F8;
+            }
+            QFrame#prescriptionHeader {
+                background-color: #325D7B;
+                border: 1px solid #284B63;
+                border-radius: 8px;
+            }
+            QFrame#prescriptionBody, QFrame#prescriptionFooter {
+                background: #FFFFFF;
+                border: 1px solid #D3DEE7;
+                border-radius: 8px;
+            }
+            QLineEdit, QDateEdit {
+                min-height: 28px;
+                padding: 3px 6px;
+                border: 1px solid #C7D4DF;
+                border-radius: 6px;
+                background: #FFFFFF;
+                color: #223746;
+            }
+            QLineEdit:focus, QDateEdit:focus {
+                border: 1px solid #5A9EC9;
+                background: #F7FBFF;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        header_frame = QFrame()
+        header_frame.setObjectName("prescriptionHeader")
+        header_layout = QVBoxLayout(header_frame)
+        header_layout.setContentsMargins(12, 10, 12, 10)
+        header_layout.setSpacing(3)
+
+        title = QLabel("Prescription Required")
+        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #FFFFFF;")
+        header_layout.addWidget(title)
+
+        helper = QLabel("This invoice includes prescription-only medicines. Capture the prescriber details before saving the sale.")
+        helper.setWordWrap(True)
+        helper.setStyleSheet("font-size: 11px; color: #DDEAF3;")
+        header_layout.addWidget(helper)
+        layout.addWidget(header_frame)
+
+        body_frame = QFrame()
+        body_frame.setObjectName("prescriptionBody")
+        body_layout = QVBoxLayout(body_frame)
+        body_layout.setContentsMargins(12, 12, 12, 12)
+        body_layout.setSpacing(10)
+
+        if product_names:
+            product_label = QLabel("Prescription items in this invoice")
+            product_label.setStyleSheet("font-size: 11px; font-weight: 700; color: #4B5563;")
+            body_layout.addWidget(product_label)
+
+            product_value = QLabel(", ".join(product_names))
+            product_value.setWordWrap(True)
+            product_value.setStyleSheet("font-size: 12px; color: #223746;")
+            body_layout.addWidget(product_value)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(10)
+
+        def field_label(text):
+            label = QLabel(text)
+            label.setStyleSheet("font-size: 11px; font-weight: 700; color: #4B5563;")
+            return label
+
+        self.doctor_name_input = QLineEdit()
+        self.doctor_name_input.setPlaceholderText("Doctor name")
+
+        self.clinic_name_input = QLineEdit()
+        self.clinic_name_input.setPlaceholderText("Clinic / hospital (optional)")
+
+        self.doctor_license_input = QLineEdit()
+        self.doctor_license_input.setPlaceholderText("PMDC / license no. (optional)")
+
+        self.prescription_date_input = QDateEdit()
+        self.prescription_date_input.setCalendarPopup(True)
+        self.prescription_date_input.setDate(QDate.currentDate())
+        self.prescription_date_input.setDisplayFormat("dd MMM yyyy")
+
+        self.notes_input = QLineEdit()
+        self.notes_input.setPlaceholderText("Notes (optional)")
+        self.attachment_paths = list((existing_payload or {}).get("attachment_source_paths") or [])
+        browse_button = QPushButton("Attach Image/PDF")
+        browse_button.clicked.connect(self._choose_attachment)
+        remove_button = QPushButton("Remove Selected")
+        remove_button.clicked.connect(self._remove_selected_attachment)
+
+        self.attachment_table = QTableWidget()
+        self.attachment_table.setColumnCount(1)
+        self.attachment_table.setHorizontalHeaderLabels(["Attachment"])
+        self.attachment_table.verticalHeader().setVisible(False)
+        self.attachment_table.horizontalHeader().setStretchLastSection(True)
+        self.attachment_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.attachment_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.attachment_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.attachment_table.setMinimumHeight(110)
+
+        grid.addWidget(field_label("Doctor"), 0, 0)
+        grid.addWidget(self.doctor_name_input, 0, 1)
+        grid.addWidget(field_label("Prescription Date"), 0, 2)
+        grid.addWidget(self.prescription_date_input, 0, 3)
+        grid.addWidget(field_label("Clinic"), 1, 0)
+        grid.addWidget(self.clinic_name_input, 1, 1, 1, 3)
+        grid.addWidget(field_label("License No."), 2, 0)
+        grid.addWidget(self.doctor_license_input, 2, 1, 1, 3)
+        grid.addWidget(field_label("Notes"), 3, 0)
+        grid.addWidget(self.notes_input, 3, 1, 1, 3)
+        grid.addWidget(field_label("Attachment"), 4, 0)
+        grid.addWidget(self.attachment_table, 4, 1, 1, 2)
+        attachment_actions = QVBoxLayout()
+        attachment_actions.addWidget(browse_button)
+        attachment_actions.addWidget(remove_button)
+        attachment_actions.addStretch(1)
+        grid.addLayout(attachment_actions, 4, 3)
+        body_layout.addLayout(grid)
+
+        layout.addWidget(body_frame)
+
+        footer_frame = QFrame()
+        footer_frame.setObjectName("prescriptionFooter")
+        footer_layout = QHBoxLayout(footer_frame)
+        footer_layout.setContentsMargins(12, 10, 12, 10)
+        footer_layout.setSpacing(8)
+        footer_layout.addStretch(1)
+
+        cancel_button = QPushButton("Cancel")
+        ignore_button = QPushButton("Ignore Prescription")
+        save_button = QPushButton("Save Prescription Info")
+        save_button.setDefault(True)
+        footer_layout.addWidget(cancel_button)
+        footer_layout.addWidget(ignore_button)
+        footer_layout.addWidget(save_button)
+        layout.addWidget(footer_frame)
+
+        cancel_button.clicked.connect(self.reject)
+        ignore_button.clicked.connect(self._ignore_prescription)
+        save_button.clicked.connect(self._submit)
+
+        if existing_payload:
+            self.doctor_name_input.setText(str(existing_payload.get("doctor_name") or ""))
+            self.clinic_name_input.setText(str(existing_payload.get("clinic_name") or ""))
+            self.doctor_license_input.setText(str(existing_payload.get("doctor_license_no") or ""))
+            existing_date = str(existing_payload.get("prescription_date") or "").strip()
+            if existing_date:
+                parsed = QDate.fromString(existing_date, "yyyy-MM-dd")
+                if parsed.isValid():
+                    self.prescription_date_input.setDate(parsed)
+            self.notes_input.setText(str(existing_payload.get("notes") or ""))
+        self._refresh_attachment_table()
+
+    def _submit(self):
+        if not str(self.doctor_name_input.text() or "").strip():
+            AppMessageBox.warning(self, "Missing Data", "Doctor name is required for prescription medicines.")
+            self.doctor_name_input.setFocus()
+            return
+        self.accept()
+
+    def _ignore_prescription(self):
+        _, accepted = AppMessageBox.confirm(
+            self,
+            "Ignore Prescription",
+            (
+                "Continue without prescription info or attachment?\n\n"
+                "This will be logged in the activity log for audit history."
+            ),
+            confirm_label="Ignore And Continue",
+            cancel_label="Cancel",
+            kind="warning",
+        )
+        if not accepted:
+            return
+        self.ignore_requested = True
+        self.accept()
+
+    def _choose_attachment(self):
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select Prescription Attachment(s)",
+            "",
+            "Prescription Files (*.png *.jpg *.jpeg *.webp *.bmp *.pdf);;All Files (*)",
+        )
+        if not file_paths:
+            return
+        for file_path in file_paths:
+            if file_path and file_path not in self.attachment_paths:
+                self.attachment_paths.append(file_path)
+        self._refresh_attachment_table()
+
+    def _refresh_attachment_table(self):
+        self.attachment_table.setRowCount(0)
+        for row_index, file_path in enumerate(self.attachment_paths):
+            self.attachment_table.insertRow(row_index)
+            self.attachment_table.setItem(row_index, 0, QTableWidgetItem(os.path.basename(file_path)))
+
+    def _remove_selected_attachment(self):
+        row = self.attachment_table.currentRow()
+        if row < 0 or row >= len(self.attachment_paths):
+            return
+        self.attachment_paths.pop(row)
+        self._refresh_attachment_table()
+
+    def get_payload(self):
+        return {
+            "doctor_name": str(self.doctor_name_input.text() or "").strip(),
+            "clinic_name": str(self.clinic_name_input.text() or "").strip(),
+            "doctor_license_no": str(self.doctor_license_input.text() or "").strip(),
+            "prescription_date": self.prescription_date_input.date().toString("yyyy-MM-dd"),
+            "notes": str(self.notes_input.text() or "").strip(),
+            "attachment_source_paths": list(self.attachment_paths),
+        }
 
 
 
@@ -722,6 +1114,8 @@ class CreateSalesWidget(QWidget):
         self.line_discount_manual_override = False
         self.line_tax_manual_override = False
         self.current_line_pricing_summary_text = "Line Pricing: Waiting for product selection"
+        self.current_sale_prescription_payload = None
+        self.current_sale_prescription_ignored = False
         self.minimum_margin_percent = 15.0
         self.pricing_details_dialog = None
         self.pricing_details_line_label = None
@@ -840,6 +1234,7 @@ class CreateSalesWidget(QWidget):
         self.customer.setMinimumWidth(200)
                
         self.customer.setEditable(True)
+        self.customer.setLineEdit(SelectAllLineEdit())
         self.customer.completer().setCaseSensitivity(Qt.CaseInsensitive)
         self.customer.completer().setFilterMode(Qt.MatchContains)
         
@@ -901,6 +1296,7 @@ class CreateSalesWidget(QWidget):
         self.active_tax_group_id = None
         self.active_tax_group_name = ""
         self.active_tax_percent = 0.0
+        self.current_sale_prescription_payload = None
         self.active_tax_fixed_amount = 0.0
         self.active_tax_apply_on_sale = False
         self.active_tax_source = "none"
@@ -1210,6 +1606,12 @@ class CreateSalesWidget(QWidget):
         self.line_info_margin_label.setStyleSheet(
             f"color: {info_text}; font-size: 11px; font-weight: 700; padding-left: 0; margin: 0;"
         )
+        self.line_info_prescription_badge = QLabel("RX REQUIRED")
+        self.line_info_prescription_badge.setVisible(False)
+        self.line_info_prescription_badge.setStyleSheet(
+            "background-color: #FFF1F2; color: #B42318; border: 1px solid #FECACA; "
+            "border-radius: 10px; padding: 3px 8px; font-size: 11px; font-weight: 700;"
+        )
 
         info_strip_layout.addWidget(self.line_info_formula_label, 4)
         info_strip_layout.addSpacing(6)
@@ -1218,6 +1620,8 @@ class CreateSalesWidget(QWidget):
         info_strip_layout.addWidget(self.line_info_profit_label, 1)
         info_strip_layout.addSpacing(6)
         info_strip_layout.addWidget(self.line_info_margin_label, 2)
+        info_strip_layout.addSpacing(6)
+        info_strip_layout.addWidget(self.line_info_prescription_badge, 0)
         product_entry_layout.addWidget(info_strip)
         product_entry_layout.addSpacing(4)
 
@@ -1257,6 +1661,7 @@ class CreateSalesWidget(QWidget):
         self.line_pricing_info_btn = info_btn
         
         info_box_layout.addWidget(info_btn)
+        self.entry_info_box_layout = info_box_layout
         
         grid.addLayout(info_box_layout, 0 , 0)
 
@@ -1334,6 +1739,7 @@ class CreateSalesWidget(QWidget):
 
         discount_label = QLabel("DISC %")
         discount_label.setStyleSheet(field_style)
+        self.entry_discount_label = discount_label
 
         self.discount = KeyUpLineEdit()
         self.discount.setPlaceholderText("Disc %")
@@ -1347,6 +1753,7 @@ class CreateSalesWidget(QWidget):
         discount_box_layout.addWidget(discount_label)
         discount_box_layout.addWidget(self.discount)
         discount_box_layout.addWidget(self.discount_mode_combo)
+        self.discount_box_layout = discount_box_layout
 
         grid.addLayout(discount_box_layout, 0, 4)
 
@@ -1358,12 +1765,14 @@ class CreateSalesWidget(QWidget):
 
         tax_label = QLabel("TAX %")
         tax_label.setStyleSheet(field_style)
+        self.entry_tax_label = tax_label
 
         self.tax = KeyUpLineEdit()
         self.tax.setPlaceholderText("Tax %")
         self.tax.setStyleSheet(field_style)
         tax_box_layout.addWidget(tax_label)
         tax_box_layout.addWidget(self.tax)
+        self.tax_box_layout = tax_box_layout
 
         grid.addLayout(tax_box_layout, 0, 5)
 
@@ -1374,6 +1783,7 @@ class CreateSalesWidget(QWidget):
 
         total_label = QLabel("TOTAL")
         total_label.setStyleSheet(field_style)
+        self.entry_total_label = total_label
 
         self.amount_edit = QLineEdit()
         self.amount_edit.setReadOnly(True)
@@ -1381,6 +1791,7 @@ class CreateSalesWidget(QWidget):
         self.amount_edit.setStyleSheet(field_style)
         total_box_layout.addWidget(total_label)
         total_box_layout.addWidget(self.amount_edit)
+        self.total_box_layout = total_box_layout
 
         grid.addLayout(total_box_layout, 0, 6)
 
@@ -1398,6 +1809,7 @@ class CreateSalesWidget(QWidget):
         action_box_layout.setSpacing(6)
         action_box_layout.addWidget(add_button)
         action_box_layout.addWidget(self.reset_line_defaults_btn)
+        self.action_box_layout = action_box_layout
 
         grid.addLayout(action_box_layout, 0, 7)
 
@@ -1443,6 +1855,7 @@ class CreateSalesWidget(QWidget):
 
         product_entry_layout.addLayout(grid)
         product_entry_layout.addSpacing(0)
+        self.apply_fast_entry_layout()
 
         table = self.add_table()
         product_entry_layout.addWidget(table)
@@ -1727,7 +2140,6 @@ class CreateSalesWidget(QWidget):
         left_section_layout.setContentsMargins(0, 0, 0, 0)
         left_section_layout.setSpacing(0)
         left_section_layout.addLayout(left_grid)
-
         right_section = QFrame()
         right_section.setObjectName("TotalsRightSection")
         right_section.setMinimumWidth(300)
@@ -1773,6 +2185,38 @@ class CreateSalesWidget(QWidget):
 
         if hasattr(widget, "selectAll"):
             widget.selectAll()
+
+    def apply_fast_entry_layout(self):
+        hidden_widgets = [
+            getattr(self, "line_pricing_info_btn", None),
+            getattr(self, "entry_discount_label", None),
+            getattr(self, "discount", None),
+            getattr(self, "discount_mode_combo", None),
+            getattr(self, "entry_tax_label", None),
+            getattr(self, "tax", None),
+            getattr(self, "entry_total_label", None),
+            getattr(self, "amount_edit", None),
+            getattr(self, "reset_line_defaults_btn", None),
+        ]
+
+        for widget in hidden_widgets:
+            if widget is not None:
+                widget.hide()
+
+        for layout in [
+            getattr(self, "entry_info_box_layout", None),
+            getattr(self, "discount_box_layout", None),
+            getattr(self, "tax_box_layout", None),
+            getattr(self, "total_box_layout", None),
+            getattr(self, "action_box_layout", None),
+        ]:
+            if layout is not None:
+                layout.setContentsMargins(0, 0, 0, 0)
+
+        if hasattr(self, "entry_grid"):
+            compact_ratios = [0, 44, 10, 12, 0, 0, 0, 8]
+            for col, ratio in enumerate(compact_ratios):
+                self.entry_grid.setColumnStretch(col, ratio)
 
     def _install_select_all_focus_behavior(self):
         widgets = [
@@ -2180,6 +2624,32 @@ class CreateSalesWidget(QWidget):
         self.line_info_cost_sale_label.setText(cost_sale_text)
         self.line_info_profit_label.setText(profit_text)
         self.line_info_margin_label.setText(margin_text)
+        self._refresh_line_prescription_badge()
+
+    def _refresh_line_prescription_badge(self):
+        if not hasattr(self, "line_info_prescription_badge"):
+            return
+
+        product_data = self.current_line_product_defaults or {}
+        if self.current_sale_prescription_ignored and bool(product_data.get("prescription_required")):
+            self.line_info_prescription_badge.setText("RX IGNORED")
+            self.line_info_prescription_badge.setStyleSheet(
+                "background-color: #FFF7E6; color: #B45309; border: 1px solid #F6C780; "
+                "border-radius: 10px; padding: 3px 8px; font-size: 11px; font-weight: 700;"
+            )
+            self.line_info_prescription_badge.setVisible(True)
+            return
+
+        if bool(product_data.get("prescription_required")):
+            self.line_info_prescription_badge.setText("RX REQUIRED")
+            self.line_info_prescription_badge.setStyleSheet(
+                "background-color: #FFF1F2; color: #B42318; border: 1px solid #FECACA; "
+                "border-radius: 10px; padding: 3px 8px; font-size: 11px; font-weight: 700;"
+            )
+            self.line_info_prescription_badge.setVisible(True)
+            return
+
+        self.line_info_prescription_badge.setVisible(False)
 
     def update_current_line_margin_indicator(self):
         if not hasattr(self, "line_info_formula_label"):
@@ -2458,8 +2928,8 @@ class CreateSalesWidget(QWidget):
         
         qty_data = self.qty_edit.text()
         rate_data = self.rate_edit.text()
-        discount_data = self.discount.text()
-        tax_data = self.tax.text()
+        discount_data = self.discount.text() or "0"
+        tax_data = self.tax.text() or "0"
         total_data = self.amount_edit.text()
         discount_mode = self.discount_mode_combo.currentData() if hasattr(self, "discount_mode_combo") else "percent"
         resolved = self.resolve_line_pricing(
@@ -2771,6 +3241,104 @@ class CreateSalesWidget(QWidget):
         
         customer = self.customer.currentData()
         return customer
+
+    def _collect_selected_product_ids(self):
+        product_ids = []
+        for row in range(self.table.rowCount()):
+            combo = self.table.cellWidget(row, 1)
+            if combo is None:
+                continue
+            product_id = self.extract_product_id(combo.currentData())
+            if product_id is None:
+                continue
+            product_ids.append(product_id)
+        return product_ids
+
+    def collect_sales_prescription_payload(self):
+        ensure_prescription_schema()
+        if self.current_sale_prescription_ignored:
+            return None
+        if self.current_sale_prescription_payload:
+            return dict(self.current_sale_prescription_payload)
+        required_products = fetch_prescription_required_products(self._collect_selected_product_ids())
+        if not required_products:
+            return None
+
+        dialog = PrescriptionInfoDialog(
+            self,
+            product_names=[row["display_name"] for row in required_products],
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return False
+
+        app = QApplication.instance()
+        payload = dialog.get_payload()
+        payload["created_by"] = app.property("user_id") if app is not None else None
+        self.current_sale_prescription_payload = dict(payload)
+        return payload
+
+    def ensure_prescription_for_product(self, product_data):
+        if not isinstance(product_data, dict):
+            return True
+        if not bool(product_data.get("prescription_required")):
+            return True
+        if self.current_sale_prescription_ignored:
+            return True
+
+        app = QApplication.instance()
+        payload = None
+        if self.current_sale_prescription_payload:
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Prescription Already Added")
+            msg.setIcon(QMessageBox.Question)
+            msg.setText("A prescription is already attached to this invoice.")
+            msg.setInformativeText(
+                "Use the existing prescription for this medicine, or open the prescription dialog again to review details and add more attachments."
+            )
+            use_existing_btn = msg.addButton("Use Existing", QMessageBox.AcceptRole)
+            review_btn = msg.addButton("Review Prescription", QMessageBox.ActionRole)
+            cancel_btn = msg.addButton("Cancel", QMessageBox.RejectRole)
+            msg.exec()
+            clicked = msg.clickedButton()
+
+            if clicked == cancel_btn:
+                return False
+            if clicked == use_existing_btn:
+                return True
+            payload = dict(self.current_sale_prescription_payload)
+
+        dialog = PrescriptionInfoDialog(
+            self,
+            product_names=[product_data.get("display_name") or product_data.get("visible_name") or "Prescription medicine"],
+            existing_payload=payload,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return False
+        if dialog.ignore_requested:
+            product_name = str(product_data.get("display_name") or product_data.get("visible_name") or "Prescription medicine").strip()
+            self.current_sale_prescription_payload = None
+            self.current_sale_prescription_ignored = True
+            log_activity(
+                category="sales",
+                action="prescription_ignored",
+                entity_type="sale",
+                entity_id=None,
+                note=f"Prescription capture was ignored while adding {product_name} to a sales invoice.",
+                previous_value="prescription_required",
+                new_value="ignored",
+            )
+            AppMessageBox.information(
+                self,
+                "Prescription Ignored",
+                "Prescription was ignored for this invoice. This decision has been logged, and the sale can continue.",
+            )
+            return True
+
+        payload = dialog.get_payload()
+        payload["created_by"] = app.property("user_id") if app is not None else None
+        self.current_sale_prescription_payload = dict(payload)
+        self.current_sale_prescription_ignored = False
+        return True
 
     def on_discount_entry_edited(self):
         self.discount_group_manual_override = True
@@ -3107,7 +3675,7 @@ class CreateSalesWidget(QWidget):
     
     
     
-    def insert_salesreceipt(self):
+    def insert_salesreceipt(self, sales_prescription_payload=None):
     
         try:
             self.calculate_payment()
@@ -3218,6 +3786,21 @@ class CreateSalesWidget(QWidget):
             )
             if txn_inserted:
                 print("Customer transaction inserted for Sales ID:", sales_id)
+
+            if sales_prescription_payload:
+                prescription_payload = dict(sales_prescription_payload)
+                attachment_source_paths = list(prescription_payload.pop("attachment_source_paths", []) or [])
+                prescription_payload["sales_id"] = sales_id
+                prescription_id = insert_sales_prescription_record(prescription_payload)
+                for attachment_source_path in attachment_source_paths:
+                    if not attachment_source_path:
+                        continue
+                    save_sales_prescription_attachment(
+                        sales_prescription_id=int(prescription_id),
+                        sales_id=sales_id,
+                        source_path=attachment_source_path,
+                        uploaded_by=prescription_payload.get("created_by"),
+                    )
                 
 
             return sales_id
@@ -4083,6 +4666,10 @@ class CreateSalesWidget(QWidget):
         if not require_open_session(self):
             return
 
+        sales_prescription_payload = self.collect_sales_prescription_payload()
+        if sales_prescription_payload is False:
+            return
+
         db = QSqlDatabase.database()
         if not db.transaction():
             AppMessageBox.error(self, "Database Error", "Could not start sales transaction.")
@@ -4091,7 +4678,7 @@ class CreateSalesWidget(QWidget):
         try: 
         
             # Insert Sales Receipt
-            sales_id = self.insert_salesreceipt()
+            sales_id = self.insert_salesreceipt(sales_prescription_payload=sales_prescription_payload)
             
             if sales_id is None:
                 raise Exception("Sales receipt header was not saved.")
@@ -4176,6 +4763,7 @@ class CreateSalesWidget(QWidget):
                 COALESCE(tg.fixed_amount, 0),
                 COALESCE(tg.apply_on_sale, 1),
                 COALESCE(tg.name, ''),
+                COALESCE(p.prescription_required, 0),
                 COALESCE((
                     SELECT SUM(quantity_remaining)
                     FROM batch
@@ -4229,7 +4817,8 @@ class CreateSalesWidget(QWidget):
         tax_fixed_amount = float(query.value(10) or 0.0)
         tax_apply_on_sale = bool(int(query.value(11) or 0))
         tax_group_name = str(query.value(12) or "").strip()
-        available_stock = int(query.value(13) or 0)
+        prescription_required = bool(int(query.value(13) or 0))
+        available_stock = int(query.value(14) or 0)
 
         return {
             "product_id": product_id,
@@ -4245,6 +4834,7 @@ class CreateSalesWidget(QWidget):
             "tax_fixed_amount": tax_fixed_amount,
             "tax_apply_on_sale": tax_apply_on_sale,
             "tax_group_name": tax_group_name,
+            "prescription_required": prescription_required,
             "available_stock": available_stock,
             "code": code_text,
         }
@@ -4406,6 +4996,7 @@ class CreateSalesWidget(QWidget):
             "tax_fixed_amount": product.get("tax_fixed_amount", 0.0),
             "tax_apply_on_sale": product.get("tax_apply_on_sale", True),
             "tax_group_name": product.get("tax_group_name", ""),
+            "prescription_required": product.get("prescription_required", False),
         }
 
         self.item.blockSignals(True)
@@ -4508,6 +5099,7 @@ class CreateSalesWidget(QWidget):
                  , COALESCE(tg.name, '')
                  , COALESCE(pp.margin_percent, 0)
                  , COALESCE(p.status, 'active')
+                 , COALESCE(p.prescription_required, 0)
             FROM product p
             LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
             LEFT JOIN tax_group tg ON tg.id = p.tax_group_id
@@ -4547,6 +5139,7 @@ class CreateSalesWidget(QWidget):
             tax_group_name = str(query.value(15) or "").strip()
             target_margin_percent = float(query.value(16) or 0.0)
             status = str(query.value(17) or "active").strip()
+            prescription_required = bool(int(query.value(18) or 0))
             results.append((visible_name, {
                 "product_id": product_id,
                 "display_name": name,
@@ -4566,6 +5159,7 @@ class CreateSalesWidget(QWidget):
                 "tax_group_name": tax_group_name,
                 "target_margin_percent": target_margin_percent,
                 "status": status,
+                "prescription_required": prescription_required,
             }))
         return results
 
@@ -4601,6 +5195,7 @@ class CreateSalesWidget(QWidget):
                  , COALESCE(tg.name, '')
                  , COALESCE(pp.margin_percent, 0)
                  , COALESCE(p.status, 'active')
+                 , COALESCE(p.prescription_required, 0)
             FROM product p
             LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
             LEFT JOIN tax_group tg ON tg.id = p.tax_group_id
@@ -4639,6 +5234,7 @@ class CreateSalesWidget(QWidget):
             "tax_group_name": str(query.value(15) or "").strip(),
             "target_margin_percent": float(query.value(16) or 0.0),
             "status": str(query.value(17) or "active").strip(),
+            "prescription_required": bool(int(query.value(18) or 0)),
         }
 
     def find_sales_product_id_by_name(self, display_name):
@@ -4707,6 +5303,15 @@ class CreateSalesWidget(QWidget):
             combo.blockSignals(False)
             combo.hidePopup()
             self.open_sales_product_quick_add_dialog(data.get("display_name") or text)
+            return None
+
+        if not self.ensure_prescription_for_product(data):
+            combo.blockSignals(True)
+            combo.setCurrentIndex(-1)
+            if combo.lineEdit() is not None:
+                combo.lineEdit().clear()
+            combo.blockSignals(False)
+            combo.hidePopup()
             return None
 
         product_id = data.get("product_id")
@@ -5373,6 +5978,8 @@ class CreateSalesWidget(QWidget):
         self.active_tax_group_id = None
         self.active_tax_group_name = ""
         self.active_tax_percent = 0.0
+        self.current_sale_prescription_payload = None
+        self.current_sale_prescription_ignored = False
         
         self.payment_method.blockSignals(True); 
         self.payment_method.setCurrentText("Cash"); 
@@ -5855,6 +6462,43 @@ class CreateSalesWidget(QWidget):
         if hasattr(self, "line_info_formula_label"):
             QTimer.singleShot(0, self.update_current_line_margin_indicator)
 
+    def _recalculate_sales_table_row(self, row):
+        qty_widget = self.table.cellWidget(row, 2)
+        rate_widget = self.table.cellWidget(row, 3)
+        discount_widget = self.table.cellWidget(row, 4)
+        tax_widget = self.table.cellWidget(row, 5)
+        total_widget = self.table.cellWidget(row, 6)
+
+        if not all([qty_widget, rate_widget, discount_widget, tax_widget, total_widget]):
+            return
+
+        qty_value = max(0.0, self._float_or_default(qty_widget.text(), 0.0))
+        rate_value = max(0.0, self._float_or_default(rate_widget.text(), 0.0))
+        discount_text = discount_widget.text().strip() or "0"
+        tax_text = tax_widget.text().strip() or "0"
+        discount_mode = str(discount_widget.property("discount_input_mode") or "percent")
+
+        resolved = self.resolve_line_pricing(
+            qty_value,
+            rate_value,
+            discount_text,
+            discount_mode,
+            tax_text,
+            discount_widget.property("discount_fixed_amount_applied") or 0.0,
+            bool(discount_widget.property("discount_apply_on_sale") if discount_widget.property("discount_apply_on_sale") is not None else True),
+            tax_widget.property("tax_fixed_amount_applied") or 0.0,
+            bool(tax_widget.property("tax_apply_on_sale") if tax_widget.property("tax_apply_on_sale") is not None else True),
+        )
+
+        total_widget.setText(f"{resolved['line_total']:.2f}")
+        discount_widget.setProperty("discount_percent_applied", resolved["discount_percent"])
+        discount_widget.setProperty("discount_fixed_amount_applied", resolved["discount_fixed_amount"])
+        discount_widget.setProperty("discount_amount_applied", resolved["discount_amount"])
+        tax_widget.setProperty("tax_percent_applied", resolved["tax_percent"])
+        tax_widget.setProperty("tax_fixed_amount_applied", resolved["tax_fixed_amount"])
+        tax_widget.setProperty("tax_amount_applied", resolved["tax_amount"])
+        self.update_total_amount()
+
     
     
     
@@ -5978,47 +6622,3 @@ class QtyValidationFilter(QObject):
             return int(query.value(0) or 0)
 
         return 0
-    
-    
-    
-    
-   
-   
-
-    
-    def _recalculate_sales_table_row(self, row):
-        qty_widget = self.table.cellWidget(row, 2)
-        rate_widget = self.table.cellWidget(row, 3)
-        discount_widget = self.table.cellWidget(row, 4)
-        tax_widget = self.table.cellWidget(row, 5)
-        total_widget = self.table.cellWidget(row, 6)
-
-        if not all([qty_widget, rate_widget, discount_widget, tax_widget, total_widget]):
-            return
-
-        qty_value = max(0.0, self._float_or_default(qty_widget.text(), 0.0))
-        rate_value = max(0.0, self._float_or_default(rate_widget.text(), 0.0))
-        discount_text = discount_widget.text().strip() or "0"
-        tax_text = tax_widget.text().strip() or "0"
-        discount_mode = str(discount_widget.property("discount_input_mode") or "percent")
-
-        resolved = self.resolve_line_pricing(
-            qty_value,
-            rate_value,
-            discount_text,
-            discount_mode,
-            tax_text,
-            discount_widget.property("discount_fixed_amount_applied") or 0.0,
-            bool(discount_widget.property("discount_apply_on_sale") if discount_widget.property("discount_apply_on_sale") is not None else True),
-            tax_widget.property("tax_fixed_amount_applied") or 0.0,
-            bool(tax_widget.property("tax_apply_on_sale") if tax_widget.property("tax_apply_on_sale") is not None else True),
-        )
-
-        total_widget.setText(f"{resolved['line_total']:.2f}")
-        discount_widget.setProperty("discount_percent_applied", resolved["discount_percent"])
-        discount_widget.setProperty("discount_fixed_amount_applied", resolved["discount_fixed_amount"])
-        discount_widget.setProperty("discount_amount_applied", resolved["discount_amount"])
-        tax_widget.setProperty("tax_percent_applied", resolved["tax_percent"])
-        tax_widget.setProperty("tax_fixed_amount_applied", resolved["tax_fixed_amount"])
-        tax_widget.setProperty("tax_amount_applied", resolved["tax_amount"])
-        self.update_total_amount()

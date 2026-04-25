@@ -699,6 +699,123 @@ class ReportService:
             })
         return rows
 
+    def get_payroll_register_rows(self, duration="today", limit=500):
+        where_clause = self._duration_where("COALESCE(p.paid_on, p.creation_date)", duration)
+        query = QSqlQuery()
+        sql = f"""
+            SELECT
+                p.id,
+                DATE(COALESCE(p.paid_on, p.creation_date)) AS paid_on,
+                COALESCE(p.month, '') AS salary_month,
+                COALESCE(e.name, 'Unknown Employee') AS employee_name,
+                COALESCE(p.basic_salary, 0),
+                COALESCE(p.allowances, 0),
+                COALESCE(p.deductions, 0),
+                COALESCE(p.advance_deduct, 0),
+                COALESCE(p.net_salary, 0),
+                COALESCE(p.payment_method, ''),
+                COALESCE(p.status, '')
+            FROM payroll p
+            LEFT JOIN employee e ON e.id = p.employee_id
+            WHERE {where_clause}
+            ORDER BY DATE(COALESCE(p.paid_on, p.creation_date)) DESC, p.id DESC
+            LIMIT {int(limit)}
+        """
+        if not query.exec(sql):
+            print("Payroll register rows query failed:", query.lastError().text())
+            return []
+
+        rows = []
+        while query.next():
+            rows.append({
+                "payroll_id": int(query.value(0) or 0),
+                "paid_on": str(query.value(1) or ""),
+                "salary_month": str(query.value(2) or ""),
+                "employee_name": str(query.value(3) or ""),
+                "basic_salary": float(query.value(4) or 0.0),
+                "allowances": float(query.value(5) or 0.0),
+                "deductions": float(query.value(6) or 0.0),
+                "advance_deduct": float(query.value(7) or 0.0),
+                "net_salary": float(query.value(8) or 0.0),
+                "payment_method": str(query.value(9) or ""),
+                "status": str(query.value(10) or ""),
+            })
+        return rows
+
+    def get_attendance_summary_rows(self, duration="today", limit=500):
+        where_clause = self._duration_where("a.date", duration)
+        query = QSqlQuery()
+        sql = f"""
+            SELECT
+                COALESCE(e.id, 0),
+                COALESCE(e.name, 'Unknown Employee') AS employee_name,
+                COALESCE(SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END), 0) AS present,
+                COALESCE(SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END), 0) AS absent,
+                COALESCE(SUM(CASE WHEN a.status = 'half_day' THEN 1 ELSE 0 END), 0) AS half_day,
+                COALESCE(SUM(CASE WHEN a.status = 'leave' THEN 1 ELSE 0 END), 0) AS leave,
+                COALESCE(COUNT(a.id), 0) AS total_marked
+            FROM attendance a
+            LEFT JOIN employee e ON e.id = a.employee_id
+            WHERE {where_clause}
+            GROUP BY e.id, e.name
+            ORDER BY employee_name ASC
+            LIMIT {int(limit)}
+        """
+        if not query.exec(sql):
+            print("Attendance summary rows query failed:", query.lastError().text())
+            return []
+
+        rows = []
+        while query.next():
+            rows.append({
+                "employee_id": int(query.value(0) or 0),
+                "employee_name": str(query.value(1) or ""),
+                "present": int(query.value(2) or 0),
+                "absent": int(query.value(3) or 0),
+                "half_day": int(query.value(4) or 0),
+                "leave": int(query.value(5) or 0),
+                "total_marked": int(query.value(6) or 0),
+            })
+        return rows
+
+    def get_salary_advance_outstanding_rows(self, duration="today", limit=500):
+        where_clause = self._duration_where("sa.date", duration)
+        query = QSqlQuery()
+        sql = f"""
+            SELECT
+                sa.id,
+                DATE(sa.date) AS advance_date,
+                COALESCE(e.name, 'Unknown Employee') AS employee_name,
+                COALESCE(sa.amount, 0),
+                COALESCE(sa.recovered, 0),
+                (COALESCE(sa.amount, 0) - COALESCE(sa.recovered, 0)) AS outstanding,
+                COALESCE(sa.status, ''),
+                COALESCE(sa.reason, '')
+            FROM salary_advance sa
+            LEFT JOIN employee e ON e.id = sa.employee_id
+            WHERE {where_clause}
+              AND (COALESCE(sa.amount, 0) - COALESCE(sa.recovered, 0)) > 0
+            ORDER BY DATE(sa.date) DESC, sa.id DESC
+            LIMIT {int(limit)}
+        """
+        if not query.exec(sql):
+            print("Salary advance outstanding rows query failed:", query.lastError().text())
+            return []
+
+        rows = []
+        while query.next():
+            rows.append({
+                "advance_id": int(query.value(0) or 0),
+                "advance_date": str(query.value(1) or ""),
+                "employee_name": str(query.value(2) or ""),
+                "amount": float(query.value(3) or 0.0),
+                "recovered": float(query.value(4) or 0.0),
+                "outstanding": float(query.value(5) or 0.0),
+                "status": str(query.value(6) or ""),
+                "reason": str(query.value(7) or ""),
+            })
+        return rows
+
     def get_sales_by_product_rows(self, duration="today", limit=500):
         where_clause = self._duration_where("si.creation_date", duration)
         query = QSqlQuery()

@@ -69,9 +69,8 @@ def widget_with_table(monkeypatch):
                 tax_amount = taxable_amount * tax / 100
                 self.table.cellWidget(row, 7).setText(str(tax_amount))
                 amount = taxable_amount + tax_amount
-                amount = float(f"{amount:.2f}")
 
-                self.table.cellWidget(row, 8).setText(str(amount))
+                self.table.cellWidget(row, 8).setText(f"{amount:.2f}")
                 self.update_total_amount()
             except ValueError:
                 self.table.cellWidget(row, 8).setText("0")

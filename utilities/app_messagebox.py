@@ -2,7 +2,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
-from utilities.stylus import load_stylesheets
+from medic.utilities.stylus import load_stylesheets
 
 
 _installed = False
@@ -135,6 +135,13 @@ def _show_message(icon, parent, title, text, buttons=QMessageBox.Ok, default_but
 
 
 class AppMessageBox:
+    # Compatibility aliases so callers can compare question() answers as
+    # AppMessageBox.Yes/AppMessageBox.No without importing QMessageBox.
+    Yes = QMessageBox.StandardButton.Yes
+    No = QMessageBox.StandardButton.No
+    Ok = QMessageBox.StandardButton.Ok
+    Cancel = QMessageBox.StandardButton.Cancel
+
     @staticmethod
     def information(parent, title, text, buttons=QMessageBox.Ok, default_button=QMessageBox.NoButton):
         return AppMessageBox.info(parent, title, text, buttons, default_button)

@@ -3,17 +3,17 @@ from PySide6.QtCore import QFile, Qt, Signal, QTimer, QStringListModel
 from PySide6.QtSql import QSqlDatabase
 from functools import partial
 from PySide6.QtGui import QColor
-from utilities.product_search_widget import ProductSearchBox
+from medic.utilities.product_search_widget import ProductSearchBox
 import csv
 import os
 import sys
 from pathlib import Path
 
 
-from utilities.stylus import load_stylesheets
-from utilities.activity_logger import log_activity
-from utilities.permissions import Permissions
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.activity_logger import log_activity
+from medic.utilities.permissions import Permissions
+from medic.utilities.app_messagebox import AppMessageBox
 from services.stock_adjustment_service import (
     apply_stock_adjustments,
     build_stock_adjustment_log_note,
@@ -452,10 +452,31 @@ class ProductListWidget(QWidget):
         display_name = str(row_data["display_name"] or "")
         manufacturer_name = str(row_data["manufacturer_name"] or "")
         total_stock = row_data["total_stock"] or 0
+        prescription_required = bool(row_data.get("prescription_required"))
 
         self.table.insertRow(row_index)
         self.table.setItem(row_index, 0, QTableWidgetItem(str(sequence_number)))
-        self.table.setItem(row_index, 1, QTableWidgetItem(display_name))
+        product_cell = QWidget()
+        product_cell.setAttribute(Qt.WA_StyledBackground, False)
+        product_cell.setStyleSheet("background: transparent;")
+        product_layout = QHBoxLayout(product_cell)
+        product_layout.setContentsMargins(8, 0, 8, 0)
+        product_layout.setSpacing(8)
+
+        name_label = QLabel(display_name)
+        name_label.setStyleSheet("color: #223746; background: transparent;")
+        product_layout.addWidget(name_label, 1)
+
+        if prescription_required:
+            rx_badge = QLabel("RX")
+            rx_badge.setStyleSheet(
+                "background-color: #FFF1F2; color: #B42318; border: 1px solid #FECACA; "
+                "border-radius: 9px; padding: 2px 8px; font-size: 11px; font-weight: 700;"
+            )
+            product_layout.addWidget(rx_badge, 0)
+
+        product_layout.addStretch(0)
+        self.table.setCellWidget(row_index, 1, product_cell)
         self.table.setItem(row_index, 2, QTableWidgetItem(manufacturer_name))
         self.table.setItem(row_index, 3, QTableWidgetItem(str(total_stock)))
 
@@ -1402,7 +1423,7 @@ class PriceChangeDialog(QDialog):
             
 import math
 from PySide6.QtWidgets import QDialog, QDialogButtonBox
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.app_messagebox import AppMessageBox
 
 class ImportDialog(QDialog):
     

@@ -3,9 +3,9 @@ from PySide6.QtWidgets import QWidget, QStackedLayout, QScrollArea
 from sales.createsales import CreateSalesWidget
 from sales.receiptlist import ReceiptListWidget
 from sales.salesdetail import SalesDetailWidget
-from utilities.basepage import BasePage
+from medic.utilities.basepage import BasePage
 
-from utilities.permissions import Permissions
+from medic.utilities.permissions import Permissions
 
 
 class BaseSalesWidget(BasePage):

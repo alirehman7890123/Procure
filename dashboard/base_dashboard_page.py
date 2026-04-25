@@ -3,8 +3,8 @@ from PySide6.QtWidgets import QWidget, QStackedLayout, QScrollArea
 from dashboard.daily_session import DailySession
 from dashboard.dashboard import DashboardWidget
 from dashboard.welcome import WelcomeWidget
-from utilities.basepage import BasePage
-from utilities.permissions import Permissions
+from medic.utilities.basepage import BasePage
+from medic.utilities.permissions import Permissions
 
 
 class BaseDashboardWidget(BasePage):

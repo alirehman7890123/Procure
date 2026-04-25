@@ -10,11 +10,11 @@ from PySide6.QtGui import QFocusEvent
 import traceback
 
 
-from utilities.basepage import BasePage
-from utilities.permissions import Permissions
+from medic.utilities.basepage import BasePage
+from medic.utilities.permissions import Permissions
 
-from utilities.stylus import load_stylesheets
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.app_messagebox import AppMessageBox
 
 
 

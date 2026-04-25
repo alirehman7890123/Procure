@@ -30,6 +30,7 @@ import os
 import sys
 import datetime
 import sqlite3
+import shutil
 from PySide6.QtSql import QSqlDatabase
 from PySide6.QtCore import QObject
 
@@ -50,6 +51,10 @@ class SQLiteConnectionManager(QObject):
 
     def get_database_path(self):
         """Return OS-appropriate location for storing the SQLite DB."""
+        app_dir = self.get_app_data_dir()
+        return os.path.join(app_dir, "procuredb.sqlite")
+
+    def get_app_data_dir(self):
         if sys.platform.startswith("win"):
             base_dir = os.getenv("APPDATA")
         elif sys.platform == "darwin":  # macOS
@@ -59,7 +64,78 @@ class SQLiteConnectionManager(QObject):
 
         app_dir = os.path.join(base_dir, self.app_name)
         os.makedirs(app_dir, exist_ok=True)  # ensure folder exists
-        return os.path.join(app_dir, "procuredb.sqlite")
+        return app_dir
+
+    def get_prescription_storage_dir(self):
+        path = os.path.join(self.get_app_data_dir(), "prescriptions")
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def get_product_media_storage_dir(self):
+        path = os.path.join(self.get_app_data_dir(), "product_media")
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def _get_backup_assets_dir(self, backup_file):
+        backup_file = str(backup_file or "").strip()
+        if not backup_file:
+            return ""
+        if backup_file.endswith(".sqlite"):
+            return backup_file[:-7] + "_assets"
+        return backup_file + "_assets"
+
+    def _copy_prescription_assets_to_backup(self, backup_file):
+        source_dir = self.get_prescription_storage_dir()
+        target_root = self._get_backup_assets_dir(backup_file)
+        if not target_root:
+            return
+
+        if os.path.isdir(target_root):
+            shutil.rmtree(target_root, ignore_errors=True)
+
+        target_dir = os.path.join(target_root, "prescriptions")
+        if not os.path.isdir(source_dir):
+            return
+
+        os.makedirs(target_root, exist_ok=True)
+        shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
+
+    def _copy_product_media_assets_to_backup(self, backup_file):
+        source_dir = self.get_product_media_storage_dir()
+        target_root = self._get_backup_assets_dir(backup_file)
+        if not target_root:
+            return
+
+        target_dir = os.path.join(target_root, "product_media")
+        if not os.path.isdir(source_dir):
+            return
+
+        os.makedirs(target_root, exist_ok=True)
+        shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
+
+    def _restore_prescription_assets_from_backup(self, backup_file):
+        backup_assets_root = self._get_backup_assets_dir(backup_file)
+        backup_prescriptions = os.path.join(backup_assets_root, "prescriptions")
+        target_dir = self.get_prescription_storage_dir()
+
+        if os.path.isdir(target_dir):
+            shutil.rmtree(target_dir, ignore_errors=True)
+        os.makedirs(target_dir, exist_ok=True)
+
+        if os.path.isdir(backup_prescriptions):
+            shutil.copytree(backup_prescriptions, target_dir, dirs_exist_ok=True)
+
+    def _restore_product_media_assets_from_backup(self, backup_file):
+        backup_assets_root = self._get_backup_assets_dir(backup_file)
+        backup_media = os.path.join(backup_assets_root, "product_media")
+        target_dir = self.get_product_media_storage_dir()
+
+        if os.path.isdir(target_dir):
+            shutil.rmtree(target_dir, ignore_errors=True)
+        os.makedirs(target_dir, exist_ok=True)
+
+        if os.path.isdir(backup_media):
+            shutil.copytree(backup_media, target_dir, dirs_exist_ok=True)
 
     def open(self):
         if not self.db.open():
@@ -263,6 +339,8 @@ class SQLiteConnectionManager(QObject):
 
             # Create a fresh target from selected backup.
             source_conn.backup(target_conn)
+            self._restore_prescription_assets_from_backup(backup_file)
+            self._restore_product_media_assets_from_backup(backup_file)
 
             success_msg = f"Restore completed. Pre-restore backup: {pre_restore_file}"
             if pre_restore_warning:
@@ -315,6 +393,9 @@ class SQLiteConnectionManager(QObject):
         for _, path in to_delete:
             try:
                 os.remove(path)
+                assets_dir = self._get_backup_assets_dir(path)
+                if assets_dir and os.path.isdir(assets_dir):
+                    shutil.rmtree(assets_dir, ignore_errors=True)
                 deleted += 1
             except OSError:
                 continue
@@ -513,7 +594,7 @@ class SQLiteConnectionManager(QObject):
             raise
 
     def backup(self, backup_dir=None, trigger_source="manual"):
-        """Create a timestamped backup of the database."""
+        """Create a timestamped backup of the database and attachment assets."""
         if not os.path.exists(self.db_path):
             raise Exception("No database file found to backup.")
 
@@ -538,6 +619,9 @@ class SQLiteConnectionManager(QObject):
             if source_conn is not None:
                 source_conn.close()
 
+        self._copy_prescription_assets_to_backup(backup_file)
+        self._copy_product_media_assets_to_backup(backup_file)
+
         backup_size = 0
         try:
             backup_size = os.path.getsize(backup_file)
@@ -554,5 +638,3 @@ class SQLiteConnectionManager(QObject):
 
         print(f"Backup created: {backup_file}")
         return backup_file
-
-

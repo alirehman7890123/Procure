@@ -342,6 +342,13 @@ def is_demo_license(payload: dict | None = None) -> bool:
     return str(payload.get("license_type") or "").lower() == "demo"
 
 
+def is_pro_license(payload: dict | None = None) -> bool:
+    payload = payload or get_current_license_payload()
+    if not payload:
+        return True
+    return str(payload.get("license_type") or "").strip().lower() in {"pro", "enterprise", "full"}
+
+
 def get_license_days_remaining(payload: dict | None = None, today: date | None = None) -> int | None:
     payload = payload or get_current_license_payload()
     if not payload:

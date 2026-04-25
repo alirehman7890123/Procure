@@ -17,9 +17,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from utilities.app_messagebox import AppMessageBox
-from utilities.permissions import Permissions
-from utilities.stylus import load_stylesheets
+from medic.utilities.app_messagebox import AppMessageBox
+from medic.utilities.permissions import Permissions
+from medic.utilities.stylus import load_stylesheets
 from services.accounting_settings_service import (
     load_sales_tax_settings as load_sales_tax_settings_from_service,
     save_sales_tax_settings as save_sales_tax_settings_to_service,

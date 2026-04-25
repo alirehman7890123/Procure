@@ -5,8 +5,8 @@ from purchase.po_list import POListWidget
 from purchase.add_po import AddPOWidget
 from purchase.po_detail import PODetailWidget
 from purchase.grn_detail import GRNDetailWidget
-from utilities.basepage import BasePage
-from utilities.permissions import Permissions
+from medic.utilities.basepage import BasePage
+from medic.utilities.permissions import Permissions
 
 
 class PurchaseOrder:

@@ -2,7 +2,7 @@ from PySide6.QtWidgets import QWidget, QComboBox, QHBoxLayout, QFrame, QLabel, Q
 from PySide6.QtCore import QFile, Qt, Signal, QDate, QDateTime
 from PySide6.QtSql import QSqlQuery
 from functools import partial
-from utilities.stylus import load_stylesheets
+from medic.utilities.stylus import load_stylesheets
 
 
 

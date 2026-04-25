@@ -4,8 +4,8 @@ from supplier.addsupplier import AddSupplierWidget
 from supplier.supplierlist import SupplierListWidget
 from supplier.supplierdetail import SupplierDetailWidget
 
-from utilities.basepage import BasePage
-from utilities.permissions import Permissions
+from medic.utilities.basepage import BasePage
+from medic.utilities.permissions import Permissions
 
 
 class BaseSupplierWidget(BasePage):

@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QWidget, QSizePolicy, QPushButton, QLabel,QMessageBox, QComboBox, QLineEdit, QVBoxLayout, QGridLayout, QTableWidget, QTableWidgetItem
 from PySide6.QtCore import QFile, Qt, QDate
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
-from utilities.stylus import load_stylesheets
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.app_messagebox import AppMessageBox
 
 
 

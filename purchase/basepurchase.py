@@ -3,9 +3,9 @@ from PySide6.QtWidgets import QWidget, QStackedLayout, QScrollArea
 from purchase.addpurchase import AddPurchaseWidget
 from purchase.purchaselist import PurchaseListWidget
 from purchase.purchasedetail import PurchaseDetailWidget
-from utilities.basepage import BasePage
+from medic.utilities.basepage import BasePage
 
-from utilities.permissions import Permissions
+from medic.utilities.permissions import Permissions
 
 class Purchase:
         

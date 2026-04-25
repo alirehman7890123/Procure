@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from utilities.license_core import ALGORITHM, PRODUCT_CODE, canonical_json, DOMAIN_SEPARATOR
+from medic.utilities.license_core import ALGORITHM, PRODUCT_CODE, canonical_json, DOMAIN_SEPARATOR
 
 
 def _hex_to_int(value: str) -> int:

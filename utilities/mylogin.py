@@ -24,20 +24,23 @@ from purchase.base_po import BasePOWidget
 from purchase.base_grn import BaseGRNWidget
 from sales.basesales import BaseSalesWidget
 from employee.baseemployee import BaseEmployeeWidget
+from payroll.basepayroll import BasePayrollWidget
 from transaction.basetransaction import BaseTransactionWidget
 from purchasereturn.base_purchase_return import BasePurchaseReturnWidget
 from salesreturn.base_sales_return import BaseSalesReturnWidget
 from expense.baseexpense import BaseExpenseWidget
 from reports.basereports import BaseReportsWidget
+from financialclose.basefinancialclose import BaseFinancialCloseWidget
 from salehold.basehold import BaseHoldSalesWidget
 
 from utilities.sizehintfinder import print_size_hints
 from functools import wraps
 from PySide6.QtWidgets import QMessageBox, QApplication
 from utilities.permissions import Permissions
-from utilities.license_core import get_current_license_payload, get_license_days_remaining, is_demo_license
+from utilities.license_core import get_current_license_payload, get_license_days_remaining, is_demo_license, is_pro_license
 from utilities.stylus import load_stylesheets
-from utilities.app_theme import get_theme_palette
+from medic.utilities.app_theme import get_theme_palette
+from services.scheduled_price_service import apply_due_scheduled_price_changes, ensure_scheduled_price_schema
 
 
 
@@ -47,7 +50,7 @@ permission = Permissions()
 import sys
 import os
 from pathlib import Path
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.app_messagebox import AppMessageBox
 
 
 def resource_path(relative_path):
@@ -81,6 +84,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.license_payload = get_current_license_payload()
         self.demo_mode = is_demo_license(self.license_payload)
+        self.pro_mode = is_pro_license(self.license_payload)
         self.demo_days_remaining = get_license_days_remaining(self.license_payload)
 
         self.setWindowTitle(self._build_window_title())
@@ -89,6 +93,7 @@ class MainWindow(QMainWindow):
         connection = SQLiteConnectionManager('ProcureApp')
         # connection = PostgresConnectionManager()
         connection.open()
+        ensure_scheduled_price_schema()
         
         screen_geometry = QApplication.primaryScreen().geometry()
         
@@ -127,6 +132,7 @@ class MainWindow(QMainWindow):
         if app and not app.property("_logout_exit_hook_connected"):
             app.aboutToQuit.connect(self._log_shutdown_logout_once)
             app.setProperty("_logout_exit_hook_connected", True)
+        QTimer.singleShot(0, self._apply_due_scheduled_prices_on_startup)
        
         
         
@@ -454,10 +460,12 @@ class MainWindow(QMainWindow):
         self.customer_button = SideBarButton('Customers')
         self.product_button = SideBarButton('Product')
         self.employee_button = SideBarButton('Employees')
+        self.payroll_button = SideBarButton('Payroll')
         self.transaction_button = SideBarButton('Transactions')
         self.purchase_return = SideBarButton('Purchase Return')
         self.sales_return = SideBarButton('Sales Return')
         self.expense_button = SideBarButton('Expenses')
+        self.financial_close_button = SideBarButton('Financial Close')
         self.reports_button = SideBarButton('Reports')
         # self.holdsales_button = SideBarButton('On-Hold Sales')
 
@@ -481,6 +489,7 @@ class MainWindow(QMainWindow):
         self.purchase_return.setCursor(Qt.PointingHandCursor)
         self.sales_return.setCursor(Qt.PointingHandCursor)
         self.expense_button.setCursor(Qt.PointingHandCursor)
+        self.financial_close_button.setCursor(Qt.PointingHandCursor)
         self.reports_button.setCursor(Qt.PointingHandCursor)
         # self.holdsales_button.setCursor(Qt.PointingHandCursor)
 
@@ -496,10 +505,12 @@ class MainWindow(QMainWindow):
         self.sidebar_nav_layout.addWidget(self.customer_button)
         self.sidebar_nav_layout.addWidget(self.product_button)
         self.sidebar_nav_layout.addWidget(self.employee_button)
+        self.sidebar_nav_layout.addWidget(self.payroll_button)
         self.sidebar_nav_layout.addWidget(self.transaction_button)
         self.sidebar_nav_layout.addWidget(self.purchase_return)
         self.sidebar_nav_layout.addWidget(self.sales_return)
         self.sidebar_nav_layout.addWidget(self.expense_button)
+        self.sidebar_nav_layout.addWidget(self.financial_close_button)
         self.sidebar_nav_layout.addWidget(self.reports_button)
         # sidebar_layout.addWidget(self.holdsales_button)
 
@@ -597,6 +608,7 @@ class MainWindow(QMainWindow):
         self.rail_purchase_return = None
         self.rail_sales_return = None
         self.rail_expense_button = None
+        self.rail_financial_close_button = None
         self.rail_reports_button = None
         self.rail_toggle_button = None
 
@@ -616,6 +628,7 @@ class MainWindow(QMainWindow):
             self.purchase_return,
             self.sales_return,
             self.expense_button,
+            self.financial_close_button,
             self.reports_button,
         ]
 
@@ -635,6 +648,7 @@ class MainWindow(QMainWindow):
             self.purchase_return: "res/rail_icons/purchase_return.svg",
             self.sales_return: "res/rail_icons/sales_return.svg",
             self.expense_button: "res/rail_icons/expense.svg",
+            self.financial_close_button: "res/rail_icons/reports.svg",
             self.reports_button: "res/rail_icons/reports.svg",
         }
 
@@ -647,6 +661,7 @@ class MainWindow(QMainWindow):
 
         self.apply_role_permissions()
         self.apply_demo_restrictions()
+        self.apply_pro_restrictions()
 
 
 
@@ -683,6 +698,7 @@ class MainWindow(QMainWindow):
         self.purchasereturn = None
         self.salesreturn = None
         self.expense = None
+        self.financial_close = None
         self.reports = None
 
         self._page_factories = {
@@ -699,10 +715,12 @@ class MainWindow(QMainWindow):
             "base_customer": lambda: BaseCustomerWidget(controller=self),
             "product": lambda: BaseProductWidget(),
             "employee": lambda: BaseEmployeeWidget(),
+            "payroll": lambda: BasePayrollWidget(),
             "transaction": lambda: BaseTransactionWidget(),
             "purchasereturn": lambda: BasePurchaseReturnWidget(),
             "salesreturn": lambda: BaseSalesReturnWidget(),
             "expense": lambda: BaseExpenseWidget(),
+            "financial_close": lambda: BaseFinancialCloseWidget(pro_enabled=self.pro_mode),
             "reports": lambda: BaseReportsWidget(),
         }
         self._page_sidebar_buttons = {
@@ -718,10 +736,12 @@ class MainWindow(QMainWindow):
             "base_customer": self.customer_button,
             "product": self.product_button,
             "employee": self.employee_button,
+            "payroll": self.payroll_button,
             "transaction": self.transaction_button,
             "purchasereturn": self.purchase_return,
             "salesreturn": self.sales_return,
             "expense": self.expense_button,
+            "financial_close": self.financial_close_button,
             "reports": self.reports_button,
         }
         
@@ -745,10 +765,12 @@ class MainWindow(QMainWindow):
         self.customer_button.clicked.connect(lambda: self.set_customer(None, self.main_content_layout))
         self.product_button.clicked.connect(lambda: self.set_product(None, self.main_content_layout))
         self.employee_button.clicked.connect(lambda: self.set_employee(None, self.main_content_layout))
+        self.payroll_button.clicked.connect(lambda: self.set_payroll(None, self.main_content_layout))
         self.transaction_button.clicked.connect(lambda: self.set_transaction(None, self.main_content_layout))
         self.purchase_return.clicked.connect(lambda: self.set_purchasereturn(None, self.main_content_layout))
         self.sales_return.clicked.connect(lambda: self.set_salesreturn(None, self.main_content_layout))
         self.expense_button.clicked.connect(lambda: self.set_expense(None, self.main_content_layout))
+        self.financial_close_button.clicked.connect(lambda: self.set_financial_close(None, self.main_content_layout))
         self.reports_button.clicked.connect(lambda: self.set_reports(None, self.main_content_layout))
         # self.holdsales_button.clicked.connect(lambda: self.set_holdsales(self.holdsales, self.main_content_layout))
 
@@ -925,6 +947,15 @@ class MainWindow(QMainWindow):
         demo_tooltip = "Demo mode: Reports can be viewed, but export and print actions are limited."
         self.reports_button.setEnabled(True)
         self.reports_button.setToolTip(demo_tooltip)
+
+    def apply_pro_restrictions(self):
+        if self.pro_mode:
+            self.financial_close_button.setEnabled(True)
+            self.financial_close_button.setToolTip("")
+            return
+
+        self.financial_close_button.setEnabled(False)
+        self.financial_close_button.setToolTip("Pro feature: Financial period closing.")
 
     def _ensure_page(self, page_key):
         widget = getattr(self, page_key, None)
@@ -1198,6 +1229,26 @@ class MainWindow(QMainWindow):
         widget = self._ensure_page("dashboard")
         self.navigate_to_page(widget, layout)
 
+    def _apply_due_scheduled_prices_on_startup(self):
+        try:
+            app = QApplication.instance()
+            username = str((app.property("username") if app else "") or "system")
+            result = apply_due_scheduled_price_changes(applied_by=username)
+        except Exception as exc:
+            print("Scheduled price auto-apply failed:", str(exc))
+            return
+
+        applied_count = int((result or {}).get("count") or 0)
+        if applied_count <= 0:
+            return
+
+        noun = "change" if applied_count == 1 else "changes"
+        AppMessageBox.information(
+            self,
+            "Scheduled Price Updates",
+            f"{applied_count} scheduled selling price {noun} became active today.",
+        )
+
     def _require_any_permission(self, permission_names, label):
         if any(Permissions.has_permission(name) for name in permission_names):
             return True
@@ -1308,6 +1359,16 @@ class MainWindow(QMainWindow):
         self.employee.reset_to_default()
         self.navigate_to_page(widget, layout)
 
+    def set_payroll(self, widget, layout):
+        if not self._require_any_permission(
+            ("payroll.view", "payroll.create", "payroll.attendance"), "Payroll"
+        ):
+            return
+        self._pause_background_page_warmup()
+        widget = self._ensure_page("payroll")
+        self.payroll.reset_to_default()
+        self.navigate_to_page(widget, layout)
+
     def set_transaction(self, widget, layout):
         if not self._require_any_permission(("transactions.view", "transactions.create"), "Transactions"):
             return
@@ -1354,6 +1415,21 @@ class MainWindow(QMainWindow):
         self._pause_background_page_warmup()
         widget = self._ensure_page("reports")
         self.reports.reset_to_default()
+        self.navigate_to_page(widget, layout)
+
+    def set_financial_close(self, widget, layout):
+        if not self._require_any_permission(("financialclose.view",), "Financial Closing"):
+            return
+        if not self.pro_mode:
+            AppMessageBox.warning(
+                self,
+                "Pro Feature",
+                "Financial period closing is available in Pro version.",
+            )
+            return
+        self._pause_background_page_warmup()
+        widget = self._ensure_page("financial_close")
+        self.financial_close.reset_to_default()
         self.navigate_to_page(widget, layout)
 
     def navigate_to_page(self, widget, layout):
@@ -1553,11 +1629,13 @@ class MainWindow(QMainWindow):
             "customer.view": (self.customer_button, None),
             "product.view": (self.product_button, None),
             "employee.view": (self.employee_button, None),
+            "payroll.view": (self.payroll_button, None),
             "transactions.view": (self.transaction_button, None),
             "purchasereturn.view": (self.purchase_return, None),
             "salesreturn.view": (self.sales_return, None),
             "expense.view": (self.expense_button, None),
             "reports.view": (self.reports_button, None),
+            "financialclose.view": (self.financial_close_button, None),
         }
 
         for permission_name, buttons in permission_to_buttons.items():
@@ -2024,6 +2102,7 @@ class MainWindow(QMainWindow):
             (self.purchase_return, self.purchasereturn),
             (self.sales_return, self.salesreturn),
             (self.expense_button, self.expense),
+            (self.financial_close_button, self.financial_close),
             (self.reports_button, self.reports),
         ]
 
@@ -2034,7 +2113,7 @@ class MainWindow(QMainWindow):
             ("Returns", [self.purchase_return, self.sales_return]),
             ("Inventory", [self.product_button]),
             ("People", [self.customer_button, self.supplier_button, self.employee_button]),
-            ("Finance", [self.transaction_button, self.expense_button, self.business_button]),
+            ("Finance", [self.transaction_button, self.expense_button, self.business_button, self.financial_close_button]),
         ]
 
     def _sidebar_button_label(self, sidebar_button):

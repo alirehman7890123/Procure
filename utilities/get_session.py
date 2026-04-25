@@ -1,6 +1,6 @@
 import warnings
 
-from utilities.session_service import get_active_session_id
+from medic.utilities.session_service import get_active_session_id
 
 
 def get_current_session(self=None):

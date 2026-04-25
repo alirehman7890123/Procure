@@ -2,8 +2,8 @@ import logging
 
 from PySide6.QtWidgets import QMessageBox
 
-from utilities.session_service import SessionErrorCode, check_active_session
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.session_service import SessionErrorCode, check_active_session
+from medic.utilities.app_messagebox import AppMessageBox
 
 
 logger = logging.getLogger(__name__)

@@ -3,8 +3,8 @@ from PySide6.QtCore import QFile, Qt, QDate, Signal
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from functools import partial
 from datetime import date
-from utilities.stylus import load_stylesheets
-from utilities.table_helpers import centered_cell_widget, style_table_action_button
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.table_helpers import centered_cell_widget, style_table_action_button
 
 
 

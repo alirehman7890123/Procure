@@ -4,8 +4,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QDate, QTimer
 from PySide6.QtSql import QSqlQuery
-from utilities.stylus import load_stylesheets
-from utilities.table_helpers import centered_cell_widget, style_table_action_button
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.table_helpers import centered_cell_widget, style_table_action_button
 
 
 

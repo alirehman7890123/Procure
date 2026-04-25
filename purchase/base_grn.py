@@ -3,8 +3,8 @@ from PySide6.QtWidgets import QStackedLayout
 from purchase.grn_list import GRNListWidget
 from purchase.create_grn import CreateGRNWidget
 from purchase.grn_detail import GRNDetailWidget
-from utilities.basepage import BasePage
-from utilities.permissions import Permissions
+from medic.utilities.basepage import BasePage
+from medic.utilities.permissions import Permissions
 
 
 class BaseGRNWidget(BasePage):

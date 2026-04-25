@@ -2,12 +2,12 @@
 from PySide6.QtWidgets import QWidget, QApplication, QPushButton, QComboBox, QVBoxLayout, QHBoxLayout, QFrame, QLineEdit, QLabel, QSpacerItem, QSizePolicy, QMessageBox
 from PySide6.QtCore import QSize, Qt, QFile, QEvent
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
-from utilities.stylus import load_stylesheets
-from utilities.payment_handler import PaymentMethodHandler
-from utilities.permissions import Permissions
-from utilities.session_gate import require_open_session
-from utilities.session_service import get_active_session_id
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.payment_handler import PaymentMethodHandler
+from medic.utilities.permissions import Permissions
+from medic.utilities.session_gate import require_open_session
+from medic.utilities.session_service import get_active_session_id
+from medic.utilities.app_messagebox import AppMessageBox
 
 class AddExpenseWidget(QWidget):
 

@@ -90,8 +90,16 @@ def compute_purchase_distribution_factor(
     cn_adjustment = max(0.0, float(cn_adjustment or 0.0))
 
     header_adjustments = (
-        -header_discount + header_tax_236g - header_tax_236h + header_sales_tax - cn_adjustment
+        -header_discount + header_tax_236g + header_tax_236h + header_sales_tax - cn_adjustment
     )
+    if line_subtotal <= 0:
+        return {
+            "line_subtotal": 0.0,
+            "header_adjustments": 0.0,
+            "total_with_fees": 0.0,
+            "distribution_factor": 1.0,
+        }
+
     total_with_fees = max(0.0, line_subtotal + header_adjustments)
 
     return {

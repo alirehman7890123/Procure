@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QFrame, QLabel, QVBoxLayout, QTableWidget, QTableWidgetItem, QSpacerItem, QSizePolicy
 from PySide6.QtCore import QFile, Qt, QDate, QDateTime
 from PySide6.QtSql import  QSqlQuery
-from utilities.stylus import load_stylesheets
+from medic.utilities.stylus import load_stylesheets
 
 
 

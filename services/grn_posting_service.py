@@ -33,7 +33,8 @@ def build_goods_receipt_payload(
         "status": status,
         "total_value": float(total_value or 0.0),
         "header_discount": header_discount,
-        "header_tax": (-tax_236g) + tax_236h + sales_tax,
+        # Keep header_tax as combined 236 tax bucket for legacy GRN views.
+        "header_tax": tax_236g + tax_236h,
         "discount": 0.0,
         "tax_236g": tax_236g,
         "tax_236h": tax_236h,

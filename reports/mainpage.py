@@ -8,10 +8,10 @@ from functools import partial
 import pyqtgraph as pg
 import sys
 import html
-from utilities.stylus import load_stylesheets
+from medic.utilities.stylus import load_stylesheets
 from reports import report_service
-from utilities.app_messagebox import AppMessageBox
-from utilities.license_core import get_current_license_payload, is_demo_license
+from medic.utilities.app_messagebox import AppMessageBox
+from medic.utilities.license_core import get_current_license_payload, is_demo_license
 
 
 class MainReportsPage(QWidget):
@@ -318,6 +318,9 @@ class MainReportsPage(QWidget):
             "Balance Sheet",
             "Trial Balance",
             "Cash Flow",
+            "Payroll Register",
+            "Attendance Summary",
+            "Salary Advance Outstanding",
         ]
 
         layout = QVBoxLayout(card)
@@ -345,7 +348,7 @@ class MainReportsPage(QWidget):
 
         layout.addWidget(header)
 
-        subtitle = QLabel("Profitability, statements, ledger, and cash movement reports.")
+        subtitle = QLabel("Profitability, statements, cash movement, and payroll reports.")
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet("color: #5A7183; font-size: 11px; font-weight: 500; padding-left: 0;")
         layout.addWidget(subtitle)
@@ -374,6 +377,9 @@ class MainReportsPage(QWidget):
             "Balance Sheet": self.show_balance_sheet_dialog,
             "Trial Balance": self.show_trial_balance_dialog,
             "Cash Flow": self.show_cash_flow_dialog,
+            "Payroll Register": self.show_payroll_register_report_dialog,
+            "Attendance Summary": self.show_attendance_summary_report_dialog,
+            "Salary Advance Outstanding": self.show_salary_advance_outstanding_report_dialog,
         }
         return handler_map.get(report_name)
 
@@ -1552,6 +1558,68 @@ class MainReportsPage(QWidget):
             row_double_click_handler=lambda row: self.show_reference_detail_dialog(
                 f"Sales Detail (SALE#{int(row.get('sales_id', 0) or 0)})",
                 self.fetch_sales_reference_details(f"SALE#{int(row.get('sales_id', 0) or 0)}"),
+            ),
+        )
+
+    def show_payroll_register_report_dialog(self):
+        self.show_sales_table_report_dialog(
+            "Payroll Register",
+            "Salary slips paid in the selected period.",
+            [
+                ("Payroll ID", "payroll_id"),
+                ("Paid On", "paid_on"),
+                ("Salary Month", "salary_month"),
+                ("Employee", "employee_name"),
+                ("Basic", "basic_salary"),
+                ("Allowances", "allowances"),
+                ("Deductions", "deductions"),
+                ("Advance Deduct", "advance_deduct"),
+                ("Net Salary", "net_salary"),
+                ("Payment", "payment_method"),
+            ],
+            fetch_rows=lambda duration: report_service.ReportService().get_payroll_register_rows(duration),
+            summary_builder=lambda rows: (
+                f"Rows: {len(rows)} | Net Salary Paid: {sum(float(r.get('net_salary', 0) or 0) for r in rows):,.2f} | "
+                f"Total Deductions: {sum(float(r.get('deductions', 0) or 0) + float(r.get('advance_deduct', 0) or 0) for r in rows):,.2f}"
+            ),
+        )
+
+    def show_attendance_summary_report_dialog(self):
+        self.show_sales_table_report_dialog(
+            "Attendance Summary",
+            "Employee-wise attendance counts for the selected period.",
+            [
+                ("Employee", "employee_name"),
+                ("Present", "present"),
+                ("Absent", "absent"),
+                ("Half Day", "half_day"),
+                ("Leave", "leave"),
+                ("Total Marked", "total_marked"),
+            ],
+            fetch_rows=lambda duration: report_service.ReportService().get_attendance_summary_rows(duration),
+            summary_builder=lambda rows: (
+                f"Employees: {len(rows)} | Present: {self._format_report_quantity(sum(float(r.get('present', 0) or 0) for r in rows))} | "
+                f"Absent: {self._format_report_quantity(sum(float(r.get('absent', 0) or 0) for r in rows))}"
+            ),
+        )
+
+    def show_salary_advance_outstanding_report_dialog(self):
+        self.show_sales_table_report_dialog(
+            "Salary Advance Outstanding",
+            "Outstanding salary advances created in the selected period.",
+            [
+                ("Advance ID", "advance_id"),
+                ("Date", "advance_date"),
+                ("Employee", "employee_name"),
+                ("Amount", "amount"),
+                ("Recovered", "recovered"),
+                ("Outstanding", "outstanding"),
+                ("Status", "status"),
+                ("Reason", "reason"),
+            ],
+            fetch_rows=lambda duration: report_service.ReportService().get_salary_advance_outstanding_rows(duration),
+            summary_builder=lambda rows: (
+                f"Rows: {len(rows)} | Outstanding Total: {sum(float(r.get('outstanding', 0) or 0) for r in rows):,.2f}"
             ),
         )
 

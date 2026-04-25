@@ -11,8 +11,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtSql import QSqlQuery
 
-from utilities.stylus import load_stylesheets
-from utilities.app_messagebox import AppMessageBox
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.app_messagebox import AppMessageBox
 
 
 class CustomerTransactionDetailWidget(QWidget):

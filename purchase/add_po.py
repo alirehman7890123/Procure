@@ -9,13 +9,13 @@ from PySide6.QtGui import QColor, QKeySequence, QShortcut, QIntValidator, QDoubl
 import os
 import platform
 import subprocess
-from utilities.stylus import load_stylesheets
-from utilities.activity_logger import log_activity
-from utilities.session_gate import require_open_session
-from utilities.session_service import get_active_session_id
-from utilities.permissions import Permissions
-from utilities.app_messagebox import AppMessageBox
-from utilities.product_search_widget import ProductSearchBox
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.activity_logger import log_activity
+from medic.utilities.session_gate import require_open_session
+from medic.utilities.session_service import get_active_session_id
+from medic.utilities.permissions import Permissions
+from medic.utilities.app_messagebox import AppMessageBox
+from medic.utilities.product_search_widget import ProductSearchBox
 from services.purchase_order_service import (
     build_purchase_order_header_payload,
     compute_reorder_suggestion,
