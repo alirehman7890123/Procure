@@ -27,27 +27,26 @@ jobs:
 
       - name: Install project dependencies
         run: |
-          venv\Scripts\pip.exe install -r medic/requirements.txt
+          venv\Scripts\pip.exe install -r "${{ github.workspace }}\medic\requirements.txt"
 
       - name: Ensure public key exists
         run: |
-          venv\Scripts\python.exe - << 'PY'
-          import json
+          $script = @"
+          import json, sys
           from pathlib import Path
-
-          path = Path("medic/licensing/public_key.json")
+          path = Path(r'${{ github.workspace }}\medic\licensing\public_key.json')
           if not path.exists():
-              raise SystemExit("public_key.json is missing")
-
-          data = json.loads(path.read_text(encoding="utf-8"))
-          if not isinstance(data, dict) or not data.get("n") or not data.get("e"):
-              raise SystemExit("public_key.json is not configured with a valid public key")
-
-          print("public_key.json is present and configured")
-          PY
+              sys.exit('public_key.json is missing')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          if not isinstance(data, dict) or not data.get('n') or not data.get('e'):
+              sys.exit('public_key.json is not configured with a valid public key')
+          print('public_key.json is present and configured')
+          "@
+          venv\Scripts\python.exe -c $script
 
       - name: Build packaged app
         run: |
+          $ws = "${{ github.workspace }}"
           $QtPluginDir = venv\Scripts\python.exe -c "from PySide6.QtCore import QLibraryInfo; print(QLibraryInfo.path(QLibraryInfo.PluginsPath))"
 
           $ExtraBinaries = @()
@@ -55,7 +54,7 @@ jobs:
           $QsvgPlugin = Join-Path $QtPluginDir "imageformats\qsvg.dll"
           if (Test-Path $QsvgPlugin) {
             $ExtraBinaries += "--add-binary"
-            $ExtraBinaries += "${QsvgPlugin}:PySide6/Qt/plugins/imageformats"
+            $ExtraBinaries += "${QsvgPlugin};PySide6/Qt/plugins/imageformats"
           } else {
             Write-Warning "Qt SVG image plugin not found at $QsvgPlugin"
           }
@@ -63,7 +62,7 @@ jobs:
           $QsvgIconEngine = Join-Path $QtPluginDir "iconengines\qsvgicon.dll"
           if (Test-Path $QsvgIconEngine) {
             $ExtraBinaries += "--add-binary"
-            $ExtraBinaries += "${QsvgIconEngine}:PySide6/Qt/plugins/iconengines"
+            $ExtraBinaries += "${QsvgIconEngine};PySide6/Qt/plugins/iconengines"
           } else {
             Write-Warning "Qt SVG icon engine plugin not found at $QsvgIconEngine"
           }
@@ -72,13 +71,13 @@ jobs:
             "--clean", "--noconfirm", "--onedir", "--windowed",
             "--name", "procure-medics",
             "--hidden-import", "PySide6.QtSvg",
-            "--add-data", "medic/licensing/public_key.json;licensing",
-            "--add-data", "medic/manufacturers.csv;.",
-            "--add-data", "medic/master_products.csv;.",
-            "--add-data", "medic/purchase/med-template.ods;purchase",
-            "--add-data", "medic/res;res",
-            "--add-data", "medic/styles;styles"
-          ) + $ExtraBinaries + @("medic/starting.py")
+            "--add-data", "$ws\medic\licensing\public_key.json;licensing",
+            "--add-data", "$ws\medic\manufacturers.csv;.",
+            "--add-data", "$ws\medic\master_products.csv;.",
+            "--add-data", "$ws\medic\purchase\med-template.ods;purchase",
+            "--add-data", "$ws\medic\res;res",
+            "--add-data", "$ws\medic\styles;styles"
+          ) + $ExtraBinaries + @("$ws\medic\starting.py")
 
           venv\Scripts\python.exe -m PyInstaller @PyInstallerArgs
 
