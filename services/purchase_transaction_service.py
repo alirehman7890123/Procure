@@ -4,7 +4,10 @@ def _new_query():
     return QSqlQuery()
 
 
-from medic.services.inventory_movement_service import insert_batch_record as insert_batch_record_from_inventory
+try:
+    from medic.services.inventory_movement_service import insert_batch_record as insert_batch_record_from_inventory
+except ModuleNotFoundError:
+    from services.inventory_movement_service import insert_batch_record as insert_batch_record_from_inventory
 
 
 def insert_purchase_header(header_payload):
