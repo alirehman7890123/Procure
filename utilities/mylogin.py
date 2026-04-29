@@ -5,10 +5,10 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtWidgets import QScrollArea
-from medic.utilities.sidebarbutton import SideBarButton
-from medic.utilities.activity_logger import log_activity
+from .sidebarbutton import SideBarButton
+from .activity_logger import log_activity
 
-from medic.utilities.database import SQLiteConnectionManager
+from .database import SQLiteConnectionManager
 # from database import PostgresConnectionManager
 from PySide6.QtGui import QPalette, QColor, QPixmap, QIcon, QPainter
 from medic.dashboard.base_dashboard_page import BaseDashboardWidget
@@ -33,14 +33,14 @@ from medic.reports.basereports import BaseReportsWidget
 from medic.features.finance.ui.base_financial_close import BaseFinancialCloseWidget
 from medic.salehold.basehold import BaseHoldSalesWidget
 
-from medic.utilities.sizehintfinder import print_size_hints
+from .sizehintfinder import print_size_hints
 from functools import wraps
 from PySide6.QtWidgets import QMessageBox, QApplication
-from medic.utilities.permissions import Permissions
-from medic.utilities.license_core import get_current_license_payload, get_license_days_remaining, is_demo_license, is_pro_license
+from .permissions import Permissions
+from .license_core import get_current_license_payload, get_license_days_remaining, is_demo_license, is_pro_license
 from medic.features.admin.services.business_service import fetch_business_name
-from medic.utilities.stylus import load_stylesheets
-from medic.utilities.app_theme import get_theme_palette
+from .stylus import load_stylesheets
+from .app_theme import get_theme_palette
 from medic.services.scheduled_price_service import apply_due_scheduled_price_changes, ensure_scheduled_price_schema
 
 
@@ -51,7 +51,7 @@ permission = Permissions()
 import sys
 import os
 from pathlib import Path
-from medic.utilities.app_messagebox import AppMessageBox
+from .app_messagebox import AppMessageBox
 
 
 def resource_path(relative_path):

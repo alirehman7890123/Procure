@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QPushButton, QSizePolicy
 from PySide6.QtCore import Qt, QSize
-from medic.utilities.app_theme import get_theme_palette
+from .app_theme import get_theme_palette
 
 class SideBarButton(QPushButton):
     def __init__(self, text="", normal_color="#2F5D7C", hover_color="#3D6A89",

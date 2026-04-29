@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QWidget, QButtonGroup
 )
 
-from medic.utilities.payment_dialogs import BankTransferDialog, MobileWalletDialog
+from .payment_dialogs import BankTransferDialog, MobileWalletDialog
 
 class PaymentMethodHandler:
     def __init__(self, parent=None):

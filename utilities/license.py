@@ -14,8 +14,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from medic.utilities.app_messagebox import AppMessageBox
-from medic.utilities.license_core import (
+from .app_messagebox import AppMessageBox
+from .license_core import (
     LICENSE_PATH,
     LicenseError,
     get_machine_id_short,
@@ -146,4 +146,3 @@ def ensure_valid_license(parent=None) -> bool:
 
     dialog = LicenseDialog(parent=parent)
     return dialog.exec() == QDialog.Accepted
-

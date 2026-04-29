@@ -2,7 +2,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
-from medic.utilities.stylus import load_stylesheets
+from .stylus import load_stylesheets
 
 
 _installed = False

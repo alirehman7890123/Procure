@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QRegularExpression
 from PySide6.QtGui import QRegularExpressionValidator
-from medic.utilities.app_messagebox import AppMessageBox
+from .app_messagebox import AppMessageBox
 
 
 

@@ -3,7 +3,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from medic.utilities.app_theme import get_theme_palette
+from .app_theme import get_theme_palette
 
 
 def resource_path(relative_path):

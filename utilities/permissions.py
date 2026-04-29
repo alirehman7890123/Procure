@@ -2,7 +2,7 @@
 
 from functools import wraps
 from PySide6.QtWidgets import QApplication, QMessageBox
-from medic.utilities.app_messagebox import AppMessageBox
+from .app_messagebox import AppMessageBox
 
 
 class Permissions:

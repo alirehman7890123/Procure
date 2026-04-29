@@ -6,7 +6,7 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout, QPushButton, QScrollArea, QL
 from PySide6.QtGui import QPixmap
 from PySide6.QtCore import Qt, QSize
 
-from medic.utilities.app_messagebox import AppMessageBox
+from .app_messagebox import AppMessageBox
 
 try:
     from PySide6.QtPdf import QPdfDocument
