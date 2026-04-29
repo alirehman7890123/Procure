@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProcureMedic – Pharmacy Management System</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:   #163B5C;
+      --mid:    #2F5D7C;
+      --dark:   #18374D;
+      --steel:  #5D7D95;
+      --ice:    #EAF3FB;
+      --white:  #FFFFFF;
+      --accent: #3A9AD9;
+      --soft:   #F5F8FB;
+      --text:   #1E2D3A;
+      --muted:  #6B7F8F;
+      --border: #D9E4EC;
+    }
+
+    body {
+      font-family: 'Montserrat', sans-serif;
+      background: #f0f4f8;
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* ─── PAGE WRAPPER ─── */
+    .page {
+      width: 794px;        /* A4 width at 96dpi */
+      min-height: 1122px;
+      margin: 32px auto;
+      background: var(--white);
+      box-shadow: 0 8px 40px rgba(22,59,92,0.18);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    /* ─── HERO HEADER ─── */
+    .hero {
+      background: linear-gradient(135deg, var(--navy) 0%, var(--mid) 60%, #3A9AD9 100%);
+      padding: 52px 56px 44px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -60px; right: -60px;
+      width: 320px; height: 320px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.05);
+    }
+    .hero::after {
+      content: '';
+      position: absolute;
+      bottom: -80px; left: 40%;
+      width: 260px; height: 260px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.04);
+    }
+    .hero-eyebrow {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+    .hero-title {
+      font-size: 38px;
+      font-weight: 800;
+      color: var(--white);
+      line-height: 1.15;
+      margin-bottom: 10px;
+    }
+    .hero-title span {
+      color: #7DD3F8;
+    }
+    .hero-tagline {
+      font-size: 14.5px;
+      font-weight: 500;
+      color: rgba(234,243,251,0.85);
+      max-width: 420px;
+      margin-bottom: 28px;
+    }
+    .hero-badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 100px;
+      padding: 6px 18px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--white);
+      letter-spacing: 0.5px;
+    }
+
+    /* ─── INTRO STRIP ─── */
+    .intro-strip {
+      background: var(--ice);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 56px;
+      font-size: 13px;
+      color: var(--steel);
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .intro-strip strong { color: var(--dark); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+
+    /* ─── BODY CONTENT ─── */
+    .body { padding: 44px 56px 0; }
+
+    /* ─── SECTION TITLE ─── */
+    .section-label {
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    .section-title {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--dark);
+      margin-bottom: 20px;
+    }
+
+    /* ─── FEATURES GRID ─── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-bottom: 40px;
+    }
+    .feature-card {
+      background: var(--soft);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 16px;
+    }
+    .feature-icon {
+      font-size: 22px;
+      margin-bottom: 10px;
+      display: block;
+    }
+    .feature-card h4 {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--dark);
+      margin-bottom: 5px;
+    }
+    .feature-card p {
+      font-size: 11.5px;
+      color: var(--muted);
+      font-weight: 500;
+      line-height: 1.5;
+    }
+
+    /* ─── HIGHLIGHTS ROW ─── */
+    .highlights {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 40px;
+    }
+    .highlight {
+      flex: 1;
+      background: var(--navy);
+      border-radius: 10px;
+      padding: 18px 20px;
+      color: var(--white);
+      text-align: center;
+    }
+    .highlight .num {
+      font-size: 28px;
+      font-weight: 800;
+      color: #7DD3F8;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .highlight .label {
+      font-size: 10.5px;
+      font-weight: 600;
+      color: rgba(234,243,251,0.75);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* ─── DIVIDER ─── */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 0 0 36px;
+    }
+
+    /* ─── PRICING SECTION ─── */
+    .pricing-wrapper {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-bottom: 40px;
+    }
+    .price-card {
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .price-card.featured {
+      border-color: var(--mid);
+      box-shadow: 0 4px 24px rgba(47,93,124,0.15);
+    }
+    .price-header {
+      padding: 18px 22px 14px;
+      background: var(--soft);
+      border-bottom: 1px solid var(--border);
+    }
+    .price-card.featured .price-header {
+      background: linear-gradient(135deg, var(--navy), var(--mid));
+    }
+    .price-card.featured .price-header * { color: var(--white) !important; }
+    .price-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--steel);
+      margin-bottom: 4px;
+    }
+    .price-card.featured .price-label { color: #7DD3F8; }
+    .price-name {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--dark);
+    }
+    .price-amount {
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--dark);
+      line-height: 1;
+      margin: 8px 0 2px;
+    }
+    .price-sub {
+      font-size: 11px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .price-body {
+      padding: 16px 22px 20px;
+    }
+    .price-body ul {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .price-body ul li {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .price-body ul li::before {
+      content: '✓';
+      color: var(--accent);
+      font-weight: 800;
+      flex-shrink: 0;
+      margin-top: 0px;
+    }
+
+    /* ─── ADDONS TABLE ─── */
+    .addons-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 40px;
+      font-size: 12.5px;
+    }
+    .addons-table thead tr {
+      background: var(--navy);
+      color: var(--white);
+    }
+    .addons-table thead th {
+      padding: 10px 16px;
+      text-align: left;
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 0.8px;
+    }
+    .addons-table tbody tr {
+      border-bottom: 1px solid var(--border);
+    }
+    .addons-table tbody tr:nth-child(even) { background: var(--soft); }
+    .addons-table tbody td {
+      padding: 9px 16px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .addons-table tbody td:last-child {
+      font-weight: 700;
+      color: var(--mid);
+    }
+
+    /* ─── WHY US ─── */
+    .why-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-bottom: 40px;
+    }
+    .why-item {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      background: var(--soft);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .why-icon {
+      font-size: 18px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .why-item h5 {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--dark);
+      margin-bottom: 3px;
+    }
+    .why-item p {
+      font-size: 11.5px;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    /* ─── FOOTER STRIP ─── */
+    .footer {
+      background: linear-gradient(90deg, var(--navy) 0%, var(--mid) 100%);
+      padding: 28px 56px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .footer-brand {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--white);
+    }
+    .footer-brand span { color: #7DD3F8; }
+    .footer-tagline {
+      font-size: 11px;
+      color: rgba(234,243,251,0.65);
+      font-weight: 600;
+      margin-top: 2px;
+    }
+    .footer-contact {
+      text-align: right;
+    }
+    .footer-contact p {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: rgba(234,243,251,0.85);
+      margin-bottom: 3px;
+    }
+    .footer-contact p strong {
+      color: var(--white);
+    }
+    .footer-promo-tag {
+      display: inline-block;
+      background: var(--accent);
+      color: var(--white);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      padding: 4px 12px;
+      border-radius: 100px;
+      margin-top: 8px;
+    }
+
+    @media print {
+      body { background: white; }
+      .page { box-shadow: none; margin: 0; border-radius: 0; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ── HERO ── -->
+  <div class="hero">
+    <div class="hero-eyebrow">Pharmacy Management Software</div>
+    <div class="hero-title">Procure<span>Medic</span></div>
+    <div class="hero-tagline">
+      Smart, simple, and reliable pharmacy management — built for how your team actually works.
+    </div>
+    <span class="hero-badge">Promotional Offer &nbsp;|&nbsp; Early Partner Clients</span>
+  </div>
+
+  <!-- ── INTRO STRIP ── -->
+  <div class="intro-strip">
+    <div class="dot"></div>
+    <div>
+      <strong>ProcureMedic</strong> is a complete desktop-based pharmacy management system designed for
+      small to mid-sized pharmacies in Pakistan — built for <strong>speed, accuracy, and daily use</strong>.
+    </div>
+  </div>
+
+  <!-- ── BODY ── -->
+  <div class="body">
+
+    <!-- Features -->
+    <div class="section-label">What You Get</div>
+    <div class="section-title">Everything Your Pharmacy Needs</div>
+    <div class="features-grid">
+      <div class="feature-card">
+        <span class="feature-icon">🧾</span>
+        <h4>Sales & Billing</h4>
+        <p>Fast invoice creation, discounts, tax handling, hold & resume, thermal receipt printing.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">📦</span>
+        <h4>Purchase & GRN</h4>
+        <p>Supplier orders, goods receipt notes, batch and expiry entry, stock auto-update on receive.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🔴</span>
+        <h4>Expiry Tracking</h4>
+        <p>Each batch tracked by expiry date. Near-expiry alerts and batch-level stock control.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">📊</span>
+        <h4>Reports</h4>
+        <p>Daily sales, stock valuation, low stock, customer dues, supplier dues, and expense summaries.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">👥</span>
+        <h4>Customers & Suppliers</h4>
+        <p>Full party management with outstanding balances, credit history, and rep tracking.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🔐</span>
+        <h4>Role-Based Access</h4>
+        <p>Admin, manager, cashier, and inventory roles — each with controlled permissions.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">↩️</span>
+        <h4>Returns Management</h4>
+        <p>Sales returns and purchase returns — stock and ledger updated automatically.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">💰</span>
+        <h4>Expense Tracking</h4>
+        <p>Log daily expenses and view them against income for accurate cash summaries.</p>
+      </div>
+      <div class="feature-card">
+        <span class="feature-icon">🔒</span>
+        <h4>Secure & Offline</h4>
+        <p>Runs on your local machine. No internet required. Your data stays with you.</p>
+      </div>
+    </div>
+
+    <!-- Highlights -->
+    <div class="highlights">
+      <div class="highlight">
+        <div class="num">100%</div>
+        <div class="label">Offline Ready</div>
+      </div>
+      <div class="highlight">
+        <div class="num">Multi</div>
+        <div class="label">User Roles</div>
+      </div>
+      <div class="highlight">
+        <div class="num">Fast</div>
+        <div class="label">Daily Billing</div>
+      </div>
+      <div class="highlight">
+        <div class="num">Batch</div>
+        <div class="label">Expiry Alerts</div>
+      </div>
+    </div>
+
+    <hr class="divider" />
+
+    <!-- Pricing -->
+    <div class="section-label">Pricing</div>
+    <div class="section-title">Promotional Packages</div>
+    <div class="pricing-wrapper">
+      <!-- Starter -->
+      <div class="price-card">
+        <div class="price-header">
+          <div class="price-label">Starter</div>
+          <div class="price-name">Basic Setup</div>
+          <div class="price-amount">PKR 12,000</div>
+          <div class="price-sub">Promotional price · single branch</div>
+        </div>
+        <div class="price-body">
+          <ul>
+            <li>Full software license (1 machine)</li>
+            <li>Up to 2 users</li>
+            <li>All core modules included</li>
+            <li>Remote installation & setup</li>
+            <li>Basic support during setup week</li>
+          </ul>
+        </div>
+      </div>
+      <!-- Featured -->
+      <div class="price-card featured">
+        <div class="price-header">
+          <div class="price-label">Recommended</div>
+          <div class="price-name">Complete Package</div>
+          <div class="price-amount">PKR 20,000</div>
+          <div class="price-sub">Promotional price · single branch</div>
+        </div>
+        <div class="price-body">
+          <ul>
+            <li>Full software license (1 machine)</li>
+            <li>Up to 2 users</li>
+            <li>All core modules included</li>
+            <li>Remote installation & setup</li>
+            <li>1 week training (1 hr/day)</li>
+            <li>Data import up to 1,000 entries</li>
+            <li>Priority support for first month</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add-ons table -->
+    <div class="section-label">Services</div>
+    <div class="section-title">Add-On Services</div>
+    <table class="addons-table">
+      <thead>
+        <tr>
+          <th>Service</th>
+          <th>Details</th>
+          <th>Price</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Data Import</td>
+          <td>Products, customers, or suppliers from Excel / paper</td>
+          <td>PKR 8,000 / 1,000 entries</td>
+        </tr>
+        <tr>
+          <td>Staff Training</td>
+          <td>1 week · 1 hour per day · remote or on-site</td>
+          <td>PKR 2,000</td>
+        </tr>
+        <tr>
+          <td>Extra Machine</td>
+          <td>Additional license activation for same branch</td>
+          <td>PKR 8,000 / year</td>
+        </tr>
+        <tr>
+          <td>Extra User</td>
+          <td>Add user account beyond base plan</td>
+          <td>PKR 6,000 / year</td>
+        </tr>
+        <tr>
+          <td>On-Site Visit</td>
+          <td>Within city</td>
+          <td>PKR 5,000 per visit</td>
+        </tr>
+        <tr>
+          <td>Annual Renewal</td>
+          <td>Software updates + continued support from Year 2</td>
+          <td>PKR 30,000 / year</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <hr class="divider" />
+
+    <!-- Why us -->
+    <div class="section-label">Why Procure Medic</div>
+    <div class="section-title">Built Different</div>
+    <div class="why-grid">
+      <div class="why-item">
+        <div class="why-icon">🤝</div>
+        <div>
+          <h5>Personal Onboarding</h5>
+          <p>We work with you step by step until your team is confident and running independently.</p>
+        </div>
+      </div>
+      <div class="why-item">
+        <div class="why-icon">🏥</div>
+        <div>
+          <h5>Pharmacy-First Design</h5>
+          <p>Expiry tracking, batch management, and supplier flow designed specifically for medical retail.</p>
+        </div>
+      </div>
+      <div class="why-item">
+        <div class="why-icon">🛡️</div>
+        <div>
+          <h5>Your Data, Your Machine</h5>
+          <p>Fully offline. No cloud subscription. No risk of data loss due to internet issues.</p>
+        </div>
+      </div>
+      <div class="why-item">
+        <div class="why-icon">📈</div>
+        <div>
+          <h5>Grows With You</h5>
+          <p>Start simple. Add users, machines, or a mobile companion app as your business grows.</p>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /body -->
+
+  <!-- ── FOOTER ── -->
+  <div class="footer">
+    <div>
+      <div class="footer-brand">Procure<span>Medic</span></div>
+      <div class="footer-tagline">Pharmacy Management · Built for Pakistan</div>
+      <div class="footer-promo-tag">Early Partner Offer</div>
+    </div>
+    <div class="footer-contact">
+      <p><strong>[Your Name]</strong></p>
+      <p>[Phone Number]</p>
+      <p>[Email Address]</p>
+      <p>[City, Pakistan]</p>
+    </div>
+  </div>
+
+</div><!-- /page -->
+</body>
+</html>

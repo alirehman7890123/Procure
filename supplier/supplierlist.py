@@ -1,10 +1,11 @@
 from PySide6.QtWidgets import QWidget, QLineEdit,QFrame, QVBoxLayout, QDialog, QHBoxLayout, QLabel, QPushButton, QHeaderView, QSizePolicy, QVBoxLayout, QTableWidget, QTableWidgetItem
 from PySide6.QtCore import QFile, Qt, Signal
-from PySide6.QtSql import QSqlQuery
 from functools import partial
 
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.table_helpers import centered_cell_widget, style_table_action_button
+from medic.utilities.app_messagebox import AppMessageBox
+from services.supplier_service import fetch_supplier_list_rows
 
 
 
@@ -158,48 +159,33 @@ class SupplierListWidget(QWidget):
 
 
     def load_suppliers_into_table(self):
-        
-        
-        query = QSqlQuery()
-        query.exec("SELECT id, name, contact, email, website, status FROM supplier")
+        try:
+            rows = fetch_supplier_list_rows()
+        except Exception as exc:
+            AppMessageBox.critical(self, "Supplier List", str(exc))
+            return
 
-        self.table.setRowCount(0)  # Clear existing rows
+        self.table.setRowCount(0)
 
-        row = 0
-        
-        while query.next():
-            
-            self.table.insertRow(row)
-            
-            row_no = row + 1
-            suppid = int(query.value(0))
-            name = query.value(1)
-            contact = query.value(2)
-            email = query.value(3)
-            website = query.value(4)
-            status = query.value(5)
+        for row_index, supplier in enumerate(rows):
+            self.table.insertRow(row_index)
 
-            row_no_item = QTableWidgetItem(str(row_no))
-            name = QTableWidgetItem(name)
-            contact = QTableWidgetItem(contact)
-            email = QTableWidgetItem(email)
-            website = QTableWidgetItem(website)
-            status = QTableWidgetItem(status)
+            values = [
+                QTableWidgetItem(str(row_index + 1)),
+                QTableWidgetItem(supplier["name"]),
+                QTableWidgetItem(supplier["contact"]),
+                QTableWidgetItem(supplier["email"]),
+                QTableWidgetItem(supplier["website"]),
+                QTableWidgetItem(supplier["status"]),
+            ]
 
-            self.table.setItem(row, 0, row_no_item)
-            self.table.setItem(row, 1, name)
-            self.table.setItem(row, 2, contact)
-            self.table.setItem(row, 3, email)
-            self.table.setItem(row, 4, website)
-            self.table.setItem(row, 5, status)
-            
+            for col_index, item in enumerate(values):
+                self.table.setItem(row_index, col_index, item)
+
             detail = style_table_action_button(QPushButton('Details'))
             detail.setCursor(Qt.PointingHandCursor)
-            self.table.setCellWidget(row, 6, centered_cell_widget(detail))
-            
-            detail.clicked.connect(partial(self.detailpagesignal.emit, suppid))
-            
-            row += 1
+            self.table.setCellWidget(row_index, 6, centered_cell_widget(detail))
+            detail.clicked.connect(partial(self.detailpagesignal.emit, supplier["id"]))
         
 
 

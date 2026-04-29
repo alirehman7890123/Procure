@@ -1,10 +1,18 @@
 from PySide6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QLineEdit, QLabel, QFrame, QSizePolicy, QMessageBox, QHBoxLayout, QComboBox, QDialog
 from PySide6.QtCore import QSize, Qt, QFile, QEvent
-from PySide6.QtSql import QSqlDatabase, QSqlQuery
+from PySide6.QtSql import QSqlDatabase
 import traceback
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
+from services.customer_service import (
+    create_customer,
+    create_discount_group,
+    create_tax_group,
+    fetch_discount_group_options,
+    fetch_tax_group_options,
+    validate_customer_payload,
+)
 
 
 
@@ -128,97 +136,6 @@ class AddCustomerWidget(QWidget):
 
 
 
-    def insert_customer(self, name, contact, email, payable, receiveable, credit_limit):
-        
-        valid, message, cleaned = self.validate_customer(name, contact, email, payable, receiveable, credit_limit)
-
-        if valid:
-            
-            print(f"[VALIDATION SUCCESS] {message}")
-            
-            name, contact, email, payable, receiveable, credit_limit = cleaned
-
-            try:
-                query = QSqlQuery()
-                query.prepare("""
-                    INSERT INTO customer (name, contact, email, payable, receiveable, credit_limit, discount_group_id, tax_group_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """)
-                query.addBindValue(name)
-                query.addBindValue(contact if contact else None)
-                query.addBindValue(email)
-                query.addBindValue(payable)
-                query.addBindValue(receiveable)
-                query.addBindValue(credit_limit)
-                query.addBindValue(self.discount_group_combo.currentData())
-                query.addBindValue(self.tax_group_combo.currentData())
-
-                if not query.exec():
-                    error_msg = query.lastError().text()
-                    print(f"[DB ERROR] Failed to insert customer.\n"
-                        f"Table: customer\n"
-                        f"Values: name={name}, contact={contact}, email={email}, "
-                        f"payable={payable}, receiveable={receiveable}, credit_limit={credit_limit}\n"
-                        f"Reason: {error_msg}")
-                    return False
-
-                # return Id if insertion is successful
-                return query.lastInsertId()
-            
-
-            except Exception as e:
-                print(f"[PYTHON ERROR] Exception occurred while inserting customer.\n"
-                    f"Function: insert_customer\n"
-                    f"Values: name={name}, contact={contact}, email={email}, "
-                    f"payable={payable}, receiveable={receiveable}, credit_limit={credit_limit}\n"
-                    f"Exception Type: {type(e).__name__}\n"
-                    f"Message: {e}")
-                return False
-            
-        
-        else:
-            
-            print(f"[VALIDATION ERROR] {message}")
-            AppMessageBox.warning(self, "Validation Error", message)
-            return False
-
-
-    def validate_customer(self, name, contact, email, payable, receiveable, credit_limit):
-        
-        name = name.strip()
-        contact = contact.strip()
-        email = email.strip()
-        payable = payable.strip()
-        receiveable = receiveable.strip()
-        credit_limit = credit_limit.strip()
-        
-        if not name or not name.strip():
-            return False, "Customer name cannot be empty.", ""
-
-        if any(char.isdigit() for char in name):
-            return False, "Customer name cannot contain numbers.", ""
-
-        if contact and not contact.isdigit():
-            return False, "Contact must contain only digits.", ""
-
-        if email and ("@" not in email or "." not in email):
-            return False, "Invalid email format.", ""
-
-        try:
-            payable_val = float(payable) if payable else 0.0
-            receiveable_val = float(receiveable) if receiveable else 0.0
-            credit_limit_val = float(credit_limit) if credit_limit else 0.0
-        except ValueError:
-            return False, "Payable, Receivable, and Credit Limit must be numbers.", ""
-
-        if payable_val < 0 or receiveable_val < 0 or credit_limit_val < 0:
-            return False, "Payable, Receivable, and Credit Limit cannot be negative.", ""
-
-        return True, "Customer details are valid.", (name, contact, email, payable_val, receiveable_val, credit_limit_val)
-    
-    
-
-
     def horizontal_line(self):
         
         line = QFrame()
@@ -271,18 +188,8 @@ class AddCustomerWidget(QWidget):
         self.discount_group_combo.blockSignals(True)
         self.discount_group_combo.clear()
         self.discount_group_combo.addItem("None", None)
-        query = QSqlQuery()
-        if query.exec("SELECT id, name, discount_percent, COALESCE(fixed_amount, 0), COALESCE(apply_on_sale, 1) FROM discount_group WHERE status = 'active' ORDER BY name ASC"):
-            while query.next():
-                group_id = query.value(0)
-                name = str(query.value(1) or "")
-                percent = float(query.value(2) or 0.0)
-                fixed_amount = float(query.value(3) or 0.0)
-                apply_on_sale = bool(int(query.value(4) or 0))
-                self.discount_group_combo.addItem(
-                    f"{name} ({percent:.2f}% + {fixed_amount:.2f}, {'Sale On' if apply_on_sale else 'Sale Off'})",
-                    group_id,
-                )
+        for option in fetch_discount_group_options():
+            self.discount_group_combo.addItem(option["label"], option["id"])
         if selected_id is not None:
             index = self.discount_group_combo.findData(selected_id)
             if index >= 0:
@@ -293,18 +200,8 @@ class AddCustomerWidget(QWidget):
         self.tax_group_combo.blockSignals(True)
         self.tax_group_combo.clear()
         self.tax_group_combo.addItem("None", None)
-        query = QSqlQuery()
-        if query.exec("SELECT id, name, tax_percent, COALESCE(fixed_amount, 0), COALESCE(apply_on_sale, 1) FROM tax_group WHERE status = 'active' ORDER BY name ASC"):
-            while query.next():
-                group_id = query.value(0)
-                name = str(query.value(1) or "")
-                percent = float(query.value(2) or 0.0)
-                fixed_amount = float(query.value(3) or 0.0)
-                apply_on_sale = bool(int(query.value(4) or 0))
-                self.tax_group_combo.addItem(
-                    f"{name} ({percent:.2f}% + {fixed_amount:.2f}, {'Sale On' if apply_on_sale else 'Sale Off'})",
-                    group_id,
-                )
+        for option in fetch_tax_group_options():
+            self.tax_group_combo.addItem(option["label"], option["id"])
         if selected_id is not None:
             index = self.tax_group_combo.findData(selected_id)
             if index >= 0:
@@ -357,31 +254,17 @@ class AddCustomerWidget(QWidget):
         layout.addLayout(button_row)
 
         def save_group():
-            group_name = name_edit.text().strip()
-            if not group_name:
-                AppMessageBox.warning(dialog, "Validation Error", "Group name is required.")
-                return
             try:
-                percent_value = float(percent_edit.text() or 0.0)
-            except ValueError:
-                AppMessageBox.warning(dialog, "Validation Error", "Percent must be a valid number.")
+                if table_name == "discount_group":
+                    new_id = create_discount_group(name_edit.text(), percent_edit.text())
+                else:
+                    new_id = create_tax_group(name_edit.text(), percent_edit.text())
+            except ValueError as exc:
+                AppMessageBox.warning(dialog, "Validation Error", str(exc))
                 return
-            if percent_value < 0:
-                AppMessageBox.warning(dialog, "Validation Error", "Percent cannot be negative.")
+            except Exception as exc:
+                AppMessageBox.critical(dialog, "Database Error", str(exc))
                 return
-
-            query = QSqlQuery()
-            query.prepare(f"""
-                INSERT INTO {table_name} (name, {value_column}, status)
-                VALUES (?, ?, 'active')
-            """)
-            query.addBindValue(group_name)
-            query.addBindValue(percent_value)
-            if not query.exec():
-                AppMessageBox.critical(dialog, "Database Error", query.lastError().text())
-                return
-
-            new_id = query.lastInsertId()
             refresh(int(new_id))
             dialog.accept()
 
@@ -410,16 +293,28 @@ class AddCustomerWidget(QWidget):
         db.transaction()
         
         try:
-        
-            customer_id = self.insert_customer(
-                self.editname.text(),
-                self.editcontact.text(),
-                self.editemail.text(),
-                self.editpayable.text(),
-                self.editreceiveable.text(),
-                self.editcreditlimit.text()
+            validate_customer_payload(
+                name=self.editname.text(),
+                contact=self.editcontact.text(),
+                email=self.editemail.text(),
+                payable=self.editpayable.text(),
+                receiveable=self.editreceiveable.text(),
+                credit_limit=self.editcreditlimit.text(),
             )
-            
+            customer_id = create_customer(
+                name=self.editname.text(),
+                contact=self.editcontact.text(),
+                email=self.editemail.text(),
+                payable=self.editpayable.text(),
+                receiveable=self.editreceiveable.text(),
+                credit_limit=self.editcreditlimit.text(),
+                discount_group_id=self.discount_group_combo.currentData(),
+                tax_group_id=self.tax_group_combo.currentData(),
+            )
+        except ValueError as e:
+            db.rollback()
+            AppMessageBox.warning(self, "Validation Error", str(e))
+            return
         
         except Exception as e:
             db.rollback()

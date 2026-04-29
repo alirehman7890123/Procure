@@ -1,3 +1,8 @@
+import csv
+import sys
+from pathlib import Path
+
+
 def _new_query():
     from PySide6.QtSql import QSqlQuery
 
@@ -142,6 +147,63 @@ def fetch_expired_product_rows():
             }
         )
     return rows
+
+
+def _resolve_catalog_path(relative_path):
+    relative = Path(relative_path)
+    candidates = []
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / relative)
+
+    module_root = Path(__file__).resolve().parent.parent
+    candidates.append(module_root / relative)
+    candidates.append(Path.cwd() / relative)
+
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+
+    return str(candidates[0])
+
+
+def fetch_master_catalog_rows(*, relative_path="master_products.csv", manufacturer_lookup=None):
+    if manufacturer_lookup is None:
+        from services.product_admin_service import fetch_manufacturer_lookup
+
+        manufacturer_lookup = fetch_manufacturer_lookup()
+
+    csv_path = _resolve_catalog_path(relative_path)
+    rows = []
+    with open(csv_path, "r", newline="", encoding="utf-8") as handle:
+        reader = csv.reader(handle)
+        next(reader, None)
+
+        for row in reader:
+            if not row or len(row) < 8:
+                continue
+
+            manufacturer_id = row[7].strip()
+            rows.append(
+                {
+                    "reg_no": row[0].strip(),
+                    "name": row[1].strip(),
+                    "generic": row[2].strip(),
+                    "form": row[3].strip(),
+                    "strength": row[4].strip(),
+                    "packing": row[5].strip(),
+                    "size": row[6].strip(),
+                    "manufacturer_id": manufacturer_id,
+                    "manufacturer_name": manufacturer_lookup.get(manufacturer_id, ""),
+                }
+            )
+
+    return {
+        "csv_path": csv_path,
+        "rows": rows,
+        "manufacturer_count": len(manufacturer_lookup),
+    }
 
 
 def fetch_product_by_barcode(code_text, *, stock_filter="All"):

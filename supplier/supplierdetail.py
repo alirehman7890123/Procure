@@ -4,9 +4,10 @@ from PySide6.QtWidgets import (
     QLineEdit, QSizePolicy, QApplication, QMessageBox
 )
 from PySide6.QtCore import QFile, Qt, QDate, QDateTime
-from PySide6.QtSql import QSqlQuery
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.permissions import Permissions
+from medic.utilities.app_messagebox import AppMessageBox
+from services.supplier_service import fetch_supplier_detail, update_supplier
 
 
 class SupplierDetailWidget(QWidget):
@@ -131,9 +132,8 @@ class SupplierDetailWidget(QWidget):
     # === Toggle Edit Mode ===
     @Permissions.require_permission('supplier.update')
     def toggle_edit_mode(self):
-        
-        self.edit_mode = not self.edit_mode
-        if self.edit_mode:
+        if not self.edit_mode:
+            self.edit_mode = True
             self.edit_btn.setText("Save")
             # Switch to QLineEdit
             for lbl, edit in self.field_pairs:
@@ -142,14 +142,15 @@ class SupplierDetailWidget(QWidget):
                     lbl.hide()
                     edit.show()
         else:
-            self.save_changes()
-            self.edit_btn.setText("Edit")
-            # Switch back to QLabel
-            for lbl, edit in self.field_pairs:
-                if edit:
-                    lbl.setText(edit.text())
-                    edit.hide()
-                    lbl.show()
+            if self.save_changes():
+                self.edit_mode = False
+                self.edit_btn.setText("Edit")
+                # Switch back to QLabel
+                for lbl, edit in self.field_pairs:
+                    if edit:
+                        lbl.setText(edit.text())
+                        edit.hide()
+                        lbl.show()
 
 
     def hideEvent(self, event):
@@ -174,35 +175,29 @@ class SupplierDetailWidget(QWidget):
         
         if not self.supplier_id:
             print("No supplier loaded.")
-            return
+            return False
 
-        query = QSqlQuery()
-        query.prepare("""
-            UPDATE supplier
-            SET name=?, contact=?, email=?, website=?, address=?, status=?, reg_no=?
-            WHERE id=?
-        """)
-        
-        registeration = self.regedit.text()
-
-        registeration = registeration if registeration.strip() else None
-        
-        
-        
-        
-        query.addBindValue(self.nameedit.text())
-        query.addBindValue(self.contactedit.text())
-        query.addBindValue(self.emailedit.text())
-        query.addBindValue(self.websiteedit.text())
-        query.addBindValue(self.addressedit.text())
-        query.addBindValue(self.statusedit.text())
-        query.addBindValue(registeration)
-        query.addBindValue(self.supplier_id)
-
-        if not query.exec():
-            print("Error updating supplier:", query.lastError().text())
+        try:
+            update_supplier(
+                self.supplier_id,
+                name=self.nameedit.text(),
+                contact=self.contactedit.text(),
+                email=self.emailedit.text(),
+                website=self.websiteedit.text(),
+                address=self.addressedit.text(),
+                status=self.statusedit.text(),
+                registeration=self.regedit.text(),
+            )
+        except ValueError as exc:
+            AppMessageBox.warning(self, "Validation Error", str(exc))
+            return False
+        except Exception as exc:
+            print("Error updating supplier:", str(exc))
+            AppMessageBox.critical(self, "Database Error", str(exc))
+            return False
         else:
             print("Supplier updated successfully.")
+            return True
         
         
             
@@ -210,35 +205,16 @@ class SupplierDetailWidget(QWidget):
     # === Load Data ===
     def load_supplier_data(self, id):
         self.supplier_id = id
-        query = QSqlQuery()
-        query.prepare(
-            """
-            SELECT
-                name,
-                contact,
-                email,
-                website,
-                address,
-                status,
-                creation_date,
-                reg_no,
-                payable,
-                receiveable
-            FROM supplier
-            WHERE id = ?
-            """
-        )
-        query.addBindValue(id)
+        supplier = fetch_supplier_detail(id)
+        if supplier:
+            self.namedata.setText(supplier["name"])
+            self.contactdata.setText(supplier["contact"])
+            self.emaildata.setText(supplier["email"])
+            self.websitedata.setText(supplier["website"])
+            self.addressdata.setText(supplier["address"])
+            self.statusdata.setText(supplier["status"])
 
-        if query.exec() and query.next():
-            self.namedata.setText(str(query.value(0) or "-"))
-            self.contactdata.setText(str(query.value(1) or "-"))
-            self.emaildata.setText(str(query.value(2) or "-"))
-            self.websitedata.setText(str(query.value(3) or "-"))
-            self.addressdata.setText(str(query.value(4) or "-"))
-            self.statusdata.setText(str(query.value(5) or "-"))
-
-            joining_date = query.value(6)
+            joining_date = supplier["creation_date"]
             if isinstance(joining_date, QDateTime):
                 joining_date = joining_date.date().toString("dd-MM-yyyy")
             elif isinstance(joining_date, QDate):
@@ -247,9 +223,9 @@ class SupplierDetailWidget(QWidget):
                 joining_date = str(joining_date)
 
             self.joiningdata.setText(joining_date)
-            self.regdata.setText(str(query.value(7) or "-"))
-            self.payabledata.setText(f"{float(query.value(8) or 0):.2f}")
-            self.receiveabledata.setText(f"{float(query.value(9) or 0):.2f}")
+            self.regdata.setText(supplier["reg_no"])
+            self.payabledata.setText(f"{supplier['payable']:.2f}")
+            self.receiveabledata.setText(f"{supplier['receiveable']:.2f}")
             
             
             
@@ -279,6 +255,5 @@ class MyTable(QTableWidget):
             
             
             
-
 
 

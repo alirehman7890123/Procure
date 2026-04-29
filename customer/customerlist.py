@@ -1,9 +1,10 @@
 from PySide6.QtWidgets import QWidget, QLineEdit, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton, QHeaderView, QSizePolicy, QVBoxLayout, QTableWidget, QTableWidgetItem
 from PySide6.QtCore import QFile, Qt, Signal
-from PySide6.QtSql import QSqlQuery
 from functools import partial
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.table_helpers import centered_cell_widget, style_table_action_button
+from medic.utilities.app_messagebox import AppMessageBox
+from services.customer_service import fetch_customer_list_rows
 
 
 
@@ -115,53 +116,34 @@ class CustomerListWidget(QWidget):
 
 
     def load_customers_into_table(self):
-        
-        
-        query = QSqlQuery()
-        query.exec("SELECT id, name, contact, email, status, payable, receiveable, credit_limit FROM customer")
+        try:
+            rows = fetch_customer_list_rows()
+        except Exception as exc:
+            AppMessageBox.critical(self, "Customer List", str(exc))
+            return
 
-        self.table.setRowCount(0)  # Clear existing rows
+        self.table.setRowCount(0)
 
-        row = 0
-        
-        while query.next():
-            
-            self.table.insertRow(row)
-            
-            row_no = int(row + 1)
-            cust_id = int(query.value(0))
-            name = query.value(1)
-            contact = query.value(2)
-            email = query.value(3)
-            status = query.value(4)
-            payable = query.value(5)
-            receiveable = query.value(6)
-            credit_limit = query.value(7)
-            
-            
-            row_no_item = QTableWidgetItem(str(row_no))
-            name = QTableWidgetItem(name)
-            contact = QTableWidgetItem(contact)
-            email = QTableWidgetItem(email)
-            status = QTableWidgetItem(status)
-            payable = QTableWidgetItem(str(payable))
-            receiveable = QTableWidgetItem(str(receiveable))
-            credit_limit = QTableWidgetItem(str(credit_limit))
-            
-            self.table.setItem(row, 0, row_no_item)
-            self.table.setItem(row, 1, name)
-            self.table.setItem(row, 2, contact)
-            self.table.setItem(row, 3, email)
-            self.table.setItem(row, 4, status)
-            self.table.setItem(row, 5, payable)
-            self.table.setItem(row, 6, receiveable)
-            self.table.setItem(row, 7, credit_limit)
+        for row_index, customer in enumerate(rows):
+            self.table.insertRow(row_index)
+
+            values = [
+                QTableWidgetItem(str(row_index + 1)),
+                QTableWidgetItem(customer["name"]),
+                QTableWidgetItem(customer["contact"]),
+                QTableWidgetItem(customer["email"]),
+                QTableWidgetItem(customer["status"]),
+                QTableWidgetItem(f"{customer['payable']:.2f}"),
+                QTableWidgetItem(f"{customer['receiveable']:.2f}"),
+                QTableWidgetItem(f"{customer['credit_limit']:.2f}"),
+            ]
+
+            for col_index, item in enumerate(values):
+                self.table.setItem(row_index, col_index, item)
 
             detail = style_table_action_button(QPushButton('Details'))
-            self.table.setCellWidget(row, 8, centered_cell_widget(detail))
-            detail.clicked.connect(partial(self.detailpagesignal.emit, cust_id))
-            
-            row += 1
+            self.table.setCellWidget(row_index, 8, centered_cell_widget(detail))
+            detail.clicked.connect(partial(self.detailpagesignal.emit, customer["id"]))
         
 
     

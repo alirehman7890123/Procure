@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QFrame, QLabel, QVBoxLayout, QTableWidget, QTableWidgetItem, QSpacerItem, QSizePolicy
 from PySide6.QtCore import QFile, Qt, QDate, QDateTime
-from PySide6.QtSql import  QSqlQuery
 from medic.utilities.stylus import load_stylesheets
+from services.employee_service import fetch_employee_detail
 
 
 
@@ -93,32 +93,16 @@ class EmployeeDetailWidget(QWidget):
     def load_employee_data(self, id):
         
         print("Loading purchase ID:", id)
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                name,
-                contact,
-                email,
-                address,
-                badge_no,
-                role,
-                status,
-                joining_date
-            FROM employee
-            WHERE id = ?
-        """)
-        query.addBindValue(id)
-        
-        if query.exec() and query.next():
-            
-            name = query.value(0)
-            contact = query.value(1)
-            email = query.value(2)
-            address = query.value(3)
-            badge = query.value(4)
-            role = query.value(5)
-            status = query.value(6)
-            joining_date = query.value(7)
+        employee = fetch_employee_detail(id)
+        if employee:
+            name = employee["name"]
+            contact = employee["contact"]
+            email = employee["email"]
+            address = employee["address"]
+            badge = employee["badge"]
+            role = employee["role"]
+            status = employee["status"]
+            joining_date = employee["joined_on"]
             
             if isinstance(joining_date, QDateTime):
                 joining_date = joining_date.date().toString("dd-MM-yyyy")
@@ -142,6 +126,5 @@ class EmployeeDetailWidget(QWidget):
             
             
             
-
 
 

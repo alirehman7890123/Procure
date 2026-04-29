@@ -324,6 +324,337 @@ def fetch_next_purchase_order_number():
     return f"PO-{next_no}"
 
 
+def fetch_purchase_order_list_rows(*, date_from, date_to, search_text=""):
+    normalized_search = str(search_text or "").strip()
+    query = _new_query()
+
+    sql = """
+        SELECT
+            po.id,
+            po.po_number,
+            COALESCE(s.name, '') AS supplier_name,
+            po.po_date,
+            po.expected_delivery_date,
+            po.status,
+            COALESCE((SELECT SUM(qty_ordered) FROM purchase_order_line WHERE po_id = po.id), 0) AS ordered_qty,
+            COALESCE((
+                SELECT SUM(grl.qty_received)
+                FROM goods_receipt_line grl
+                JOIN goods_receipt gr ON gr.id = grl.grn_id
+                JOIN purchase_order_line pol ON pol.id = grl.po_line_id
+                WHERE gr.po_id = po.id
+            ), 0) AS received_qty,
+            COALESCE(po.total_value, 0)
+        FROM purchase_order po
+        JOIN supplier s ON po.supplier = s.id
+        WHERE po.po_date BETWEEN ? AND ?
+    """
+    params = [date_from, date_to]
+
+    if normalized_search:
+        sql += " AND (po.po_number LIKE ? OR s.name LIKE ?)"
+        pattern = f"%{normalized_search}%"
+        params.extend([pattern, pattern])
+
+    sql += " ORDER BY po.po_date DESC"
+    query.prepare(sql)
+    for param in params:
+        query.addBindValue(param)
+
+    if not query.exec():
+        raise Exception(f"Failed to load purchase orders: {query.lastError().text()}")
+
+    rows = []
+    while query.next():
+        ordered_qty = float(query.value(6) or 0.0)
+        received_qty = float(query.value(7) or 0.0)
+        rows.append(
+            {
+                "po_id": int(query.value(0) or 0),
+                "po_number": str(query.value(1) or ""),
+                "supplier_name": str(query.value(2) or ""),
+                "po_date": query.value(3),
+                "expected_delivery_date": query.value(4),
+                "status": str(query.value(5) or ""),
+                "ordered_qty": ordered_qty,
+                "received_qty": received_qty,
+                "remaining_qty": max(ordered_qty - received_qty, 0.0),
+                "total_value": float(query.value(8) or 0.0),
+            }
+        )
+    return rows
+
+
+def fetch_purchase_order_detail(po_id):
+    query = _new_query()
+    query.prepare(
+        """
+        SELECT
+            po.id,
+            po.po_number,
+            COALESCE(s.name, '') AS supplier_name,
+            po.po_date,
+            po.expected_delivery_date,
+            po.status,
+            COALESCE(po.total_value, 0),
+            COALESCE(po.notes, '')
+        FROM purchase_order po
+        JOIN supplier s ON po.supplier = s.id
+        WHERE po.id = ?
+        LIMIT 1
+        """
+    )
+    query.addBindValue(int(po_id))
+
+    if not query.exec():
+        raise Exception(f"Failed to load PO: {query.lastError().text()}")
+    if not query.next():
+        return None
+
+    return {
+        "po_id": int(query.value(0) or 0),
+        "po_number": str(query.value(1) or ""),
+        "supplier_name": str(query.value(2) or ""),
+        "po_date": query.value(3),
+        "expected_delivery_date": query.value(4),
+        "status": str(query.value(5) or ""),
+        "total_value": float(query.value(6) or 0.0),
+        "notes": str(query.value(7) or ""),
+    }
+
+
+def fetch_purchase_order_line_rows(po_id):
+    query = _new_query()
+    query.prepare(
+        """
+        SELECT
+            COALESCE(p.display_name, '-') AS product_name,
+            COALESCE(pol.qty_ordered, 0),
+            COALESCE(SUM(grl.qty_received), 0) AS qty_received,
+            COALESCE(pol.unit_price, 0),
+            COALESCE(pol.total_price, 0)
+        FROM purchase_order_line pol
+        JOIN product p ON pol.product = p.id
+        LEFT JOIN goods_receipt_line grl ON grl.po_line_id = pol.id
+        WHERE pol.po_id = ?
+        GROUP BY pol.id, p.display_name, pol.qty_ordered, pol.unit_price, pol.total_price
+        ORDER BY pol.id ASC
+        """
+    )
+    query.addBindValue(int(po_id))
+
+    if not query.exec():
+        raise Exception(f"Failed to load PO line items: {query.lastError().text()}")
+
+    rows = []
+    while query.next():
+        qty_ordered = float(query.value(1) or 0.0)
+        qty_received = float(query.value(2) or 0.0)
+        rows.append(
+            {
+                "product_name": str(query.value(0) or "-"),
+                "qty_ordered": qty_ordered,
+                "qty_received": qty_received,
+                "qty_remaining": max(qty_ordered - qty_received, 0.0),
+                "unit_price": float(query.value(3) or 0.0),
+                "total_price": float(query.value(4) or 0.0),
+            }
+        )
+    return rows
+
+
+def fetch_purchase_order_totals(po_id):
+    query = _new_query()
+    query.prepare(
+        """
+        SELECT
+            COALESCE(SUM(pol.qty_ordered), 0),
+            COALESCE(SUM(grl.qty_received), 0)
+        FROM purchase_order_line pol
+        LEFT JOIN goods_receipt_line grl ON grl.po_line_id = pol.id
+        WHERE pol.po_id = ?
+        """
+    )
+    query.addBindValue(int(po_id))
+
+    if not query.exec():
+        raise Exception(f"Failed to load PO totals: {query.lastError().text()}")
+    if not query.next():
+        return {"ordered_total": 0.0, "received_total": 0.0, "remaining_total": 0.0}
+
+    ordered_total = float(query.value(0) or 0.0)
+    received_total = float(query.value(1) or 0.0)
+    return {
+        "ordered_total": ordered_total,
+        "received_total": received_total,
+        "remaining_total": max(ordered_total - received_total, 0.0),
+    }
+
+
+def fetch_purchase_order_grn_rows(po_id):
+    query = _new_query()
+    query.prepare(
+        """
+        SELECT
+            gr.id,
+            gr.grn_number,
+            gr.grn_date,
+            gr.status,
+            COALESCE(gr.total_value, 0),
+            COALESCE((SELECT MAX(p.id) FROM purchase p WHERE p.sellerinvoice = gr.grn_number), '') AS bill_id
+        FROM goods_receipt gr
+        WHERE gr.po_id = ?
+        ORDER BY gr.id DESC
+        """
+    )
+    query.addBindValue(int(po_id))
+
+    if not query.exec():
+        raise Exception(f"Failed to load PO GRN history: {query.lastError().text()}")
+
+    rows = []
+    while query.next():
+        rows.append(
+            {
+                "grn_id": int(query.value(0) or 0),
+                "grn_number": str(query.value(1) or ""),
+                "grn_date": str(query.value(2) or ""),
+                "status": str(query.value(3) or ""),
+                "total_value": float(query.value(4) or 0.0),
+                "bill_id": str(query.value(5) or ""),
+            }
+        )
+    return rows
+
+
+def fetch_purchase_order_print_payload(po_id):
+    business_query = _new_query()
+    business_query.prepare(
+        """
+        SELECT businessname, address, contact
+        FROM business
+        WHERE id = 1
+        LIMIT 1
+        """
+    )
+    business_name = "Business"
+    business_address = "-"
+    business_contact = "-"
+    if business_query.exec() and business_query.next():
+        business_name = str(business_query.value(0) or business_name)
+        business_address = str(business_query.value(1) or business_address)
+        business_contact = str(business_query.value(2) or business_contact)
+
+    header = fetch_purchase_order_detail(po_id)
+    if header is None:
+        raise Exception("Purchase order not found.")
+
+    line_query = _new_query()
+    line_query.prepare(
+        """
+        SELECT
+            COALESCE(p.display_name, ''),
+            COALESCE(pol.qty_ordered, 0),
+            COALESCE(pol.unit_price, 0),
+            COALESCE(pol.total_price, 0)
+        FROM purchase_order_line pol
+        JOIN product p ON p.id = pol.product
+        WHERE pol.po_id = ?
+        ORDER BY pol.id ASC
+        """
+    )
+    line_query.addBindValue(int(po_id))
+    if not line_query.exec():
+        raise Exception(f"Failed to load PO line items: {line_query.lastError().text()}")
+
+    items = []
+    while line_query.next():
+        items.append(
+            (
+                str(line_query.value(0) or ""),
+                float(line_query.value(1) or 0.0),
+                float(line_query.value(2) or 0.0),
+                float(line_query.value(3) or 0.0),
+            )
+        )
+
+    return {
+        "business_name": business_name,
+        "business_address": business_address,
+        "business_contact": business_contact,
+        "po_number": header["po_number"],
+        "po_date": str(header["po_date"] or ""),
+        "expected_delivery": str(header["expected_delivery_date"] or ""),
+        "total_value": float(header["total_value"] or 0.0),
+        "notes": str(header["notes"] or "").strip(),
+        "supplier_name": str(header["supplier_name"] or "Unknown Supplier"),
+        "items": items,
+    }
+
+
+def close_purchase_order(po_id):
+    query = _new_query()
+    query.prepare("UPDATE purchase_order SET status = ? WHERE id = ?")
+    query.addBindValue("closed")
+    query.addBindValue(int(po_id))
+
+    if not query.exec():
+        raise Exception(f"Failed to close PO: {query.lastError().text()}")
+
+    return True
+
+
+def fetch_supplier_option_rows():
+    query = _new_query()
+    if not query.exec("SELECT id, COALESCE(name, '') FROM supplier ORDER BY name ASC"):
+        raise Exception(f"Error loading suppliers: {query.lastError().text()}")
+
+    rows = []
+    while query.next():
+        rows.append(
+            {
+                "supplier_id": int(query.value(0) or 0),
+                "supplier_name": str(query.value(1) or ""),
+            }
+        )
+    return rows
+
+
+def create_supplier_option(*, name, contact=""):
+    normalized_name = str(name or "").strip()
+    normalized_contact = str(contact or "").strip()
+    if not normalized_name:
+        raise ValueError("Supplier name is required.")
+
+    query = _new_query()
+    query.prepare(
+        """
+        INSERT INTO supplier (
+            name,
+            contact
+        )
+        VALUES (?, ?)
+        """
+    )
+    query.addBindValue(normalized_name)
+    query.addBindValue(normalized_contact or None)
+
+    if not query.exec():
+        raise Exception(f"Failed to save supplier: {query.lastError().text()}")
+
+    supplier_id = query.lastInsertId()
+    try:
+        normalized_id = int(supplier_id)
+    except Exception:
+        normalized_id = None
+
+    return {
+        "supplier_id": normalized_id,
+        "supplier_name": normalized_name,
+        "contact": normalized_contact,
+    }
+
+
 def insert_purchase_order_header(payload):
     query = _new_query()
     query.prepare(

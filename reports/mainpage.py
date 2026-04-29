@@ -1,5 +1,5 @@
 
-from PySide6.QtWidgets import QWidget, QPushButton, QComboBox, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QTableWidget, QTableWidgetItem, QSpacerItem, QSizePolicy, QToolButton, QDialog, QLineEdit
+from PySide6.QtWidgets import QWidget, QPushButton, QComboBox, QFrame, QLabel, QHBoxLayout, QVBoxLayout, QGridLayout, QTableWidget, QTableWidgetItem, QSpacerItem, QSizePolicy, QToolButton, QDialog, QLineEdit, QToolTip, QCompleter
 from PySide6.QtCore import QFile, Qt,QDate
 from PySide6.QtGui import QCursor, QColor
 from datetime import date
@@ -284,6 +284,8 @@ class MainReportsPage(QWidget):
         metrics_row.addWidget(self.create_embedded_overview_metric_card("Expenses", "catalog_expense_card_data"), 1)
 
         layout.addLayout(metrics_row)
+        layout.addSpacing(8)
+        layout.addWidget(self.create_phase_one_trend_card())
 
         return card
 
@@ -306,6 +308,452 @@ class MainReportsPage(QWidget):
         layout.addWidget(value_label)
 
         return widget
+
+    def create_phase_one_trend_card(self):
+        card = QFrame()
+        card.setStyleSheet(
+            """
+            QFrame {
+                background-color: #F3F7FA;
+                border: 1px solid #D3DDE6;
+                border-radius: 8px;
+            }
+            """
+        )
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(8)
+
+        title = QLabel("Trend & Forecast")
+        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #223746; padding-left: 0;")
+        subtitle = QLabel("Phase 2: daily trend, forecast horizon, projection band, confidence, reorder hint")
+        subtitle.setStyleSheet("font-size: 11px; font-weight: 500; color: #5A7183; padding-left: 0;")
+        title_row.addWidget(title)
+        title_row.addWidget(subtitle)
+        title_row.addStretch()
+        layout.addLayout(title_row)
+
+        filter_row = QHBoxLayout()
+        filter_row.setContentsMargins(0, 0, 0, 0)
+        filter_row.setSpacing(8)
+
+        filter_row.addWidget(QLabel("Scope"))
+        self.trend_scope_combo = QComboBox()
+        self.trend_scope_combo.addItem("Overall Sales", "overall")
+        self.trend_scope_combo.addItem("Product Trend", "product")
+        self.trend_scope_combo.setCursor(Qt.PointingHandCursor)
+        self.trend_scope_combo.setFixedWidth(160)
+        filter_row.addWidget(self.trend_scope_combo)
+
+        filter_row.addWidget(QLabel("Range"))
+        self.trend_range_combo = QComboBox()
+        self.trend_range_combo.addItem("Last 30 days", 30)
+        self.trend_range_combo.addItem("Last 60 days", 60)
+        self.trend_range_combo.addItem("Last 90 days", 90)
+        self.trend_range_combo.setCurrentIndex(0)
+        self.trend_range_combo.setCursor(Qt.PointingHandCursor)
+        self.trend_range_combo.setFixedWidth(150)
+        filter_row.addWidget(self.trend_range_combo)
+
+        filter_row.addWidget(QLabel("Forecast"))
+        self.trend_forecast_combo = QComboBox()
+        self.trend_forecast_combo.addItem("Next 7 days", 7)
+        self.trend_forecast_combo.addItem("Next 14 days", 14)
+        self.trend_forecast_combo.addItem("Next 30 days", 30)
+        self.trend_forecast_combo.setCurrentIndex(1)
+        self.trend_forecast_combo.setCursor(Qt.PointingHandCursor)
+        self.trend_forecast_combo.setFixedWidth(150)
+        filter_row.addWidget(self.trend_forecast_combo)
+
+        self.trend_product_label = QLabel("Product")
+        filter_row.addWidget(self.trend_product_label)
+        self.trend_product_combo = QComboBox()
+        self.trend_product_combo.setEditable(True)
+        self.trend_product_combo.setCursor(Qt.PointingHandCursor)
+        self.trend_product_combo.setMinimumWidth(260)
+        self.trend_product_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.trend_product_combo.setStyleSheet(
+            """
+            QComboBox {
+                color: #223746;
+                background-color: #FFFFFF;
+                border: 1px solid #C7D4DE;
+                border-radius: 6px;
+                padding: 4px 8px;
+            }
+            QComboBox QAbstractItemView {
+                color: #223746;
+                background-color: #FFFFFF;
+                selection-color: #FFFFFF;
+                selection-background-color: #325D7B;
+                border: 1px solid #C7D4DE;
+            }
+            QComboBox QLineEdit {
+                color: #223746;
+                background-color: #FFFFFF;
+                border: none;
+            }
+            """
+        )
+        self.trend_product_combo.addItem("Select product", None)
+        for product_row in report_service.ReportService().get_used_product_options():
+            self.trend_product_combo.addItem(product_row["display_name"], product_row["product_id"])
+        trend_completer = QCompleter(self.trend_product_combo.model(), self.trend_product_combo)
+        trend_completer.setCaseSensitivity(Qt.CaseInsensitive)
+        trend_completer.setFilterMode(Qt.MatchContains)
+        trend_completer.setCompletionMode(QCompleter.PopupCompletion)
+        self.trend_product_combo.setCompleter(trend_completer)
+        filter_row.addWidget(self.trend_product_combo, 1)
+        filter_row.addStretch()
+        layout.addLayout(filter_row)
+
+        stats_row = QHBoxLayout()
+        stats_row.setContentsMargins(0, 0, 0, 0)
+        stats_row.setSpacing(8)
+        stats_row.addWidget(self.create_trend_stat_card("Net Sales", "trend_primary_title", "trend_primary_value"), 1)
+        stats_row.addWidget(self.create_trend_stat_card("Daily Average", "trend_secondary_title", "trend_secondary_value"), 1)
+        stats_row.addWidget(self.create_trend_stat_card("vs previous 30 days", "trend_tertiary_title", "trend_tertiary_value"), 1)
+        stats_row.addWidget(self.create_trend_stat_card("Next 14 days", "trend_forecast_title", "trend_forecast_value"), 1)
+        layout.addLayout(stats_row)
+
+        self.trend_chart_title = QLabel("Daily Net Sales")
+        self.trend_chart_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #223746; padding-left: 0;")
+        layout.addWidget(self.trend_chart_title)
+
+        self.trend_plot = pg.PlotWidget()
+        self.trend_plot.setMinimumHeight(280)
+        self.trend_plot.setBackground(None)
+        self.trend_plot.setMenuEnabled(False)
+        self.trend_plot.setMouseEnabled(x=False, y=False)
+        self.trend_plot.showGrid(x=True, y=True, alpha=0.16)
+        self.trend_plot.getAxis("left").setTextPen(pg.mkPen("#5A7183"))
+        self.trend_plot.getAxis("bottom").setTextPen(pg.mkPen("#5A7183"))
+        self.trend_plot.getAxis("left").setPen(pg.mkPen("#C7D4DE"))
+        self.trend_plot.getAxis("bottom").setPen(pg.mkPen("#C7D4DE"))
+        self.trend_plot.setStyleSheet(
+            """
+            QToolTip {
+                background-color: #1F405C;
+                color: #FFFFFF;
+                border: 1px solid #2D5F87;
+                border-radius: 4px;
+                padding: 6px 8px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            """
+        )
+        layout.addWidget(self.trend_plot)
+
+        chart_hint = QLabel("Blue = daily actual values. Green dashed line = rolling 7-day moving average.")
+        chart_hint.setStyleSheet("font-size: 11px; font-weight: 500; color: #6D8191; padding-left: 0;")
+        layout.addWidget(chart_hint)
+
+        self.trend_forecast_band_label = QLabel("")
+        self.trend_forecast_band_label.setStyleSheet("font-size: 11px; font-weight: 700; color: #7A4A00; padding-left: 0;")
+        layout.addWidget(self.trend_forecast_band_label)
+
+        footer_row = QHBoxLayout()
+        footer_row.setContentsMargins(0, 0, 0, 0)
+        footer_row.setSpacing(8)
+
+        self.trend_status_badge = QLabel("Loading")
+        self.trend_status_badge.setStyleSheet(
+            "background-color: #E6EEF5; color: #325D7B; border: 1px solid #C7D4DE; "
+            "border-radius: 12px; padding: 4px 10px; font-size: 11px; font-weight: 700;"
+        )
+        footer_row.addWidget(self.trend_status_badge)
+
+        self.trend_note_label = QLabel("")
+        self.trend_note_label.setWordWrap(True)
+        self.trend_note_label.setStyleSheet("font-size: 11px; font-weight: 500; color: #5A7183; padding-left: 0;")
+        footer_row.addWidget(self.trend_note_label, 1)
+        layout.addLayout(footer_row)
+
+        self.trend_confidence_label = QLabel("")
+        self.trend_confidence_label.setWordWrap(True)
+        self.trend_confidence_label.setStyleSheet("font-size: 11px; font-weight: 600; color: #5A7183; padding-left: 0;")
+        layout.addWidget(self.trend_confidence_label)
+
+        self.trend_reorder_label = QLabel("")
+        self.trend_reorder_label.setWordWrap(True)
+        self.trend_reorder_label.setStyleSheet("font-size: 11px; font-weight: 600; color: #5A7183; padding-left: 0;")
+        layout.addWidget(self.trend_reorder_label)
+
+        self.trend_hover_rows = []
+        self.trend_scatter = None
+        self.trend_scope_combo.currentIndexChanged.connect(self.on_trend_controls_changed)
+        self.trend_range_combo.currentIndexChanged.connect(self.load_phase_one_trend_panel)
+        self.trend_forecast_combo.currentIndexChanged.connect(self.load_phase_one_trend_panel)
+        self.trend_product_combo.currentIndexChanged.connect(self.load_phase_one_trend_panel)
+        self.on_trend_controls_changed()
+
+        return card
+
+    def create_trend_stat_card(self, title_text, title_attr_name, value_attr_name):
+        card = QFrame()
+        card.setStyleSheet(
+            """
+            QFrame {
+                background-color: #FFFFFF;
+                border: 1px solid #D8E2EA;
+                border-radius: 8px;
+            }
+            """
+        )
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(3)
+
+        title_label = QLabel(title_text)
+        title_label.setStyleSheet("font-size: 11px; font-weight: 700; color: #6A7F90; padding-left: 0;")
+        value_label = QLabel("0")
+        value_label.setStyleSheet("font-size: 18px; font-weight: 700; color: #223746; padding-left: 0;")
+
+        setattr(self, title_attr_name, title_label)
+        setattr(self, value_attr_name, value_label)
+
+        layout.addWidget(title_label)
+        layout.addWidget(value_label)
+        return card
+
+    def on_trend_controls_changed(self, *_):
+        scope = self.trend_scope_combo.currentData() if hasattr(self, "trend_scope_combo") else "overall"
+        product_mode = scope == "product"
+        if hasattr(self, "trend_product_combo"):
+            self.trend_product_combo.setEnabled(product_mode)
+            self.trend_product_combo.setVisible(product_mode)
+        if hasattr(self, "trend_product_label"):
+            self.trend_product_label.setVisible(product_mode)
+        self.load_phase_one_trend_panel()
+
+    def format_trend_money(self, value):
+        return f"PKR {float(value or 0.0):,.0f}"
+
+    def format_trend_units(self, value):
+        return f"{float(value or 0.0):,.1f}".rstrip("0").rstrip(".")
+
+    def set_trend_status_badge(self, classification):
+        classification = str(classification or "Stable").strip() or "Stable"
+        palette = {
+            "Rising": ("#E6F4EA", "#2E7D32", "#B7DFC0"),
+            "Stable": ("#E8F0F7", "#325D7B", "#C7D4DE"),
+            "Declining": ("#FDECEA", "#C62828", "#F1C1BC"),
+            "Volatile": ("#FFF4E5", "#B26A00", "#EBCB97"),
+            "Seasonal": ("#F3E8FF", "#7B3FB2", "#D8B8F3"),
+            "Flat demand": ("#EFF3F6", "#5A7183", "#D3DDE6"),
+            "Insufficient history": ("#EFF3F6", "#5A7183", "#D3DDE6"),
+        }
+        background, foreground, border = palette.get(classification, palette["Stable"])
+        self.trend_status_badge.setText(classification)
+        self.trend_status_badge.setStyleSheet(
+            f"background-color: {background}; color: {foreground}; border: 1px solid {border}; "
+            "border-radius: 12px; padding: 4px 10px; font-size: 11px; font-weight: 700;"
+        )
+
+    def load_phase_one_trend_panel(self, *_):
+        if not hasattr(self, "trend_plot"):
+            return
+
+        scope = self.trend_scope_combo.currentData() or "overall"
+        days = int(self.trend_range_combo.currentData() or 30)
+        forecast_days = int(self.trend_forecast_combo.currentData() or 14)
+
+        try:
+            service = report_service.ReportService()
+            if scope == "product":
+                product_id = self.trend_product_combo.currentData()
+                if not product_id:
+                    self.render_phase_one_trend_snapshot(
+                        {
+                            "mode": "product",
+                            "days": days,
+                            "product_name": "",
+                            "rows": [],
+                            "metric_label": "Units Sold",
+                            "summary": {
+                                "headline_title": "Units Sold",
+                                "headline_value": 0.0,
+                                "secondary_value": 0.0,
+                                "comparison_title": f"vs previous {days} days",
+                                "comparison_value": 0.0,
+                                "forecast_title": f"Next {forecast_days} days",
+                                "forecast_value": 0.0,
+                                "forecast_low": 0.0,
+                                "forecast_high": 0.0,
+                                "classification": "Insufficient history",
+                                "seasonality_note": "Choose a product to see its daily demand pattern.",
+                                "confidence_label": "Low confidence",
+                                "confidence_note": "Pick a product to generate a product-level forecast hint.",
+                                "reorder_note": "",
+                            },
+                        }
+                    )
+                    return
+                snapshot = service.get_product_sales_trend_snapshot(product_id, days, forecast_days=forecast_days)
+            else:
+                snapshot = service.get_overall_sales_trend_snapshot(days, forecast_days=forecast_days)
+            self.render_phase_one_trend_snapshot(snapshot)
+        except Exception as exc:
+            self.trend_plot.clear()
+            self.trend_note_label.setText(str(exc))
+            self.set_trend_status_badge("Insufficient history")
+
+    def render_phase_one_trend_snapshot(self, snapshot):
+        mode = str(snapshot.get("mode") or "overall")
+        days = int(snapshot.get("days") or 30)
+        summary = snapshot.get("summary") or {}
+        rows = snapshot.get("rows") or []
+        projection_rows = snapshot.get("projection_rows") or []
+        product_name = str(snapshot.get("product_name") or "").strip()
+
+        if mode == "product":
+            self.trend_chart_title.setText(
+                f"Daily Product Demand{f' - {product_name}' if product_name else ''}"
+            )
+            self.trend_primary_title.setText("Units Sold")
+            self.trend_primary_value.setText(self.format_trend_units(summary.get("headline_value", 0.0)))
+            self.trend_secondary_title.setText("Revenue")
+            self.trend_secondary_value.setText(self.format_trend_money(summary.get("secondary_value", 0.0)))
+            self.trend_tertiary_title.setText(summary.get("comparison_title", f"vs previous {days} days"))
+            self.trend_tertiary_value.setText(f"{float(summary.get('comparison_value', 0.0)):+.1f}%")
+            self.trend_forecast_title.setText(summary.get("forecast_title", "Next 14 days"))
+            self.trend_forecast_value.setText(self.format_trend_units(summary.get("forecast_value", 0.0)))
+        else:
+            self.trend_chart_title.setText("Daily Net Sales")
+            self.trend_primary_title.setText("Net Sales")
+            self.trend_primary_value.setText(self.format_trend_money(summary.get("headline_value", 0.0)))
+            self.trend_secondary_title.setText("Daily Average")
+            self.trend_secondary_value.setText(self.format_trend_money(summary.get("average_value", 0.0)))
+            self.trend_tertiary_title.setText(summary.get("comparison_title", f"vs previous {days} days"))
+            self.trend_tertiary_value.setText(f"{float(summary.get('comparison_value', 0.0)):+.1f}%")
+            self.trend_forecast_title.setText(summary.get("forecast_title", "Next 14 days"))
+            self.trend_forecast_value.setText(self.format_trend_money(summary.get("forecast_value", 0.0)))
+
+        comparison_value = float(summary.get("comparison_value", 0.0) or 0.0)
+        comparison_color = "#2E7D32" if comparison_value >= 0 else "#C62828"
+        self.trend_tertiary_value.setStyleSheet(
+            f"font-size: 18px; font-weight: 700; color: {comparison_color}; padding-left: 0;"
+        )
+        self.trend_note_label.setText(str(summary.get("seasonality_note") or ""))
+        self.trend_confidence_label.setText(
+            f"{summary.get('confidence_label', 'Medium confidence')}: "
+            f"{summary.get('confidence_note', '')}"
+        )
+        reorder_note = str(summary.get("reorder_note") or "").strip()
+        self.trend_reorder_label.setVisible(bool(reorder_note))
+        self.trend_reorder_label.setText(reorder_note)
+        forecast_low = summary.get("forecast_low", summary.get("forecast_value", 0.0))
+        forecast_high = summary.get("forecast_high", summary.get("forecast_value", 0.0))
+        if mode == "product":
+            self.trend_forecast_band_label.setText(
+                f"Forecast band: {self.format_trend_units(forecast_low)} to "
+                f"{self.format_trend_units(forecast_high)} units"
+            )
+        else:
+            self.trend_forecast_band_label.setText(
+                f"Forecast band: {self.format_trend_money(forecast_low)} to "
+                f"{self.format_trend_money(forecast_high)}"
+            )
+        self.set_trend_status_badge(summary.get("classification", "Stable"))
+        self.render_phase_one_trend_chart(
+            rows,
+            snapshot.get("metric_label") or "Value",
+            mode,
+            projection_rows=projection_rows,
+        )
+
+    def render_phase_one_trend_chart(self, rows, metric_label, mode, projection_rows=None):
+        self.trend_plot.clear()
+        self.trend_hover_rows = list(rows or [])
+        if not rows:
+            self.trend_plot.setTitle("No trend data yet")
+            QToolTip.hideText()
+            return
+
+        x_values = list(range(len(rows)))
+        y_values = [float(row.get("value", 0.0) or 0.0) for row in rows]
+        ma_values = [float(row.get("moving_average", 0.0) or 0.0) for row in rows]
+        projection_rows = list(projection_rows or [])
+
+        ticks = []
+        step = max(1, len(rows) // 8)
+        for index in range(0, len(rows), step):
+            ticks.append((index, rows[index].get("label", "")))
+        if ticks[-1][0] != len(rows) - 1:
+            ticks.append((len(rows) - 1, rows[-1].get("label", "")))
+
+        self.trend_plot.getAxis("bottom").setTicks([ticks])
+        self.trend_plot.setLabel("left", metric_label)
+        self.trend_plot.setTitle("")
+
+        actual_pen = pg.mkPen(QColor("#1F5EA8"), width=2.4)
+        avg_pen = pg.mkPen(QColor("#2E7D32"), width=2.0, style=Qt.DashLine)
+        forecast_pen = pg.mkPen(QColor("#D97A00"), width=2.0, style=Qt.DashLine)
+        self.trend_plot.plot(x_values, y_values, pen=actual_pen)
+        self.trend_plot.plot(x_values, ma_values, pen=avg_pen)
+
+        if projection_rows:
+            forecast_x = [len(rows) - 1] + [len(rows) - 1 + idx + 1 for idx in range(len(projection_rows))]
+            forecast_y = [y_values[-1]] + [float(row.get("value", 0.0) or 0.0) for row in projection_rows]
+            self.trend_plot.plot(forecast_x, forecast_y, pen=forecast_pen)
+            all_rows = rows + projection_rows
+            full_ticks = []
+            total_length = len(all_rows)
+            step = max(1, total_length // 8)
+            for index in range(0, total_length, step):
+                full_ticks.append((index, all_rows[index].get("label", "")))
+            if full_ticks[-1][0] != total_length - 1:
+                full_ticks.append((total_length - 1, all_rows[-1].get("label", "")))
+            self.trend_plot.getAxis("bottom").setTicks([full_ticks])
+            all_values = y_values + ma_values + [float(row.get("value", 0.0) or 0.0) for row in projection_rows]
+        else:
+            all_values = y_values + ma_values
+
+        self.trend_scatter = pg.ScatterPlotItem(
+            x=x_values,
+            y=y_values,
+            size=8,
+            brush=pg.mkBrush("#1F5EA8"),
+            pen=pg.mkPen("#F3F7FA", width=1.5),
+            hoverable=True,
+            tip=None,
+        )
+        self.trend_scatter.sigHovered.connect(self._show_report_trend_hover)
+        self.trend_plot.addItem(self.trend_scatter)
+        x_max = (len(rows) + len(projection_rows) - 0.5) if projection_rows else (len(rows) - 0.5)
+        self.trend_plot.setYRange(0, max(max(all_values), 1.0) * 1.15, padding=0)
+        self.trend_plot.setXRange(-0.5, x_max, padding=0)
+        self.trend_plot.enableAutoRange(x=False, y=False)
+        self.trend_plot.repaint()
+
+    def _show_report_trend_hover(self, _scatter, points, _event):
+        if points is None or len(points) == 0:
+            QToolTip.hideText()
+            return
+
+        index = int(round(points[0].pos().x()))
+        if index < 0 or index >= len(self.trend_hover_rows):
+            QToolTip.hideText()
+            return
+
+        row = self.trend_hover_rows[index]
+        sales_amount = float(row.get("sales_amount", 0.0) or 0.0)
+        qty_sold = row.get("qty_sold")
+        if qty_sold is None:
+            text = f"{row.get('label', '')}\nSales: {sales_amount:,.0f} PKR"
+        else:
+            text = (
+                f"{row.get('label', '')}\n"
+                f"Units: {self.format_trend_units(qty_sold)}\n"
+                f"Revenue: {sales_amount:,.0f} PKR"
+            )
+        QToolTip.showText(self.cursor().pos(), text, self.trend_plot)
 
     def create_financial_report_catalog_card(self):
         card = QFrame()
@@ -5193,6 +5641,7 @@ class MainReportsPage(QWidget):
                 self.duration_combo.setCurrentIndex(0)
                 self.duration_combo.blockSignals(False)
             self.refresh_overview_for_duration("today")
+            self.load_phase_one_trend_panel()
             self._overview_loaded_once = True
 
 

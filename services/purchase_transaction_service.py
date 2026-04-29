@@ -219,3 +219,207 @@ def update_supplier_balances(supplier_id, *, payable_after, receiveable_after):
         raise Exception(f"Failed to update supplier balances: {query.lastError().text()}")
 
     return True
+
+
+def fetch_purchase_list_rows(*, from_date, to_date, search_text="", barcode_code=None):
+    normalized_search = str(search_text or "").strip()
+    query = _new_query()
+
+    if barcode_code:
+        query.prepare(
+            """
+            SELECT DISTINCT pu.id, COALESCE(s.name, ''), COALESCE(pu.sellerinvoice, ''),
+                   COALESCE(r.name, ''), pu.creation_date
+            FROM purchase pu
+            LEFT JOIN supplier s ON s.id = pu.supplier
+            LEFT JOIN rep r ON r.id = pu.rep
+            JOIN purchaseitem pi ON pi.purchase = pu.id
+            JOIN product p ON p.id = pi.product
+            WHERE pu.creation_date BETWEEN ? AND ?
+              AND TRIM(CAST(p.code AS TEXT)) = ?
+            ORDER BY pu.id DESC
+            """
+        )
+        query.addBindValue(from_date)
+        query.addBindValue(to_date)
+        query.addBindValue(str(barcode_code).strip())
+    elif normalized_search:
+        pattern = f"%{normalized_search}%"
+        query.prepare(
+            """
+            SELECT pu.id, COALESCE(s.name, ''), COALESCE(pu.sellerinvoice, ''),
+                   COALESCE(r.name, ''), pu.creation_date
+            FROM purchase pu
+            LEFT JOIN supplier s ON s.id = pu.supplier
+            LEFT JOIN rep r ON r.id = pu.rep
+            WHERE pu.creation_date BETWEEN ? AND ?
+              AND (s.name LIKE ? OR pu.sellerinvoice LIKE ?)
+            ORDER BY pu.id DESC
+            """
+        )
+        query.addBindValue(from_date)
+        query.addBindValue(to_date)
+        query.addBindValue(pattern)
+        query.addBindValue(pattern)
+    else:
+        query.prepare(
+            """
+            SELECT pu.id, COALESCE(s.name, ''), COALESCE(pu.sellerinvoice, ''),
+                   COALESCE(r.name, ''), pu.creation_date
+            FROM purchase pu
+            LEFT JOIN supplier s ON s.id = pu.supplier
+            LEFT JOIN rep r ON r.id = pu.rep
+            WHERE pu.creation_date BETWEEN ? AND ?
+            ORDER BY pu.id DESC
+            """
+        )
+        query.addBindValue(from_date)
+        query.addBindValue(to_date)
+
+    if not query.exec():
+        raise Exception(f"Failed to load purchases: {query.lastError().text()}")
+
+    rows = []
+    while query.next():
+        rows.append(
+            {
+                "purchase_id": int(query.value(0) or 0),
+                "supplier_name": str(query.value(1) or ""),
+                "sellerinvoice": str(query.value(2) or ""),
+                "rep_name": str(query.value(3) or ""),
+                "creation_date": query.value(4),
+            }
+        )
+    return rows
+
+
+def fetch_purchase_detail(purchase_id):
+    query = _new_query()
+    query.prepare(
+        """
+        SELECT
+            p.id,
+            p.supplier,
+            COALESCE(s.name, '') AS supplier_name,
+            p.rep,
+            COALESCE(r.name, '-') AS rep_name,
+            COALESCE(p.sellerinvoice, ''),
+            p.creation_date,
+            COALESCE(p.subtotal, 0),
+            COALESCE(p.discount, 0),
+            COALESCE(p.tax_236g, 0),
+            COALESCE(p.tax_236h, 0),
+            COALESCE(p.salestax, 0),
+            COALESCE(p.netamount, 0),
+            COALESCE(p.cn_adjustment, 0),
+            COALESCE(p.total, 0),
+            COALESCE(p.paid, 0),
+            COALESCE(p.remaining, 0),
+            COALESCE(p.writeoff, 0),
+            p.due_date
+        FROM purchase p
+        LEFT JOIN supplier s ON s.id = p.supplier
+        LEFT JOIN rep r ON r.id = p.rep
+        WHERE p.id = ?
+        LIMIT 1
+        """
+    )
+    query.addBindValue(int(purchase_id))
+
+    if not query.exec():
+        raise Exception(f"Failed to load purchase detail: {query.lastError().text()}")
+    if not query.next():
+        return None
+
+    return {
+        "purchase_id": int(query.value(0) or 0),
+        "supplier_id": query.value(1),
+        "supplier_name": str(query.value(2) or ""),
+        "rep_id": query.value(3),
+        "rep_name": str(query.value(4) or "-"),
+        "sellerinvoice": str(query.value(5) or ""),
+        "creation_date": query.value(6),
+        "subtotal": float(query.value(7) or 0.0),
+        "discount": float(query.value(8) or 0.0),
+        "tax_236g": float(query.value(9) or 0.0),
+        "tax_236h": float(query.value(10) or 0.0),
+        "sales_tax": float(query.value(11) or 0.0),
+        "netamount": float(query.value(12) or 0.0),
+        "cn_adjustment": float(query.value(13) or 0.0),
+        "total": float(query.value(14) or 0.0),
+        "paid": float(query.value(15) or 0.0),
+        "remaining": float(query.value(16) or 0.0),
+        "writeoff": float(query.value(17) or 0.0),
+        "due_date": query.value(18),
+    }
+
+
+def fetch_purchase_item_rows(purchase_id):
+    query = _new_query()
+    query.prepare(
+        """
+        SELECT
+            COALESCE(pr.display_name, '-') AS product_name,
+            COALESCE(pr.brand, '-') AS brand_name,
+            pi.qty,
+            pi.bonus,
+            pi.rate,
+            pi.discount,
+            pi.tax,
+            pi.total
+        FROM purchaseitem pi
+        LEFT JOIN product pr ON pr.id = pi.product
+        WHERE pi.purchase = ?
+        """
+    )
+    query.addBindValue(int(purchase_id))
+
+    if not query.exec():
+        query = _new_query()
+        query.prepare(
+            """
+            SELECT
+                COALESCE(pr.display_name, '-') AS product_name,
+                COALESCE(pr.brand, '-') AS brand_name,
+                pi.qty,
+                pi.bonus,
+                pi.unitcost,
+                pi.discount,
+                pi.tax,
+                pi.totalcost
+            FROM purchaseitem pi
+            LEFT JOIN product pr ON pr.id = pi.medicine
+            WHERE pi.purchase = ?
+            """
+        )
+        query.addBindValue(int(purchase_id))
+        if not query.exec():
+            raise Exception(f"Failed to load purchase items: {query.lastError().text()}")
+
+    rows = []
+    while query.next():
+        rows.append(
+            {
+                "product_name": str(query.value(0) or "-"),
+                "brand_name": str(query.value(1) or "-"),
+                "qty": str(query.value(2) or ""),
+                "bonus": str(query.value(3) or ""),
+                "rate": str(query.value(4) or ""),
+                "discount": str(query.value(5) or ""),
+                "tax": str(query.value(6) or ""),
+                "total": str(query.value(7) or ""),
+            }
+        )
+    return rows
+
+
+def update_purchase_due_date(purchase_id, due_date_value):
+    query = _new_query()
+    query.prepare("UPDATE purchase SET due_date = ? WHERE id = ?")
+    query.addBindValue(due_date_value)
+    query.addBindValue(int(purchase_id))
+
+    if not query.exec():
+        raise Exception(f"Could not update due date: {query.lastError().text()}")
+
+    return True

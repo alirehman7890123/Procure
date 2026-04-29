@@ -1,9 +1,17 @@
 from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QFrame, QLabel, QLineEdit, QVBoxLayout, QTableWidget, QHeaderView, QTableWidgetItem, QSizePolicy, QMessageBox, QComboBox, QDialog
 from PySide6.QtCore import QFile, Qt, QDate, QDateTime, Signal
-from PySide6.QtSql import  QSqlQuery
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
+from services.customer_service import (
+    create_discount_group,
+    create_tax_group,
+    fetch_customer_detail,
+    fetch_customer_transaction_rows,
+    fetch_discount_group_options,
+    fetch_tax_group_options,
+    update_customer,
+)
 
 
 
@@ -209,18 +217,8 @@ class CustomerDetailWidget(QWidget):
         self.discount_group_combo.blockSignals(True)
         self.discount_group_combo.clear()
         self.discount_group_combo.addItem("None", None)
-        query = QSqlQuery()
-        if query.exec("SELECT id, name, discount_percent, COALESCE(fixed_amount, 0), COALESCE(apply_on_sale, 1) FROM discount_group WHERE status = 'active' ORDER BY name ASC"):
-            while query.next():
-                group_id = query.value(0)
-                name = str(query.value(1) or "")
-                percent = float(query.value(2) or 0.0)
-                fixed_amount = float(query.value(3) or 0.0)
-                apply_on_sale = bool(int(query.value(4) or 0))
-                self.discount_group_combo.addItem(
-                    f"{name} ({percent:.2f}% + {fixed_amount:.2f}, {'Sale On' if apply_on_sale else 'Sale Off'})",
-                    group_id,
-                )
+        for option in fetch_discount_group_options():
+            self.discount_group_combo.addItem(option["label"], option["id"])
         self.sync_group_selection(self.discount_group_combo, selected_id)
         self.discount_group_combo.blockSignals(False)
 
@@ -228,18 +226,8 @@ class CustomerDetailWidget(QWidget):
         self.tax_group_combo.blockSignals(True)
         self.tax_group_combo.clear()
         self.tax_group_combo.addItem("None", None)
-        query = QSqlQuery()
-        if query.exec("SELECT id, name, tax_percent, COALESCE(fixed_amount, 0), COALESCE(apply_on_sale, 1) FROM tax_group WHERE status = 'active' ORDER BY name ASC"):
-            while query.next():
-                group_id = query.value(0)
-                name = str(query.value(1) or "")
-                percent = float(query.value(2) or 0.0)
-                fixed_amount = float(query.value(3) or 0.0)
-                apply_on_sale = bool(int(query.value(4) or 0))
-                self.tax_group_combo.addItem(
-                    f"{name} ({percent:.2f}% + {fixed_amount:.2f}, {'Sale On' if apply_on_sale else 'Sale Off'})",
-                    group_id,
-                )
+        for option in fetch_tax_group_options():
+            self.tax_group_combo.addItem(option["label"], option["id"])
         self.sync_group_selection(self.tax_group_combo, selected_id)
         self.tax_group_combo.blockSignals(False)
 
@@ -295,31 +283,18 @@ class CustomerDetailWidget(QWidget):
         layout.addLayout(button_row)
 
         def save_group():
-            group_name = name_edit.text().strip()
-            if not group_name:
-                AppMessageBox.warning(dialog, "Validation Error", "Group name is required.")
-                return
             try:
-                percent_value = float(percent_edit.text() or 0.0)
-            except ValueError:
-                AppMessageBox.warning(dialog, "Validation Error", "Percent must be a valid number.")
+                if table_name == "discount_group":
+                    new_id = create_discount_group(name_edit.text(), percent_edit.text())
+                else:
+                    new_id = create_tax_group(name_edit.text(), percent_edit.text())
+            except ValueError as exc:
+                AppMessageBox.warning(dialog, "Validation Error", str(exc))
                 return
-            if percent_value < 0:
-                AppMessageBox.warning(dialog, "Validation Error", "Percent cannot be negative.")
-                return
-
-            query = QSqlQuery()
-            query.prepare(f"""
-                INSERT INTO {table_name} (name, {value_column}, status)
-                VALUES (?, ?, 'active')
-            """)
-            query.addBindValue(group_name)
-            query.addBindValue(percent_value)
-            if not query.exec():
-                AppMessageBox.critical(dialog, "Database Error", query.lastError().text())
+            except Exception as exc:
+                AppMessageBox.critical(dialog, "Database Error", str(exc))
                 return
 
-            new_id = query.lastInsertId()
             refresh(int(new_id))
             combo.setCurrentIndex(combo.findData(int(new_id)))
             dialog.accept()
@@ -356,8 +331,8 @@ class CustomerDetailWidget(QWidget):
     # === Toggle Edit Mode ===
     @Permissions.require_permission('customer.update')
     def toggle_edit_mode(self):
-        self.edit_mode = not self.edit_mode
-        if self.edit_mode:
+        if not self.edit_mode:
+            self.edit_mode = True
             self.edit_btn.setText("Save")
             # Switch to QLineEdit
             for lbl, edit in self.field_pairs:
@@ -372,20 +347,21 @@ class CustomerDetailWidget(QWidget):
             self.discount_group_add_btn.show()
             self.tax_group_add_btn.show()
         else:
-            self.save_changes()
-            self.edit_btn.setText("Edit")
-            # Switch back to QLabel
-            for lbl, edit in self.field_pairs:
-                if edit:
-                    lbl.setText(edit.text())
-                    edit.hide()
-                    lbl.show()
-            self.discount_group_data.show()
-            self.tax_group_data.show()
-            self.discount_group_combo.hide()
-            self.tax_group_combo.hide()
-            self.discount_group_add_btn.hide()
-            self.tax_group_add_btn.hide()
+            if self.save_changes():
+                self.edit_mode = False
+                self.edit_btn.setText("Edit")
+                # Switch back to QLabel
+                for lbl, edit in self.field_pairs:
+                    if edit:
+                        lbl.setText(edit.text())
+                        edit.hide()
+                        lbl.show()
+                self.discount_group_data.show()
+                self.tax_group_data.show()
+                self.discount_group_combo.hide()
+                self.tax_group_combo.hide()
+                self.discount_group_add_btn.hide()
+                self.tax_group_add_btn.hide()
     
     
 
@@ -396,40 +372,31 @@ class CustomerDetailWidget(QWidget):
         
         if not self.customer_id:
             print("No customer loaded.")
-            return
+            return False
 
         try:
-            credit_limit = float(self.creditlimitedit.text() or 0.0)
-        except ValueError:
-            AppMessageBox.warning(self, "Validation Error", "Credit Limit must be a valid number.")
-            return
-
-        if credit_limit < 0:
-            AppMessageBox.warning(self, "Validation Error", "Credit Limit cannot be negative.")
-            return
-
-        query = QSqlQuery()
-        query.prepare("""
-            UPDATE customer
-            SET name=?, contact=?, email=?, status=?, credit_limit=?, discount_group_id=?, tax_group_id=?
-            WHERE id=?
-        """)
-        
-        query.addBindValue(self.nameedit.text())
-        query.addBindValue(self.contactedit.text())
-        query.addBindValue(self.emailedit.text())
-        query.addBindValue(self.statusedit.text())
-        query.addBindValue(credit_limit)
-        query.addBindValue(self.discount_group_combo.currentData())
-        query.addBindValue(self.tax_group_combo.currentData())
-        query.addBindValue(self.customer_id)
-
-        if not query.exec():
-            print("Error updating customer:", query.lastError().text())
+            update_customer(
+                self.customer_id,
+                name=self.nameedit.text(),
+                contact=self.contactedit.text(),
+                email=self.emailedit.text(),
+                status=self.statusedit.text(),
+                credit_limit=self.creditlimitedit.text(),
+                discount_group_id=self.discount_group_combo.currentData(),
+                tax_group_id=self.tax_group_combo.currentData(),
+            )
+        except ValueError as exc:
+            AppMessageBox.warning(self, "Validation Error", str(exc))
+            return False
+        except Exception as exc:
+            print("Error updating customer:", str(exc))
+            AppMessageBox.critical(self, "Database Error", str(exc))
+            return False
         else:
             self.discount_group_data.setText(self.discount_group_combo.currentText() or "None")
             self.tax_group_data.setText(self.tax_group_combo.currentText() or "None")
             print("Customer updated successfully.")
+            return True
             
 
             
@@ -439,34 +406,14 @@ class CustomerDetailWidget(QWidget):
         self.customer_id = customer_id
         print("Loading customer ID:", self.customer_id)
         self.customer_id = int(self.customer_id)
-        customer_query = QSqlQuery()
-        customer_query.prepare(
-            """
-            SELECT
-                name,
-                contact,
-                email,
-                status,
-                creation_date,
-                payable,
-                receiveable,
-                credit_limit,
-                discount_group_id,
-                tax_group_id
-            FROM customer
-            WHERE id = ?
-            """
-        )
-        customer_query.addBindValue(self.customer_id)
-        
-        if customer_query.exec() and customer_query.next():
-            
-            self.namedata.setText(str(customer_query.value(0) or "-"))
-            self.contactdata.setText(str(customer_query.value(1) or "-"))
-            self.emaildata.setText(str(customer_query.value(2) or "-"))
-            self.statusdata.setText(str(customer_query.value(3) or "-"))
-            joining_date = customer_query.value(4)
-            
+        customer = fetch_customer_detail(self.customer_id)
+        if customer:
+            self.namedata.setText(customer["name"])
+            self.contactdata.setText(customer["contact"])
+            self.emaildata.setText(customer["email"])
+            self.statusdata.setText(customer["status"])
+            joining_date = customer["creation_date"]
+
             if isinstance(joining_date, QDateTime):
                 joining_date = joining_date.date().toString("dd-MM-yyyy")
             elif isinstance(joining_date, QDate):
@@ -475,11 +422,11 @@ class CustomerDetailWidget(QWidget):
                 joining_date = str(joining_date)
                 
             self.joiningdata.setText(joining_date)
-            self.payabledata.setText(f"{float(customer_query.value(5) or 0):.2f}")
-            self.receiveabledata.setText(f"{float(customer_query.value(6) or 0):.2f}")
-            self.creditlimitdata.setText(f"{float(customer_query.value(7) or 0):.2f}")
-            discount_group_id = customer_query.value(8)
-            tax_group_id = customer_query.value(9)
+            self.payabledata.setText(f"{customer['payable']:.2f}")
+            self.receiveabledata.setText(f"{customer['receiveable']:.2f}")
+            self.creditlimitdata.setText(f"{customer['credit_limit']:.2f}")
+            discount_group_id = customer["discount_group_id"]
+            tax_group_id = customer["tax_group_id"]
             self.sync_group_selection(self.discount_group_combo, discount_group_id)
             self.sync_group_selection(self.tax_group_combo, tax_group_id)
             self.discount_group_data.setText(self.discount_group_combo.currentText() or "None")
@@ -488,82 +435,40 @@ class CustomerDetailWidget(QWidget):
             
            
         print("Loading Customer Transaction")
-        query = QSqlQuery()
-        query.prepare("""SELECT 
-                                creation_date,                                
-                                transaction_type, 
-                                receiveable_now,
-                                payable_before,
-                                receiveable_before,
-                                paid,
-                                received,
-                                payable_after,
-                                receiveable_after,
-                                payment_method,
-                                id
-                                FROM customer_transaction 
-                                WHERE customer = ?
-                                ORDER BY creation_date DESC
-                      
-                      """)
-        query.addBindValue(self.customer_id)
-        
-        
-        if not query.exec():
-            
-            print("Error executing query:", query.lastError().text())
+        try:
+            rows = fetch_customer_transaction_rows(self.customer_id)
+        except Exception as exc:
+            print("Error executing query:", str(exc))
             return
-        
-        else:
-            self.table.setRowCount(0)  # Clear existing rows
-            row = 0
-            
-            while query.next():
-                
-                self.table.insertRow(row)
-                
-                
-                creation_date = query.value(0)
-                transaction_type = str(query.value(1))
-                payment_type = str(query.value(9) or "-")
-                total_now = float(query.value(2) or 0)
-                payable_before = float(query.value(3) or 0)
-                receiveable_before = float(query.value(4) or 0)
-                paid = float(query.value(5) or 0)
-                received = float(query.value(6) or 0)
-                payable_after = float(query.value(7) or 0)
-                receiveable_after = float(query.value(8) or 0)
-                transaction_id = int(query.value(10))
+        self.table.setRowCount(0)
+        row = 0
 
-               
-                
-                date_item = QTableWidgetItem(str(creation_date))
-                transaction_type = QTableWidgetItem(transaction_type)
-                payment_type = QTableWidgetItem(payment_type)
-                total_now = QTableWidgetItem(f"{total_now:.2f}")
-                payable_before = QTableWidgetItem(f"{payable_before:.2f}")
-                receiveable_before = QTableWidgetItem(f"{receiveable_before:.2f}")
-                
-                paid = QTableWidgetItem(f"{paid:.2f}")
-                received = QTableWidgetItem(f"{received:.2f}")
-                payable_after = QTableWidgetItem(f"{payable_after:.2f}")
-                receiveable_after = QTableWidgetItem(f"{receiveable_after:.2f}")
-                
+        for tx_row in rows:
+            self.table.insertRow(row)
 
-                # Add items to table
-                self.table.setItem(row, 0, date_item)
-                self.table.setItem(row, 1, transaction_type)
-                self.table.setItem(row, 2, payment_type)
-                self.table.setItem(row, 3, total_now)
-                self.table.setItem(row, 4, payable_before)
-                self.table.setItem(row, 5, receiveable_before)
-                self.table.setItem(row, 6, paid) 
-                self.table.setItem(row, 7, received) 
-                self.table.setItem(row, 8, payable_after) 
-                self.table.setItem(row, 9, receiveable_after) 
-                            
-                
-                row += 1
+            date_item = QTableWidgetItem(str(tx_row["creation_date"]))
+            transaction_type = QTableWidgetItem(tx_row["transaction_type"])
+            payment_type = QTableWidgetItem(tx_row["payment_method"])
+            total_now = QTableWidgetItem(f"{tx_row['due_or_credit']:.2f}")
+            payable_before = QTableWidgetItem(f"{tx_row['payable_before']:.2f}")
+            receiveable_before = QTableWidgetItem(f"{tx_row['receiveable_before']:.2f}")
+            paid = QTableWidgetItem(f"{tx_row['paid']:.2f}")
+            received = QTableWidgetItem(f"{tx_row['received']:.2f}")
+            payable_after = QTableWidgetItem(f"{tx_row['payable_after']:.2f}")
+            receiveable_after = QTableWidgetItem(f"{tx_row['receiveable_after']:.2f}")
+
+            self.table.setItem(row, 0, date_item)
+            self.table.setItem(row, 1, transaction_type)
+            self.table.setItem(row, 2, payment_type)
+            self.table.setItem(row, 3, total_now)
+            self.table.setItem(row, 4, payable_before)
+            self.table.setItem(row, 5, receiveable_before)
+            self.table.setItem(row, 6, paid)
+            self.table.setItem(row, 7, received)
+            self.table.setItem(row, 8, payable_after)
+            self.table.setItem(row, 9, receiveable_after)
+
+            row += 1
         
         
         

@@ -1,4 +1,7 @@
+from datetime import datetime, timedelta
+import math
 
+import bcrypt
 from PySide6.QtSql import  QSqlQuery
 from PySide6.QtCore import QDate
 from services.accounting_settings_service import load_opening_inventory_value
@@ -6,6 +9,23 @@ from services.accounting_settings_service import load_opening_inventory_value
 
 
 class ReportService:
+    @staticmethod
+    def _parse_datetime_text(value):
+        text = str(value or "").strip()
+        if not text:
+            return None
+
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                return datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
     @staticmethod
     def _to_float(value, default=0.0):
         if value is None:
@@ -47,6 +67,564 @@ class ReportService:
         if duration == "all":
             return "1=1"
         return f"DATE({column_expr}) = DATE('now')"
+
+    @staticmethod
+    def _build_rolling_average(values, window=7):
+        window = max(int(window or 0), 1)
+        averages = []
+        for index in range(len(values)):
+            start = max(0, index - window + 1)
+            subset = values[start:index + 1]
+            averages.append(sum(subset) / len(subset) if subset else 0.0)
+        return averages
+
+    @staticmethod
+    def _calculate_percent_change(current_value, previous_value):
+        current_value = float(current_value or 0.0)
+        previous_value = float(previous_value or 0.0)
+        if abs(previous_value) < 0.0001:
+            if abs(current_value) < 0.0001:
+                return 0.0
+            return 100.0
+        return ((current_value - previous_value) / abs(previous_value)) * 100.0
+
+    @staticmethod
+    def _classify_trend(values, percent_change):
+        cleaned = [float(value or 0.0) for value in values]
+        if len(cleaned) < 7:
+            return "Insufficient history"
+
+        mean_value = sum(cleaned) / len(cleaned) if cleaned else 0.0
+        if mean_value <= 0.0001 and max(cleaned or [0.0]) <= 0.0001:
+            return "Flat demand"
+
+        variance = sum((value - mean_value) ** 2 for value in cleaned) / max(len(cleaned), 1)
+        deviation = math.sqrt(variance)
+        coefficient = (deviation / mean_value) if mean_value > 0.0001 else 0.0
+
+        if coefficient >= 0.9 and len(cleaned) >= 14:
+            return "Volatile"
+        if percent_change >= 8:
+            return "Rising"
+        if percent_change <= -8:
+            return "Declining"
+        return "Stable"
+
+    def _get_product_display_name(self, product_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT COALESCE(display_name, '')
+            FROM product
+            WHERE id = ?
+            LIMIT 1
+            """
+        )
+        query.addBindValue(int(product_id or 0))
+        if query.exec() and query.next():
+            return str(query.value(0) or "").strip()
+        return ""
+
+    def _get_product_stock_profile(self, product_id):
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                COALESCE(SUM(b.quantity_remaining), 0) AS available_qty,
+                COALESCE(MAX(pp.reorder_level), 0) AS reorder_level,
+                COALESCE(MAX(pp.pack_size), 1) AS pack_size
+            FROM product p
+            LEFT JOIN batch b ON b.product_id = p.id
+            LEFT JOIN price_pack pp ON pp.product_id = p.id
+            WHERE p.id = ?
+            GROUP BY p.id
+            """
+        )
+        query.addBindValue(int(product_id or 0))
+        if query.exec() and query.next():
+            return {
+                "available_qty": float(query.value(0) or 0.0),
+                "reorder_level": float(query.value(1) or 0.0),
+                "pack_size": float(query.value(2) or 1.0) or 1.0,
+            }
+        return {
+            "available_qty": 0.0,
+            "reorder_level": 0.0,
+            "pack_size": 1.0,
+        }
+
+    @staticmethod
+    def _build_forecast_projection(last_label_date, start_value, daily_projection, days):
+        rows = []
+        try:
+            current_date = datetime.strptime(str(last_label_date or ""), "%Y-%m-%d")
+        except ValueError:
+            current_date = datetime.now()
+
+        running_value = float(start_value or 0.0)
+        for offset in range(1, max(int(days or 0), 0) + 1):
+            current_date = current_date + timedelta(days=1)
+            running_value = max(float(daily_projection or 0.0), 0.0)
+            rows.append(
+                {
+                    "date": current_date.strftime("%Y-%m-%d"),
+                    "label": current_date.strftime("%d %b"),
+                    "value": running_value,
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _build_forecast_confidence(values, coefficient, classification):
+        values = list(values or [])
+        if len(values) < 14:
+            return {
+                "label": "Low confidence",
+                "note": "Forecast uses a short history window, so treat it as directional guidance only.",
+            }
+        if coefficient >= 0.9 or classification == "Volatile":
+            return {
+                "label": "Low confidence",
+                "note": "Recent demand is volatile, so the forecast range is intentionally loose.",
+            }
+        if coefficient >= 0.45:
+            return {
+                "label": "Medium confidence",
+                "note": "Demand is usable but somewhat choppy; review with current stock before ordering.",
+            }
+        return {
+            "label": "High confidence",
+            "note": "Recent demand is comparatively steady, so the short forecast is more reliable.",
+        }
+
+    def _build_overall_sales_trend_rows(self, days):
+        days = max(int(days or 0), 7)
+        start_date = (datetime.now() - timedelta(days=(days * 2) - 1)).strftime("%Y-%m-%d")
+
+        query = QSqlQuery()
+        query.prepare(
+            """
+            WITH RECURSIVE span(day_date) AS (
+                SELECT date(:start_date)
+                UNION ALL
+                SELECT date(day_date, '+1 day')
+                FROM span
+                WHERE day_date < date('now', 'localtime')
+            )
+            SELECT
+                span.day_date,
+                COALESCE(SUM(s.total), 0) AS total_sales
+            FROM span
+            LEFT JOIN sales s
+              ON date(datetime(s.creation_date, 'localtime')) = span.day_date
+            GROUP BY span.day_date
+            ORDER BY span.day_date ASC
+            """
+        )
+        query.bindValue(":start_date", start_date)
+
+        if not query.exec():
+            raise Exception(f"Overall sales trend query failed: {query.lastError().text()}")
+
+        rows = []
+        while query.next():
+            day_text = str(query.value(0) or "").strip()
+            try:
+                label = datetime.strptime(day_text, "%Y-%m-%d").strftime("%d %b")
+            except ValueError:
+                label = day_text
+            rows.append(
+                {
+                    "date": day_text,
+                    "label": label,
+                    "value": float(query.value(1) or 0.0),
+                    "sales_amount": float(query.value(1) or 0.0),
+                    "qty_sold": None,
+                }
+            )
+        return rows
+
+    def _build_product_sales_trend_rows(self, product_id, days):
+        product_id = int(product_id or 0)
+        if product_id <= 0:
+            return []
+
+        days = max(int(days or 0), 7)
+        start_date = (datetime.now() - timedelta(days=(days * 2) - 1)).strftime("%Y-%m-%d")
+
+        query = QSqlQuery()
+        query.prepare(
+            """
+            WITH RECURSIVE span(day_date) AS (
+                SELECT date(:start_date)
+                UNION ALL
+                SELECT date(day_date, '+1 day')
+                FROM span
+                WHERE day_date < date('now', 'localtime')
+            )
+            SELECT
+                span.day_date,
+                COALESCE(SUM(si.qty_sold), 0) AS qty_sold,
+                COALESCE(SUM(si.line_total), 0) AS sales_amount
+            FROM span
+            LEFT JOIN sales s
+              ON date(datetime(s.creation_date, 'localtime')) = span.day_date
+            LEFT JOIN salesitem si
+              ON si.sales_id = s.id
+             AND si.product_id = :product_id
+            GROUP BY span.day_date
+            ORDER BY span.day_date ASC
+            """
+        )
+        query.bindValue(":start_date", start_date)
+        query.bindValue(":product_id", product_id)
+
+        if not query.exec():
+            raise Exception(f"Product sales trend query failed: {query.lastError().text()}")
+
+        rows = []
+        while query.next():
+            day_text = str(query.value(0) or "").strip()
+            try:
+                label = datetime.strptime(day_text, "%Y-%m-%d").strftime("%d %b")
+            except ValueError:
+                label = day_text
+            qty_sold = float(query.value(1) or 0.0)
+            sales_amount = float(query.value(2) or 0.0)
+            rows.append(
+                {
+                    "date": day_text,
+                    "label": label,
+                    "value": qty_sold,
+                    "sales_amount": sales_amount,
+                    "qty_sold": qty_sold,
+                }
+            )
+        return rows
+
+    def _get_product_same_window_last_year(self, product_id, days):
+        product_id = int(product_id or 0)
+        if product_id <= 0:
+            return {"qty_sold": 0.0, "sales_amount": 0.0}
+
+        days = max(int(days or 0), 7)
+        current_end = datetime.now().strftime("%Y-%m-%d")
+        current_start = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                COALESCE(SUM(si.qty_sold), 0) AS qty_sold,
+                COALESCE(SUM(si.line_total), 0) AS sales_amount
+            FROM salesitem si
+            JOIN sales s ON s.id = si.sales_id
+            WHERE si.product_id = :product_id
+              AND date(datetime(s.creation_date, 'localtime'))
+                  BETWEEN date(:current_start, '-1 year') AND date(:current_end, '-1 year')
+            """
+        )
+        query.bindValue(":product_id", product_id)
+        query.bindValue(":current_start", current_start)
+        query.bindValue(":current_end", current_end)
+
+        if not query.exec():
+            return {"qty_sold": 0.0, "sales_amount": 0.0}
+
+        if query.next():
+            return {
+                "qty_sold": float(query.value(0) or 0.0),
+                "sales_amount": float(query.value(1) or 0.0),
+            }
+        return {"qty_sold": 0.0, "sales_amount": 0.0}
+
+    def _get_product_monthly_history(self, product_id, months=24):
+        product_id = int(product_id or 0)
+        if product_id <= 0:
+            return []
+
+        months = max(int(months or 0), 1)
+        start_anchor = datetime.now().replace(day=1)
+        start_date = (start_anchor - timedelta(days=(months * 31))).strftime("%Y-%m-%d")
+
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                strftime('%Y-%m', datetime(s.creation_date, 'localtime')) AS year_month,
+                CAST(strftime('%m', datetime(s.creation_date, 'localtime')) AS INTEGER) AS month_number,
+                COALESCE(SUM(si.qty_sold), 0) AS qty_sold,
+                COALESCE(SUM(si.line_total), 0) AS sales_amount
+            FROM salesitem si
+            JOIN sales s ON s.id = si.sales_id
+            WHERE si.product_id = :product_id
+              AND date(datetime(s.creation_date, 'localtime')) >= date(:start_date)
+            GROUP BY year_month, month_number
+            ORDER BY year_month ASC
+            """
+        )
+        query.bindValue(":product_id", product_id)
+        query.bindValue(":start_date", start_date)
+
+        if not query.exec():
+            return []
+
+        rows = []
+        while query.next():
+            rows.append(
+                {
+                    "year_month": str(query.value(0) or "").strip(),
+                    "month_number": int(query.value(1) or 0),
+                    "qty_sold": float(query.value(2) or 0.0),
+                    "sales_amount": float(query.value(3) or 0.0),
+                }
+            )
+        return rows
+
+    def _detect_product_seasonality(self, product_id, current_total, recent_average, classification):
+        history = self._get_product_monthly_history(product_id, months=24)
+        nonzero_history = [row for row in history if float(row.get("qty_sold", 0.0) or 0.0) > 0.0]
+        if len(nonzero_history) < 12:
+            return {
+                "is_seasonal": False,
+                "classification": classification,
+                "note": "Seasonality watch needs roughly 12 months of comparable product history.",
+                "pattern_strength": "insufficient",
+            }
+
+        overall_average = sum(float(row.get("qty_sold", 0.0) or 0.0) for row in nonzero_history) / len(nonzero_history)
+        current_month = datetime.now().month
+        current_year_month = datetime.now().strftime("%Y-%m")
+        same_month_history = [
+            float(row.get("qty_sold", 0.0) or 0.0)
+            for row in nonzero_history
+            if int(row.get("month_number", 0) or 0) == current_month
+        ]
+        current_month_row = next((row for row in nonzero_history if row.get("year_month") == current_year_month), None)
+        current_month_qty = float(current_month_row.get("qty_sold", 0.0) or 0.0) if current_month_row else 0.0
+        same_month_last_year = next(
+            (
+                float(row.get("qty_sold", 0.0) or 0.0)
+                for row in nonzero_history
+                if row.get("year_month") == (datetime.now().replace(day=1) - timedelta(days=365)).strftime("%Y-%m")
+            ),
+            0.0,
+        )
+
+        repeated_spike_count = sum(1 for value in same_month_history if value >= overall_average * 1.20)
+        current_window_projection = max(float(recent_average or 0.0), 0.0) * 30.0
+        projection_vs_average = self._calculate_percent_change(current_window_projection, overall_average)
+
+        if repeated_spike_count >= 2 and current_window_projection >= overall_average * 1.10:
+            return {
+                "is_seasonal": True,
+                "classification": "Seasonal",
+                "note": (
+                    "Possible seasonal item: this month has shown repeated demand spikes in prior history, "
+                    f"and the current run-rate is around {projection_vs_average:+.0f}% versus the monthly baseline."
+                ),
+                "pattern_strength": "strong",
+            }
+
+        if same_month_last_year > 0.0 and same_month_last_year >= overall_average * 1.15 and current_total >= same_month_last_year * 0.80:
+            return {
+                "is_seasonal": True,
+                "classification": "Seasonal",
+                "note": (
+                    "Possible seasonal item: demand is aligning with a stronger same-month-last-year pattern "
+                    f"({same_month_last_year:,.1f} units last year)."
+                ),
+                "pattern_strength": "medium",
+            }
+
+        if classification in {"Rising", "Volatile"} and current_window_projection >= overall_average * 1.20:
+            return {
+                "is_seasonal": False,
+                "classification": classification,
+                "note": "Demand spike likely not seasonal yet; recent movement is stronger than the monthly history baseline only in the short term.",
+                "pattern_strength": "weak",
+            }
+
+        return {
+            "is_seasonal": False,
+            "classification": classification,
+            "note": f"{classification}: no repeat seasonal pattern is strong enough yet.",
+            "pattern_strength": "weak",
+        }
+
+    def _build_trend_snapshot(self, rows, days, mode, product_id=None, forecast_days=14):
+        rows = list(rows or [])
+        days = max(int(days or 0), 7)
+        forecast_days = max(int(forecast_days or 0), 1)
+        if not rows:
+            return {
+                "mode": mode,
+                "days": days,
+                "rows": [],
+                "projection_rows": [],
+                "metric_label": "Sales (PKR)" if mode == "overall" else "Units Sold",
+                "secondary_metric_label": "" if mode == "overall" else "Revenue (PKR)",
+                "summary": {
+                    "headline_title": "Net Sales" if mode == "overall" else "Units Sold",
+                    "headline_value": 0.0,
+                    "average_title": "Daily Average",
+                    "average_value": 0.0,
+                    "comparison_title": f"vs previous {days} days",
+                    "comparison_value": 0.0,
+                    "forecast_title": f"Next {forecast_days} days",
+                    "forecast_value": 0.0,
+                    "forecast_low": 0.0,
+                    "forecast_high": 0.0,
+                    "forecast_daily": 0.0,
+                    "secondary_value": 0.0,
+                    "classification": "Insufficient history",
+                    "seasonality_note": "No trend history available yet.",
+                    "confidence_label": "Low confidence",
+                    "confidence_note": "Forecast needs more recent history before it becomes meaningful.",
+                    "reorder_note": "",
+                },
+            }
+
+        current_rows = rows[-days:]
+        previous_rows = rows[:-days]
+        current_values = [float(row.get("value", 0.0) or 0.0) for row in current_rows]
+        current_sales = [float(row.get("sales_amount", 0.0) or 0.0) for row in current_rows]
+        moving_average = self._build_rolling_average(current_values, window=min(7, len(current_values)))
+        for row, average in zip(current_rows, moving_average):
+            row["moving_average"] = average
+
+        previous_values = [float(row.get("value", 0.0) or 0.0) for row in previous_rows[-days:]]
+        current_total = sum(current_values)
+        previous_total = sum(previous_values)
+        average_daily = (current_total / len(current_values)) if current_values else 0.0
+        percent_change = self._calculate_percent_change(current_total, previous_total)
+        recent_window = current_values[-min(7, len(current_values)):] if current_values else []
+        recent_average = (sum(recent_window) / len(recent_window)) if recent_window else 0.0
+        older_window = current_values[-min(14, len(current_values)):] if current_values else []
+        older_average = (sum(older_window) / len(older_window)) if older_window else average_daily
+        growth_bias = max(min(percent_change / 100.0, 0.35), -0.35)
+        weighted_daily = (recent_average * 0.6) + (average_daily * 0.3) + (older_average * 0.1)
+        forecast_daily = max(weighted_daily * (1 + (growth_bias * 0.35)), 0.0)
+        classification = self._classify_trend(current_values, percent_change)
+        mean_value = sum(current_values) / len(current_values) if current_values else 0.0
+        variance = sum((value - mean_value) ** 2 for value in current_values) / max(len(current_values), 1)
+        deviation = math.sqrt(variance)
+        coefficient = (deviation / mean_value) if mean_value > 0.0001 else 0.0
+        volatility_buffer = min(max(coefficient, 0.08), 0.35)
+        forecast_total = forecast_daily * forecast_days
+        forecast_low = max(forecast_total * (1 - volatility_buffer), 0.0)
+        forecast_high = max(forecast_total * (1 + volatility_buffer), 0.0)
+        confidence = self._build_forecast_confidence(current_values, coefficient, classification)
+        projection_rows = self._build_forecast_projection(
+            current_rows[-1].get("date", ""),
+            current_values[-1] if current_values else 0.0,
+            forecast_daily,
+            forecast_days,
+        )
+
+        seasonality_note = ""
+        secondary_value = 0.0
+        reorder_note = ""
+        if mode == "overall":
+            seasonality_note = (
+                f"{classification}: using the last {days} days versus the previous {days}-day window."
+            )
+        else:
+            secondary_value = sum(current_sales)
+            stock_profile = self._get_product_stock_profile(product_id)
+            available_qty = float(stock_profile.get("available_qty", 0.0) or 0.0)
+            reorder_level = float(stock_profile.get("reorder_level", 0.0) or 0.0)
+            projected_cover_days = (available_qty / forecast_daily) if forecast_daily > 0.0001 else 0.0
+            suggested_cover_days = 21
+            suggested_order_qty = max((forecast_daily * suggested_cover_days) - available_qty, 0.0)
+            if suggested_order_qty > 0.0:
+                reorder_note = (
+                    f"Suggested reorder cover: about {suggested_cover_days // 7} weeks. "
+                    f"Current stock covers roughly {projected_cover_days:.1f} days. "
+                    f"Suggested order: {suggested_order_qty:,.1f} units"
+                    + (f" (reorder level {reorder_level:,.1f})." if reorder_level > 0 else ".")
+                )
+            else:
+                reorder_note = (
+                    f"Current stock covers roughly {projected_cover_days:.1f} days at the projected pace."
+                    + (f" Reorder level is {reorder_level:,.1f}." if reorder_level > 0 else "")
+                )
+            same_last_year = self._get_product_same_window_last_year(product_id, days)
+            last_year_qty = float(same_last_year.get("qty_sold", 0.0) or 0.0)
+            seasonality = self._detect_product_seasonality(
+                product_id,
+                current_total=current_total,
+                recent_average=recent_average,
+                classification=classification,
+            )
+            classification = seasonality["classification"]
+            if last_year_qty > 0.0 and seasonality["pattern_strength"] != "strong":
+                same_year_change = self._calculate_percent_change(current_total, last_year_qty)
+                if abs(same_year_change) <= 15:
+                    comparison_text = "tracking close to"
+                elif same_year_change > 15:
+                    comparison_text = "running above"
+                else:
+                    comparison_text = "running below"
+                seasonality_note = (
+                    f"{seasonality['note']} Current {days}-day demand is {comparison_text} the same window last year "
+                    f"({last_year_qty:,.1f} units)."
+                )
+            else:
+                seasonality_note = seasonality["note"]
+            if classification == "Seasonal":
+                confidence = {
+                    "label": "Medium confidence" if confidence["label"] == "High confidence" else confidence["label"],
+                    "note": confidence["note"] + " Seasonal demand can still swing within the active period.",
+                }
+
+        return {
+            "mode": mode,
+            "days": days,
+            "rows": current_rows,
+            "projection_rows": projection_rows,
+            "metric_label": "Sales (PKR)" if mode == "overall" else "Units Sold",
+            "secondary_metric_label": "" if mode == "overall" else "Revenue (PKR)",
+            "summary": {
+                "headline_title": "Net Sales" if mode == "overall" else "Units Sold",
+                "headline_value": current_total,
+                "average_title": "Daily Average",
+                "average_value": average_daily,
+                "comparison_title": f"vs previous {days} days",
+                "comparison_value": percent_change,
+                "forecast_title": f"Next {forecast_days} days",
+                "forecast_value": forecast_total,
+                "forecast_low": forecast_low,
+                "forecast_high": forecast_high,
+                "forecast_daily": forecast_daily,
+                "secondary_value": secondary_value,
+                "classification": classification,
+                "seasonality_note": seasonality_note,
+                "confidence_label": confidence["label"],
+                "confidence_note": confidence["note"],
+                "reorder_note": reorder_note,
+            },
+        }
+
+    def get_overall_sales_trend_snapshot(self, days=30, forecast_days=14):
+        days = max(int(days or 0), 7)
+        rows = self._build_overall_sales_trend_rows(days)
+        return self._build_trend_snapshot(rows, days=days, mode="overall", forecast_days=forecast_days)
+
+    def get_product_sales_trend_snapshot(self, product_id, days=30, forecast_days=14):
+        days = max(int(days or 0), 7)
+        product_id = int(product_id or 0)
+        rows = self._build_product_sales_trend_rows(product_id, days)
+        snapshot = self._build_trend_snapshot(
+            rows,
+            days=days,
+            mode="product",
+            product_id=product_id,
+            forecast_days=forecast_days,
+        )
+        snapshot["product_id"] = product_id
+        snapshot["product_name"] = self._get_product_display_name(product_id)
+        return snapshot
 
     def get_latest_session_cash_position(self):
         query = QSqlQuery()
@@ -3380,6 +3958,705 @@ class ReportService:
                 }
             )
         return rows
+
+    def get_dashboard_low_stock_rows(self, limit=10):
+        query = QSqlQuery()
+        query.prepare(
+            f"""
+            SELECT
+                p.id,
+                p.display_name,
+                COALESCE(SUM(b.quantity_remaining), 0) AS available_qty,
+                MAX(COALESCE(pp.reorder_level, 0)) AS reorder_level
+            FROM product p
+            LEFT JOIN price_pack pp ON pp.product_id = p.id
+            LEFT JOIN batch b ON b.product_id = p.id
+            WHERE p.status = 'used'
+            GROUP BY p.id, p.display_name
+            HAVING COALESCE(SUM(b.quantity_remaining), 0) <= MAX(COALESCE(pp.reorder_level, 0))
+            ORDER BY available_qty ASC, p.display_name ASC
+            LIMIT {int(limit)}
+            """
+        )
+        if not query.exec():
+            raise Exception(f"Low stock query failed: {query.lastError().text()}")
+
+        rows = []
+        while query.next():
+            rows.append({
+                "product_id": int(query.value(0) or 0),
+                "product_name": str(query.value(1) or ""),
+                "available_qty": float(query.value(2) or 0.0),
+                "reorder_level": float(query.value(3) or 0.0),
+            })
+        return rows
+
+    def get_dashboard_expiry_rows(self, limit=10):
+        query = QSqlQuery()
+        query.prepare(
+            f"""
+            WITH parsed AS (
+                SELECT
+                    p.display_name,
+                    COALESCE(b.batch_no, '-') AS batch_no,
+                    b.expiry_date,
+                    CASE
+                        WHEN b.expiry_date LIKE '____-__-__' THEN date(b.expiry_date)
+                        WHEN b.expiry_date LIKE '__-__-____'
+                            THEN date(substr(b.expiry_date, 7, 4) || '-' || substr(b.expiry_date, 4, 2) || '-' || substr(b.expiry_date, 1, 2))
+                        ELSE NULL
+                    END AS expiry_norm
+                FROM batch b
+                JOIN product p ON p.id = b.product_id
+                WHERE
+                    p.status = 'used'
+                    AND b.quantity_remaining > 0
+                    AND b.expiry_date IS NOT NULL
+            )
+            SELECT
+                display_name,
+                batch_no,
+                expiry_date,
+                CASE
+                    WHEN expiry_norm < date('now', 'localtime') THEN 'Expired'
+                    WHEN expiry_norm <= date('now', 'localtime', '+180 days') THEN 'Expiring Soon'
+                END AS alert_status,
+                CAST(julianday(expiry_norm) - julianday(date('now', 'localtime')) AS INTEGER) AS remaining_days
+            FROM parsed
+            WHERE
+                expiry_norm IS NOT NULL
+                AND expiry_norm <= date('now', 'localtime', '+180 days')
+            ORDER BY expiry_norm ASC, display_name ASC
+            LIMIT {int(limit)}
+            """
+        )
+        if not query.exec():
+            raise Exception(f"Expiry query failed: {query.lastError().text()}")
+
+        rows = []
+        while query.next():
+            rows.append({
+                "product_name": str(query.value(0) or ""),
+                "batch_no": str(query.value(1) or ""),
+                "expiry_date": str(query.value(2) or ""),
+                "status": str(query.value(3) or ""),
+                "remaining_days": int(query.value(4) or 0),
+            })
+        return rows
+
+    def get_today_session_sales_rows(self, session_id):
+        rows = []
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                s.id,
+                COALESCE(c.name, 'Walk-in Customer') AS customer_name,
+                COALESCE(a.username, '') AS salesman_name,
+                COALESCE(s.total, 0),
+                COALESCE(s.received, 0),
+                COALESCE(s.remaining, 0),
+                COALESCE(s.writeoff, 0),
+                COALESCE(s.creation_date, '')
+            FROM sales s
+            LEFT JOIN customer c ON c.id = s.customer
+            LEFT JOIN auth a ON a.id = s.salesman
+            WHERE s.session_id = :session_id
+              AND DATE(s.creation_date) = DATE('now')
+            ORDER BY datetime(s.creation_date) DESC, s.id DESC
+            """
+        )
+        query.bindValue(":session_id", int(session_id))
+        if not query.exec():
+            raise Exception(f"Could not load today's sales.\n\n{query.lastError().text()}")
+        while query.next():
+            rows.append({
+                "sale_id": int(query.value(0) or 0),
+                "customer_name": str(query.value(1) or ""),
+                "salesman_name": str(query.value(2) or ""),
+                "total": float(query.value(3) or 0.0),
+                "received": float(query.value(4) or 0.0),
+                "remaining": float(query.value(5) or 0.0),
+                "writeoff": float(query.value(6) or 0.0),
+                "creation_date": str(query.value(7) or ""),
+            })
+        return rows
+
+    def get_today_session_sales_return_rows(self, session_id):
+        rows = []
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT
+                sr.id,
+                COALESCE(sr.salesorder, 0),
+                COALESCE(c.name, 'Walk-in Customer') AS customer_name,
+                COALESCE(a.username, '') AS salesman_name,
+                COALESCE(sr.total, 0),
+                COALESCE(sr.paid, 0),
+                COALESCE(sr.remaining, 0),
+                COALESCE(sr.creation_date, '')
+            FROM salesreturn sr
+            LEFT JOIN customer c ON c.id = sr.customer
+            LEFT JOIN auth a ON a.id = sr.salesman
+            WHERE sr.session_id = :session_id
+              AND DATE(sr.creation_date) = DATE('now')
+            ORDER BY datetime(sr.creation_date) DESC, sr.id DESC
+            """
+        )
+        query.bindValue(":session_id", int(session_id))
+        if not query.exec():
+            raise Exception(f"Could not load today's sales returns.\n\n{query.lastError().text()}")
+        while query.next():
+            rows.append({
+                "return_id": int(query.value(0) or 0),
+                "salesorder_id": int(query.value(1) or 0),
+                "customer_name": str(query.value(2) or ""),
+                "salesman_name": str(query.value(3) or ""),
+                "total": float(query.value(4) or 0.0),
+                "paid": float(query.value(5) or 0.0),
+                "remaining": float(query.value(6) or 0.0),
+                "creation_date": str(query.value(7) or ""),
+            })
+        return rows
+
+    def get_dashboard_reminder_queue_rows(self):
+        rows = []
+        payment_query = QSqlQuery()
+        payment_query.prepare(
+            """
+            SELECT
+                s.id,
+                COALESCE(c.name, 'Walk-in Customer') AS customer_name,
+                COALESCE(s.receiveable, 0) AS outstanding,
+                DATE(s.due_date) AS due_date,
+                CAST(julianday('now', 'localtime') - julianday(s.due_date) AS INTEGER) AS due_delta_days
+            FROM sales s
+            LEFT JOIN customer c ON c.id = s.customer
+            WHERE COALESCE(s.receiveable, 0) > 0
+              AND COALESCE(s.writeoff, 0) = 0
+              AND s.due_date IS NOT NULL
+            """
+        )
+        if payment_query.exec():
+            while payment_query.next():
+                invoice_id = int(payment_query.value(0) or 0)
+                customer_name = str(payment_query.value(1) or "")
+                outstanding = float(payment_query.value(2) or 0.0)
+                due_date = str(payment_query.value(3) or "")
+                due_delta = int(payment_query.value(4) or 0)
+                if due_delta > 30:
+                    priority = "High"
+                elif due_delta > 0:
+                    priority = "Medium"
+                elif due_delta >= -3:
+                    priority = "Low"
+                else:
+                    continue
+                rows.append({
+                    "reminder_key": f"PAYMENT:SALE#{invoice_id}",
+                    "type": "Payment",
+                    "priority": priority,
+                    "entity": customer_name,
+                    "reference": f"SALE#{invoice_id}",
+                    "due_date": due_date,
+                    "message": (
+                        f"Invoice #{invoice_id} for {customer_name} is overdue by {due_delta} day(s)."
+                        if due_delta > 0
+                        else f"Invoice #{invoice_id} for {customer_name} is due in {abs(due_delta)} day(s)."
+                    ),
+                    "amount": outstanding,
+                })
+
+        for row in self.get_dashboard_low_stock_rows(limit=25):
+            available_qty = float(row.get("available_qty", 0.0) or 0.0)
+            reorder_level = float(row.get("reorder_level", 0.0) or 0.0)
+            rows.append({
+                "reminder_key": f"LOW_STOCK:PROD#{int(row.get('product_id', 0) or 0)}",
+                "type": "Low Stock",
+                "priority": "High" if available_qty <= 0 else "Medium",
+                "entity": str(row.get("product_name", "")),
+                "reference": "",
+                "due_date": "",
+                "message": f"Available {available_qty:.0f} vs reorder {reorder_level:.0f}.",
+                "amount": 0.0,
+            })
+
+        for idx, row in enumerate(self.get_near_expiry_rows(days=45)[:25]):
+            remaining_days = int(row.get("days_left", 0) or 0)
+            rows.append({
+                "reminder_key": f"EXPIRY:BATCH#{idx}",
+                "type": "Expiry",
+                "priority": "High" if remaining_days < 0 else ("Medium" if remaining_days <= 15 else "Low"),
+                "entity": str(row.get("product_name", "")),
+                "reference": f"Batch {row.get('batch_no', '')}",
+                "due_date": str(row.get("expiry_date", "")),
+                "message": f"Batch {row.get('batch_no', '')} expires in {remaining_days} day(s).",
+                "amount": 0.0,
+            })
+
+        return rows
+
+    def get_hourly_sales_series(self):
+        local_offset = datetime.now().astimezone().utcoffset()
+        offset_hours = int(local_offset.total_seconds() // 3600) if local_offset else 0
+        offset_str = f"{offset_hours:+d} hours"
+        today = datetime.now().strftime('%Y-%m-%d')
+        hourly_sales = {i: 0 for i in range(24)}
+
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT 
+                strftime('%H', datetime(creation_date, :offset)) AS hour,
+                COALESCE(SUM(total), 0) AS total_sales
+            FROM sales
+            WHERE 
+                date(datetime(creation_date, :offset)) = date(:today)
+            GROUP BY hour
+            ORDER BY hour
+            """
+        )
+        query.bindValue(":offset", offset_str)
+        query.bindValue(":today", today)
+        if query.exec():
+            while query.next():
+                hourly_sales[int(query.value(0) or 0)] = float(query.value(1) or 0.0)
+        return hourly_sales
+
+    def get_monthly_sales_series(self):
+        monthly_sales = {day: 0 for day in range(1, 32)}
+        query = QSqlQuery()
+        query.prepare(
+            """
+            WITH RECURSIVE days(day) AS (
+                SELECT 1
+                UNION ALL
+                SELECT day + 1 FROM days WHERE day < 31
+            )
+            SELECT
+                days.day,
+                COALESCE(SUM(s.total), 0) AS total_sales
+            FROM
+                days
+            LEFT JOIN
+                sales s
+                ON CAST(STRFTIME('%d', s.creation_date) AS INTEGER) = days.day
+                AND STRFTIME('%Y-%m', s.creation_date) = STRFTIME('%Y-%m', 'now')
+            GROUP BY
+                days.day
+            ORDER BY
+                days.day
+            """
+        )
+        if query.exec():
+            while query.next():
+                monthly_sales[int(query.value(0) or 0)] = float(query.value(1) or 0.0)
+        return [monthly_sales[day] for day in range(1, 32)]
+
+    def get_dashboard_sales_trajectory_rows(self, days=7):
+        days = max(int(days or 0), 1)
+        start_date = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+
+        query = QSqlQuery()
+        query.prepare(
+            """
+            WITH RECURSIVE span(day_date) AS (
+                SELECT date(:start_date)
+                UNION ALL
+                SELECT date(day_date, '+1 day')
+                FROM span
+                WHERE day_date < date('now', 'localtime')
+            )
+            SELECT
+                span.day_date,
+                COALESCE(SUM(s.total), 0) AS total_sales
+            FROM span
+            LEFT JOIN sales s
+              ON date(datetime(s.creation_date, 'localtime')) = span.day_date
+            GROUP BY span.day_date
+            ORDER BY span.day_date ASC
+            """
+        )
+        query.bindValue(":start_date", start_date)
+
+        if not query.exec():
+            raise Exception(f"Sales trajectory query failed: {query.lastError().text()}")
+
+        rows = []
+        while query.next():
+            day_text = str(query.value(0) or "").strip()
+            try:
+                label = datetime.strptime(day_text, "%Y-%m-%d").strftime("%d %b")
+            except ValueError:
+                label = day_text
+            rows.append(
+                {
+                    "date": day_text,
+                    "label": label,
+                    "sales_total": float(query.value(1) or 0.0),
+                }
+            )
+        return rows
+
+    def get_dashboard_top_selling_item_rows(self, limit=5, days=30):
+        limit = max(int(limit or 0), 1)
+        days = max(int(days or 0), 1)
+
+        query = QSqlQuery()
+        query.prepare(
+            f"""
+            SELECT
+                COALESCE(p.display_name, 'Unknown Product') AS product_name,
+                COALESCE((
+                    SELECT pp.pack_size
+                    FROM price_pack pp
+                    WHERE pp.product_id = p.id
+                    ORDER BY COALESCE(pp.is_default, 0) DESC, pp.id ASC
+                    LIMIT 1
+                ), 1) AS pack_size,
+                COALESCE(SUM(si.qty_sold), 0) AS total_qty,
+                COALESCE(SUM(si.line_total), 0) AS sales_amount
+            FROM salesitem si
+            JOIN sales s ON s.id = si.sales_id
+            LEFT JOIN product p ON p.id = si.product_id
+            WHERE date(datetime(s.creation_date, 'localtime')) >= date('now', 'localtime', '-{days - 1} days')
+            GROUP BY si.product_id, p.display_name
+            ORDER BY sales_amount DESC, total_qty DESC, product_name ASC
+            LIMIT {limit}
+            """
+        )
+
+        if not query.exec():
+            raise Exception(f"Top selling items query failed: {query.lastError().text()}")
+
+        rows = []
+        while query.next():
+            rows.append(
+                {
+                    "product_name": str(query.value(0) or "").strip(),
+                    "pack_size": float(query.value(1) or 1.0),
+                    "total_qty": float(query.value(2) or 0.0),
+                    "sales_amount": float(query.value(3) or 0.0),
+                }
+            )
+        return rows
+
+    def get_latest_login_timestamp(self, username):
+        username = str(username or "").strip()
+        if not username:
+            return ""
+
+        query = QSqlQuery()
+        query.prepare(
+            """
+            SELECT timestamp
+            FROM activity_log
+            WHERE category = 'login'
+              AND action = 'login'
+              AND username = ?
+            ORDER BY datetime(timestamp) DESC
+            LIMIT 1
+            """
+        )
+        query.addBindValue(username)
+
+        if query.exec() and query.next():
+            return str(query.value(0) or "").strip()
+        return ""
+
+    def get_login_history_rows(self, username, period="week", limit=500):
+        username = str(username or "").strip()
+        if not username:
+            return []
+
+        period = (period or "week").lower()
+        date_filter_sql = ""
+        if period == "today":
+            date_filter_sql = " AND DATE(timestamp) = DATE('now') "
+        elif period == "week":
+            date_filter_sql = " AND DATE(timestamp) >= DATE('now', '-6 days') "
+        elif period == "month":
+            date_filter_sql = " AND DATE(timestamp) >= DATE('now', '-29 days') "
+
+        query = QSqlQuery()
+        query.prepare(
+            f"""
+            SELECT
+                COALESCE(al.timestamp, ''),
+                COALESCE(al.login_session_id, ''),
+                COALESCE(al.daily_session_id, ''),
+                COALESCE(ds.session_date, ''),
+                COALESCE((
+                    SELECT lo.timestamp
+                    FROM activity_log lo
+                    WHERE lo.category = 'login'
+                      AND lo.action = 'logout'
+                      AND COALESCE(lo.login_session_id, '') = COALESCE(al.login_session_id, '')
+                    ORDER BY datetime(lo.timestamp) DESC
+                    LIMIT 1
+                ), '')
+            FROM activity_log al
+            LEFT JOIN daily_session ds ON ds.id = al.daily_session_id
+            WHERE al.category = 'login'
+              AND al.action = 'login'
+              AND al.username = ?
+              {date_filter_sql}
+            ORDER BY datetime(al.timestamp) DESC
+            LIMIT {int(limit)}
+            """
+        )
+        query.addBindValue(username)
+
+        rows = []
+        if not query.exec():
+            raise Exception(f"Could not load login history.\n\n{query.lastError().text()}")
+
+        while query.next():
+            raw_timestamp = str(query.value(0) or "").strip()
+            logout_timestamp = str(query.value(4) or "").strip()
+            login_dt = self._parse_datetime_text(raw_timestamp)
+            logout_dt = self._parse_datetime_text(logout_timestamp)
+
+            if login_dt:
+                login_date = login_dt.strftime("%a, %d %b %Y")
+                login_time = login_dt.strftime("%I:%M %p")
+            else:
+                login_date = raw_timestamp
+                login_time = ""
+
+            if logout_dt:
+                logout_time = logout_dt.strftime("%I:%M %p")
+            else:
+                logout_time = "Active / Unknown"
+
+            duration_text = "-"
+            if login_dt and logout_dt:
+                total_seconds = max(0, int((logout_dt - login_dt).total_seconds()))
+                hours = total_seconds // 3600
+                minutes = (total_seconds % 3600) // 60
+                duration_text = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+
+            daily_session_id = str(query.value(2) or "").strip()
+            session_date = str(query.value(3) or "").strip()
+            if daily_session_id and session_date:
+                daily_session_label = f"Session #{daily_session_id} | {session_date}"
+            elif daily_session_id:
+                daily_session_label = f"Session #{daily_session_id}"
+            else:
+                daily_session_label = "-"
+
+            rows.append({
+                "login_date": login_date,
+                "login_time": login_time,
+                "logout_time": logout_time,
+                "duration": duration_text,
+                "daily_session_label": daily_session_label,
+            })
+
+        return rows
+
+    def ensure_reminder_state_table(self):
+        query = QSqlQuery()
+        if not query.exec("""
+            CREATE TABLE IF NOT EXISTS reminder_state (
+                reminder_key TEXT PRIMARY KEY,
+                state TEXT NOT NULL DEFAULT 'open',
+                snooze_until TEXT,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+            )
+        """):
+            print("reminder_state table create failed:", query.lastError().text())
+
+    def get_reminder_state_map(self, reminder_keys):
+        state_map = {}
+        keys = [str(k) for k in reminder_keys if str(k)]
+        if not keys:
+            return state_map
+
+        placeholders = ",".join(["?"] * len(keys))
+        query = QSqlQuery()
+        query.prepare(f"""
+            SELECT reminder_key, state, COALESCE(snooze_until, '')
+            FROM reminder_state
+            WHERE reminder_key IN ({placeholders})
+        """)
+        for key in keys:
+            query.addBindValue(key)
+
+        if not query.exec():
+            print("reminder_state read failed:", query.lastError().text())
+            return state_map
+
+        while query.next():
+            reminder_key = str(query.value(0) or "")
+            state_map[reminder_key] = {
+                "state": str(query.value(1) or "open"),
+                "snooze_until": str(query.value(2) or ""),
+            }
+        return state_map
+
+    def set_reminder_state(self, reminder_key, state="open", snooze_days=None, clear_snooze=False):
+        reminder_key = str(reminder_key or "").strip()
+        if not reminder_key:
+            return
+
+        query = QSqlQuery()
+        if clear_snooze:
+            query.prepare("""
+                INSERT INTO reminder_state (reminder_key, state, snooze_until, updated_at)
+                VALUES (?, ?, NULL, datetime('now','localtime'))
+                ON CONFLICT(reminder_key) DO UPDATE SET
+                    state = excluded.state,
+                    snooze_until = NULL,
+                    updated_at = datetime('now','localtime')
+            """)
+            query.addBindValue(reminder_key)
+            query.addBindValue(state)
+        elif snooze_days is not None:
+            try:
+                snooze_days = int(snooze_days)
+            except Exception:
+                snooze_days = 1
+            if snooze_days < 1:
+                snooze_days = 1
+            modifier = f"+{snooze_days} days"
+            query.prepare("""
+                INSERT INTO reminder_state (reminder_key, state, snooze_until, updated_at)
+                VALUES (?, 'open', datetime('now','localtime', ?), datetime('now','localtime'))
+                ON CONFLICT(reminder_key) DO UPDATE SET
+                    state = 'open',
+                    snooze_until = datetime('now','localtime', ?),
+                    updated_at = datetime('now','localtime')
+            """)
+            query.addBindValue(reminder_key)
+            query.addBindValue(modifier)
+            query.addBindValue(modifier)
+        else:
+            query.prepare("""
+                INSERT INTO reminder_state (reminder_key, state, snooze_until, updated_at)
+                VALUES (?, ?, NULL, datetime('now','localtime'))
+                ON CONFLICT(reminder_key) DO UPDATE SET
+                    state = excluded.state,
+                    snooze_until = NULL,
+                    updated_at = datetime('now','localtime')
+            """)
+            query.addBindValue(reminder_key)
+            query.addBindValue(state)
+
+        if not query.exec():
+            print("reminder_state update failed:", query.lastError().text())
+
+    def cleanup_stale_reminder_state(self, active_keys):
+        keys = [str(k) for k in active_keys if str(k)]
+        query = QSqlQuery()
+        if not keys:
+            query.exec("DELETE FROM reminder_state")
+            return
+
+        placeholders = ",".join(["?"] * len(keys))
+        query.prepare(f"DELETE FROM reminder_state WHERE reminder_key NOT IN ({placeholders})")
+        for key in keys:
+            query.addBindValue(key)
+        if not query.exec():
+            print("reminder_state cleanup failed:", query.lastError().text())
+
+    def is_reminder_snoozed(self, snooze_until):
+        snooze_dt = self._parse_datetime_text(snooze_until)
+        if not snooze_dt:
+            return False
+        if getattr(snooze_dt, "tzinfo", None) is not None:
+            return snooze_dt >= datetime.now(snooze_dt.tzinfo)
+        return snooze_dt >= datetime.now()
+
+    def verify_active_admin_password(self, user_id, password):
+        try:
+            user_id = int(user_id)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Could not verify admin account."}
+
+        query = QSqlQuery()
+        query.prepare("SELECT password_hash FROM auth WHERE id = ? AND role = 'admin' AND status = 'active' LIMIT 1")
+        query.addBindValue(user_id)
+
+        if not query.exec() or not query.next():
+            return {"ok": False, "error": "Could not verify admin account."}
+
+        stored_hash = str(query.value(0) or "")
+        if not stored_hash:
+            return {"ok": False, "error": "Stored admin password is missing."}
+
+        try:
+            valid = bcrypt.checkpw(str(password).encode(), stored_hash.encode())
+        except Exception:
+            valid = False
+
+        if not valid:
+            return {"ok": False, "error": "Invalid admin password."}
+
+        return {"ok": True}
+
+    def get_backup_health_view_model(self, backup_manager, stale_after_hours=30):
+        health = backup_manager.get_backup_health(stale_after_hours=stale_after_hours)
+        level = str(health.get("status_level", "warning"))
+        text = str(health.get("status_text", ""))
+        last_run = str(health.get("last_run_status", "unknown")).upper()
+
+        if level == "ok":
+            badge_text = "OK"
+            badge_color = "#2e7d32"
+        elif level == "critical":
+            badge_text = "ALERT"
+            badge_color = "#b71c1c"
+        else:
+            badge_text = "WARN"
+            badge_color = "#ef6c00"
+
+        return {
+            "status_level": level,
+            "status_text": text,
+            "last_run_status": last_run,
+            "badge_text": badge_text,
+            "badge_color": badge_color,
+            "summary_text": f"{text} | Last run: {last_run}",
+        }
+
+    def get_backup_run_log_rows(self, backup_manager, limit=100):
+        rows = []
+        for row in backup_manager.get_backup_run_logs(limit=limit):
+            status = str(row.get("status", ""))
+            rows.append({
+                "run_at": str(row.get("run_at", "")),
+                "status": status,
+                "trigger_source": str(row.get("trigger_source", "")),
+                "backup_file": str(row.get("backup_file", "")),
+                "backup_size_kb": str(round((float(row.get("backup_size", 0) or 0) / 1024.0), 1)),
+                "message": str(row.get("message", "")),
+                "status_color": self._status_color(status),
+            })
+        return rows
+
+    def get_restore_run_log_rows(self, backup_manager, limit=50):
+        rows = []
+        for row in backup_manager.get_restore_run_logs(limit=limit):
+            status = str(row.get("status", ""))
+            rows.append({
+                "run_at": str(row.get("run_at", "")),
+                "status": status,
+                "backup_file": str(row.get("backup_file", "")),
+                "message": str(row.get("message", "")),
+                "status_color": self._status_color(status),
+            })
+        return rows
+
+    @staticmethod
+    def _status_color(status):
+        status = str(status or "").lower()
+        if status == "success":
+            return "#2e7d32"
+        if status == "failed":
+            return "#b71c1c"
+        return "#ef6c00"
         
            
         

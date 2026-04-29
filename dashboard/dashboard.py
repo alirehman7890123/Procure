@@ -1,8 +1,8 @@
-from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QHeaderView,QDialog, QLineEdit,QSpacerItem, QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QFileDialog, QInputDialog, QApplication, QGridLayout
+from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QHeaderView,QDialog, QLineEdit,QSpacerItem, QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QFileDialog, QInputDialog, QApplication, QGridLayout, QToolTip
 from PySide6.QtCore import Qt, QFile, QDate, QDateTime, Signal, QTimer
 from PySide6.QtGui import QColor
 import sys, os
-from PySide6.QtSql import QSqlQuery, QSqlDatabase
+from PySide6.QtSql import QSqlDatabase
 from PySide6.QtCore import QDate
 from functools import partial
 from medic.utilities.database import SQLiteConnectionManager
@@ -10,9 +10,10 @@ from medic.utilities.activity_logger import log_activity
 from medic.utilities.permissions import Permissions
 from medic.utilities.session_service import SessionErrorCode, check_active_session
 from services.financial_closing_service import get_month_close_prompt_state
+from services import daily_session_service
+from reports.report_service import ReportService
 import pyqtgraph as pg
-import bcrypt
-from dashboard.daily_session import DailySession
+from features.finance.ui.daily_session import DailySession
 
 
 import os
@@ -67,6 +68,7 @@ class DashboardWidget(QWidget):
 
         # main vertical layout
         self.layout = QVBoxLayout(self)
+        self.report_service = ReportService()
         self.layout.setContentsMargins(10, 10, 10, 10)
         self.layout.setSpacing(10)
         self.layout.setAlignment(Qt.AlignTop)
@@ -269,6 +271,8 @@ class DashboardWidget(QWidget):
         self.low_stock_card = self.build_low_stock_card()
         self.expiry_card = self.build_expiry_card()
         self.reminders_card = self.build_reminders_card()
+        self.sales_trend_card = self.build_sales_trend_card()
+        self.top_selling_card = self.build_top_selling_card()
         self.backup_card = self.build_backup_health_card()
 
         self._apply_dashboard_card_style(self.quick_links_card)
@@ -276,6 +280,8 @@ class DashboardWidget(QWidget):
         self._apply_dashboard_card_style(self.low_stock_card)
         self._apply_dashboard_card_style(self.expiry_card)
         self._apply_dashboard_card_style(self.reminders_card)
+        self._apply_dashboard_card_style(self.sales_trend_card)
+        self._apply_dashboard_card_style(self.top_selling_card)
         self._apply_dashboard_card_style(self.backup_card)
 
         alerts_layout.addWidget(self.quick_links_card)
@@ -287,6 +293,12 @@ class DashboardWidget(QWidget):
         operational_row.addWidget(self.expiry_card, 1)
         operational_row.addWidget(self.reminders_card, 1)
         alerts_layout.addLayout(operational_row)
+
+        sales_snapshot_row = QHBoxLayout()
+        sales_snapshot_row.setSpacing(12)
+        sales_snapshot_row.addWidget(self.sales_trend_card, 2)
+        sales_snapshot_row.addWidget(self.top_selling_card, 1)
+        alerts_layout.addLayout(sales_snapshot_row)
 
         alerts_layout.addSpacing(10)
         alerts_layout.addWidget(self.backup_card)
@@ -370,6 +382,52 @@ class DashboardWidget(QWidget):
             """
         )
 
+    def _format_sold_units(self, total_qty, pack_size):
+        try:
+            qty = int(float(total_qty or 0.0))
+        except Exception:
+            qty = 0
+        try:
+            normalized_pack_size = int(float(pack_size or 0.0))
+        except Exception:
+            normalized_pack_size = 0
+
+        if normalized_pack_size <= 1:
+            return f"0p {qty}s"
+
+        packs = qty // normalized_pack_size
+        singles = qty % normalized_pack_size
+        return f"{packs}p {singles}s"
+
+    def _build_sold_units_label(self, total_qty, pack_size, emphasized=False):
+        label = QLabel()
+        label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        label.setTextFormat(Qt.RichText)
+
+        try:
+            qty = int(float(total_qty or 0.0))
+        except Exception:
+            qty = 0
+        try:
+            normalized_pack_size = int(float(pack_size or 0.0))
+        except Exception:
+            normalized_pack_size = 0
+
+        if normalized_pack_size <= 1:
+            packs = 0
+            singles = qty
+        else:
+            packs = qty // normalized_pack_size
+            singles = qty % normalized_pack_size
+
+        pack_color = "#244F70" if emphasized else "#2F5D7C"
+        single_color = "#738896" if emphasized else "#8AA0AD"
+        label.setText(
+            f"<span style='font-weight:700; color:{pack_color};'>{packs}p</span> "
+            f"<span style='font-weight:600; color:{single_color};'>{singles}s</span>"
+        )
+        return label
+
     def dialog_section_style(self, section):
         if section == "header":
             return "background-color: #EEF4F7; border: 1px solid #D7E2E8; border-radius: 10px;"
@@ -440,84 +498,10 @@ class DashboardWidget(QWidget):
             main_window.financial_close.set_financial_close_create_widget()
 
     def get_today_session_sales_rows(self, session_id):
-        rows = []
-        query = QSqlQuery()
-        query.prepare(
-            """
-            SELECT
-                s.id,
-                COALESCE(c.name, 'Walk-in Customer') AS customer_name,
-                COALESCE(a.username, '') AS salesman_name,
-                COALESCE(s.total, 0),
-                COALESCE(s.received, 0),
-                COALESCE(s.remaining, 0),
-                COALESCE(s.writeoff, 0),
-                COALESCE(s.creation_date, '')
-            FROM sales s
-            LEFT JOIN customer c ON c.id = s.customer
-            LEFT JOIN auth a ON a.id = s.salesman
-            WHERE s.session_id = :session_id
-              AND DATE(s.creation_date) = DATE('now')
-            ORDER BY datetime(s.creation_date) DESC, s.id DESC
-            """
-        )
-        query.bindValue(":session_id", int(session_id))
-
-        if not query.exec():
-            raise Exception(f"Could not load today's sales.\n\n{query.lastError().text()}")
-
-        while query.next():
-            rows.append({
-                "sale_id": int(query.value(0) or 0),
-                "customer_name": str(query.value(1) or ""),
-                "salesman_name": str(query.value(2) or ""),
-                "total": float(query.value(3) or 0.0),
-                "received": float(query.value(4) or 0.0),
-                "remaining": float(query.value(5) or 0.0),
-                "writeoff": float(query.value(6) or 0.0),
-                "creation_date": str(query.value(7) or ""),
-            })
-        return rows
+        return self.report_service.get_today_session_sales_rows(session_id)
 
     def get_today_session_sales_return_rows(self, session_id):
-        rows = []
-        query = QSqlQuery()
-        query.prepare(
-            """
-            SELECT
-                sr.id,
-                COALESCE(sr.salesorder, 0),
-                COALESCE(c.name, 'Walk-in Customer') AS customer_name,
-                COALESCE(a.username, '') AS salesman_name,
-                COALESCE(sr.total, 0),
-                COALESCE(sr.paid, 0),
-                COALESCE(sr.remaining, 0),
-                COALESCE(sr.creation_date, '')
-            FROM salesreturn sr
-            LEFT JOIN customer c ON c.id = sr.customer
-            LEFT JOIN auth a ON a.id = sr.salesman
-            WHERE sr.session_id = :session_id
-              AND DATE(sr.creation_date) = DATE('now')
-            ORDER BY datetime(sr.creation_date) DESC, sr.id DESC
-            """
-        )
-        query.bindValue(":session_id", int(session_id))
-
-        if not query.exec():
-            raise Exception(f"Could not load today's sales returns.\n\n{query.lastError().text()}")
-
-        while query.next():
-            rows.append({
-                "return_id": int(query.value(0) or 0),
-                "salesorder_id": int(query.value(1) or 0),
-                "customer_name": str(query.value(2) or ""),
-                "salesman_name": str(query.value(3) or ""),
-                "total": float(query.value(4) or 0.0),
-                "paid": float(query.value(5) or 0.0),
-                "remaining": float(query.value(6) or 0.0),
-                "creation_date": str(query.value(7) or ""),
-            })
-        return rows
+        return self.report_service.get_today_session_sales_return_rows(session_id)
 
     def show_today_sales_dialog(self):
         session_result = check_active_session(strict=True)
@@ -762,24 +746,7 @@ class DashboardWidget(QWidget):
     def update_dashboard_datetime(self):
         app = QApplication.instance()
         username = (app.property("username") or "") if app else ""
-
-        query = QSqlQuery()
-        query.prepare(
-            """
-            SELECT timestamp
-            FROM activity_log
-            WHERE category = 'login'
-              AND action = 'login'
-              AND username = ?
-            ORDER BY datetime(timestamp) DESC
-            LIMIT 1
-            """
-        )
-        query.addBindValue(username)
-
-        last_login_text = ""
-        if query.exec() and query.next():
-            last_login_text = str(query.value(0) or "").strip()
+        last_login_text = self.report_service.get_latest_login_timestamp(username)
 
         if last_login_text:
             login_dt = QDateTime.fromString(last_login_text, "yyyy-MM-dd HH:mm:ss")
@@ -897,101 +864,7 @@ class DashboardWidget(QWidget):
 
         def load_rows():
             period_key = period_combo.currentData()
-            date_filter_sql = ""
-
-            if period_key == "today":
-                date_filter_sql = " AND DATE(timestamp) = DATE('now') "
-            elif period_key == "week":
-                date_filter_sql = " AND DATE(timestamp) >= DATE('now', '-6 days') "
-            elif period_key == "month":
-                date_filter_sql = " AND DATE(timestamp) >= DATE('now', '-29 days') "
-
-            query = QSqlQuery()
-            query.prepare(
-                f"""
-                SELECT
-                    COALESCE(al.timestamp, ''),
-                    COALESCE(al.login_session_id, ''),
-                    COALESCE(al.daily_session_id, ''),
-                    COALESCE(ds.session_date, ''),
-                    COALESCE((
-                        SELECT lo.timestamp
-                        FROM activity_log lo
-                        WHERE lo.category = 'login'
-                          AND lo.action = 'logout'
-                          AND COALESCE(lo.login_session_id, '') = COALESCE(al.login_session_id, '')
-                        ORDER BY datetime(lo.timestamp) DESC
-                        LIMIT 1
-                    ), '')
-                FROM activity_log al
-                LEFT JOIN daily_session ds ON ds.id = al.daily_session_id
-                WHERE al.category = 'login'
-                  AND al.action = 'login'
-                  AND al.username = ?
-                  {date_filter_sql}
-                ORDER BY datetime(al.timestamp) DESC
-                LIMIT 500
-                """
-            )
-            query.addBindValue(username)
-
-            rows = []
-            if query.exec():
-                while query.next():
-                    raw_timestamp = str(query.value(0) or "").strip()
-                    logout_timestamp = str(query.value(4) or "").strip()
-                    login_dt = QDateTime.fromString(raw_timestamp, "yyyy-MM-dd HH:mm:ss")
-                    if not login_dt.isValid():
-                        login_dt = QDateTime.fromString(raw_timestamp, Qt.ISODate)
-
-                    logout_dt = QDateTime.fromString(logout_timestamp, "yyyy-MM-dd HH:mm:ss")
-                    if not logout_dt.isValid():
-                        logout_dt = QDateTime.fromString(logout_timestamp, Qt.ISODate)
-
-                    if login_dt.isValid():
-                        if login_dt.timeSpec() == Qt.LocalTime:
-                            login_dt.setTimeSpec(Qt.UTC)
-                        login_dt = login_dt.toLocalTime()
-                        login_date = login_dt.toString("ddd, dd MMM yyyy")
-                        login_time = login_dt.toString("hh:mm AP")
-                    else:
-                        login_date = raw_timestamp
-                        login_time = ""
-
-                    if logout_dt.isValid():
-                        if logout_dt.timeSpec() == Qt.LocalTime:
-                            logout_dt.setTimeSpec(Qt.UTC)
-                        logout_dt = logout_dt.toLocalTime()
-                        logout_time = logout_dt.toString("hh:mm AP")
-                    else:
-                        logout_time = "Active / Unknown"
-
-                    duration_text = "-"
-                    if login_dt.isValid() and logout_dt.isValid():
-                        total_seconds = max(0, login_dt.secsTo(logout_dt))
-                        hours = total_seconds // 3600
-                        minutes = (total_seconds % 3600) // 60
-                        if hours > 0:
-                            duration_text = f"{hours}h {minutes}m"
-                        else:
-                            duration_text = f"{minutes}m"
-
-                    daily_session_id = str(query.value(2) or "").strip()
-                    session_date = str(query.value(3) or "").strip()
-                    if daily_session_id and session_date:
-                        daily_session_label = f"Session #{daily_session_id} | {session_date}"
-                    elif daily_session_id:
-                        daily_session_label = f"Session #{daily_session_id}"
-                    else:
-                        daily_session_label = "-"
-
-                    rows.append({
-                        "login_date": login_date,
-                        "login_time": login_time,
-                        "logout_time": logout_time,
-                        "duration": duration_text,
-                        "daily_session_label": daily_session_label,
-                    })
+            rows = self.report_service.get_login_history_rows(username, period=period_key, limit=500)
 
             table.setRowCount(len(rows))
             for row_index, row in enumerate(rows):
@@ -1133,6 +1006,122 @@ class DashboardWidget(QWidget):
         layout.addLayout(info_row)
         return card
 
+    def build_sales_trend_card(self):
+        card = QFrame()
+        card.setObjectName("sectionCard")
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        title = QLabel("Sales Overview")
+        title.setObjectName("SectionTitle")
+        self.sales_snapshot_range_combo = QComboBox()
+        self.sales_snapshot_range_combo.addItem("Last 7 days", 7)
+        self.sales_snapshot_range_combo.addItem("Last 30 days", 30)
+        self.sales_snapshot_range_combo.addItem("Last 60 days", 60)
+        self.sales_snapshot_range_combo.addItem("Last 90 days", 90)
+        self.sales_snapshot_range_combo.setCurrentIndex(0)
+        self.sales_snapshot_range_combo.setCursor(Qt.PointingHandCursor)
+        self.sales_snapshot_range_combo.currentIndexChanged.connect(self.load_sales_snapshot_data)
+        self.sales_trend_meta = QLabel("Last 7 days")
+        self.sales_trend_meta.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.sales_trend_meta.setStyleSheet("color:#777; padding-left: 0;")
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(self.sales_snapshot_range_combo)
+        header.addSpacing(8)
+        header.addWidget(self.sales_trend_meta)
+        layout.addLayout(header)
+
+        self.sales_trend_plot = pg.PlotWidget()
+        self.sales_trend_plot.setStyleSheet(
+            """
+            QToolTip {
+                background-color: #183B56;
+                color: #F8FBFD;
+                border: 1px solid #2A5B7D;
+                border-radius: 2px;
+                padding: 6px 8px;
+                font-weight: 600;
+            }
+            """
+        )
+        self.sales_trend_plot.setBackground("#F8FBFD")
+        self.sales_trend_plot.setMinimumHeight(230)
+        self.sales_trend_plot.showGrid(x=False, y=True, alpha=0.18)
+        self.sales_trend_plot.setMenuEnabled(False)
+        self.sales_trend_plot.setMouseEnabled(x=False, y=False)
+        self.sales_trend_plot.hideButtons()
+        self.sales_trend_plot.getPlotItem().setContentsMargins(6, 6, 12, 6)
+        self.sales_trend_plot.getAxis("left").setTextPen(pg.mkPen("#607D8B"))
+        self.sales_trend_plot.getAxis("bottom").setTextPen(pg.mkPen("#607D8B"))
+        self.sales_trend_plot.getAxis("left").setPen(pg.mkPen("#C9D6DF"))
+        self.sales_trend_plot.getAxis("bottom").setPen(pg.mkPen("#C9D6DF"))
+        self.sales_trend_plot.getPlotItem().hideAxis("top")
+        self.sales_trend_plot.getPlotItem().hideAxis("right")
+        self.sales_trend_points = []
+        self.sales_trend_scatter = None
+        layout.addWidget(self.sales_trend_plot)
+
+        return card
+
+    def build_top_selling_card(self):
+        card = QFrame()
+        card.setObjectName("sectionCard")
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        title = QLabel("Top Selling Items")
+        title.setObjectName("SectionTitle")
+        self.top_selling_meta = QLabel("Last 30 days")
+        self.top_selling_meta.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.top_selling_meta.setStyleSheet("color:#777; padding-left: 0;")
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(self.top_selling_meta)
+        layout.addLayout(header)
+
+        self.top_selling_table = QTableWidget(0, 3)
+        self.top_selling_table.setHorizontalHeaderLabels(["Item Name", "Sold", "Sales (PKR)"])
+        self.top_selling_table.verticalHeader().setVisible(False)
+        self.top_selling_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.top_selling_table.setSelectionMode(QTableWidget.NoSelection)
+        self.top_selling_table.setFocusPolicy(Qt.NoFocus)
+        self.top_selling_table.setAlternatingRowColors(True)
+        self.top_selling_table.setShowGrid(False)
+        self.top_selling_table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.top_selling_table.setStyleSheet(
+            """
+            QTableWidget {
+                background-color: #F8FBFD;
+                alternate-background-color: #F1F6FA;
+                border: 1px solid #D9E5EC;
+                border-radius: 6px;
+            }
+            QHeaderView::section {
+                background-color: #EAF2F7;
+                color: #36566C;
+                font-weight: 700;
+                border: none;
+                border-bottom: 1px solid #D4E0E8;
+                padding: 6px 8px;
+            }
+            """
+        )
+        self.top_selling_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.top_selling_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.top_selling_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.top_selling_table.verticalHeader().setDefaultSectionSize(34)
+        self.top_selling_table.setMinimumHeight(230)
+        layout.addWidget(self.top_selling_table)
+
+        return card
+
 
     def build_reminders_card(self):
 
@@ -1262,7 +1251,8 @@ class DashboardWidget(QWidget):
         self.load_backup_health_summary()
         self.load_reminder_summary()
         self.load_low_stock_data()
-        self.load_expiry_data()        
+        self.load_expiry_data()
+        self.load_sales_snapshot_data()
 
     def refresh_dashboard_alerts(self):
         db = QSqlDatabase.database()
@@ -1303,28 +1293,43 @@ class DashboardWidget(QWidget):
         return DailySession._get_strict_active_session_id(self, action_label)
 
     def get_open_session(self):
-        return DailySession.get_open_session(self)
+        active_session_id = self._get_strict_active_session_id(action_label="view session details")
+        if active_session_id is None:
+            return None
+        return daily_session_service.get_open_session(session_id=active_session_id)
 
     def open_session_dialog(self):
         return DailySession.open_session_dialog(self)
 
     def get_previous_balance(self):
-        return DailySession.get_previous_balance(self)
+        return daily_session_service.get_previous_balance()
 
     def get_cash_expenses(self):
-        return DailySession.get_cash_expenses(self)
+        active_session_id = self._get_strict_active_session_id(action_label="close the session")
+        if active_session_id is None:
+            return 0.0
+        return daily_session_service.get_cash_expenses(session_id=active_session_id)
 
     def get_session_payment_method_summary(self, methods=None):
-        return DailySession.get_session_payment_method_summary(self, methods)
+        active_session_id = self._get_strict_active_session_id(action_label="close the session")
+        if active_session_id is None:
+            return {}
+        return daily_session_service.get_session_payment_method_summary(session_id=active_session_id, methods=methods)
 
     def close_session_dialog(self, session_data):
         return DailySession.close_session_dialog(self, session_data)
 
     def get_opening_cash(self):
-        return DailySession.get_opening_cash(self)
+        active_session_id = self._get_strict_active_session_id(action_label="close the session")
+        if active_session_id is None:
+            return 0.0
+        return daily_session_service.get_opening_cash(session_id=active_session_id)
 
     def get_current_session_cash_flows(self):
-        return DailySession.get_current_session_cash_flows(self)
+        active_session_id = self._get_strict_active_session_id(action_label="close the session")
+        if active_session_id is None:
+            return None, 0.0, 0.0
+        return daily_session_service.get_current_session_cash_flows(session_id=active_session_id)
 
     def update_session_status_card(self):
         result = check_active_session(strict=True)
@@ -1383,18 +1388,13 @@ class DashboardWidget(QWidget):
         if not session_data:
             return
 
-        query = QSqlQuery()
-        query.prepare(
-            """
-            INSERT INTO daily_session (session_date, opening_cash, status)
-            VALUES (?, ?, 'open')
-            """
-        )
-        query.addBindValue(session_data["session_date"])
-        query.addBindValue(session_data["opening_cash"])
-
-        if not query.exec():
-            AppMessageBox.critical(self, "Database Error", f"Could not open daily session.\n\n{query.lastError().text()}")
+        try:
+            daily_session_service.open_daily_session(
+                session_date=session_data["session_date"],
+                opening_cash=session_data["opening_cash"],
+            )
+        except Exception as exc:
+            AppMessageBox.critical(self, "Database Error", f"Could not open daily session.\n\n{exc}")
             return
 
         self.refresh_dashboard_alerts()
@@ -1411,28 +1411,16 @@ class DashboardWidget(QWidget):
         if not result:
             return
 
-        query = QSqlQuery()
-        query.prepare(
-            """
-            UPDATE daily_session
-            SET
-                system_cash = ?,
-                actual_cash = ?,
-                withdrawal = ?,
-                cash_difference = ?,
-                closed_at = CURRENT_TIMESTAMP,
-                status = 'closed'
-            WHERE id = ?
-            """
-        )
-        query.addBindValue(result["system_cash"])
-        query.addBindValue(result["actual_cash"])
-        query.addBindValue(result["withdraw_amount"])
-        query.addBindValue(result["cash_difference"])
-        query.addBindValue(session["id"])
-
-        if not query.exec():
-            AppMessageBox.critical(self, "Database Error", f"Could not close daily session.\n\n{query.lastError().text()}")
+        try:
+            daily_session_service.close_daily_session(
+                session_id=session["id"],
+                system_cash=result["system_cash"],
+                actual_cash=result["actual_cash"],
+                withdrawal=result["withdraw_amount"],
+                cash_difference=result["cash_difference"],
+            )
+        except Exception as exc:
+            AppMessageBox.critical(self, "Database Error", f"Could not close daily session.\n\n{exc}")
             return
 
         self.refresh_dashboard_alerts()
@@ -1496,26 +1484,9 @@ class DashboardWidget(QWidget):
         if not ok:
             return False
 
-        query = QSqlQuery()
-        query.prepare("SELECT password_hash FROM auth WHERE id = ? AND role = 'admin' AND status = 'active' LIMIT 1")
-        query.addBindValue(int(user_id))
-
-        if not query.exec() or not query.next():
-            AppMessageBox.warning(self, "Verification Failed", "Could not verify admin account.")
-            return False
-
-        stored_hash = str(query.value(0) or "")
-        if not stored_hash:
-            AppMessageBox.warning(self, "Verification Failed", "Stored admin password is missing.")
-            return False
-
-        try:
-            valid = bcrypt.checkpw(str(password).encode(), stored_hash.encode())
-        except Exception:
-            valid = False
-
-        if not valid:
-            AppMessageBox.warning(self, "Verification Failed", "Invalid admin password.")
+        verification = self.report_service.verify_active_admin_password(user_id, password)
+        if not verification.get("ok"):
+            AppMessageBox.warning(self, "Verification Failed", str(verification.get("error") or "Admin verification failed."))
             return False
 
         return True
@@ -1557,22 +1528,10 @@ class DashboardWidget(QWidget):
 
 
     def load_backup_health_summary(self):
-        health = self.backup_manager.get_backup_health(stale_after_hours=30)
-        level = str(health.get("status_level", "warning"))
-        text = str(health.get("status_text", ""))
-        last_run = str(health.get("last_run_status", "unknown")).upper()
-
-        if level == "ok":
-            self.backup_status_badge.setText("OK")
-            self.backup_status_badge.setStyleSheet("font-weight:bold; color:#2e7d32;")
-        elif level == "critical":
-            self.backup_status_badge.setText("ALERT")
-            self.backup_status_badge.setStyleSheet("font-weight:bold; color:#b71c1c;")
-        else:
-            self.backup_status_badge.setText("WARN")
-            self.backup_status_badge.setStyleSheet("font-weight:bold; color:#ef6c00;")
-
-        self.backup_meta.setText(f"{text} | Last run: {last_run}")
+        health = self.report_service.get_backup_health_view_model(self.backup_manager, stale_after_hours=30)
+        self.backup_status_badge.setText(str(health.get("badge_text", "WARN")))
+        self.backup_status_badge.setStyleSheet(f"font-weight:bold; color:{health.get('badge_color', '#ef6c00')};")
+        self.backup_meta.setText(str(health.get("summary_text", "")))
 
 
     def show_backup_status_dialog(self):
@@ -1584,7 +1543,7 @@ class DashboardWidget(QWidget):
         layout.setSpacing(8)
 
         top_row = QHBoxLayout()
-        health = self.backup_manager.get_backup_health(stale_after_hours=30)
+        health = self.report_service.get_backup_health_view_model(self.backup_manager, stale_after_hours=30)
         top_row.addWidget(QLabel(str(health.get("status_text", ""))))
         top_row.addStretch()
         backup_now_btn = QPushButton("Backup Now")
@@ -1650,52 +1609,40 @@ class DashboardWidget(QWidget):
             return str(file_item.text() or "").strip()
 
         def load_log_rows():
-            rows = []
-            for row in self.backup_manager.get_backup_run_logs(limit=100):
-                rows.append([
-                    str(row.get("run_at", "")),
-                    str(row.get("status", "")),
-                    str(row.get("trigger_source", "")),
-                    str(row.get("backup_file", "")),
-                    str(round((float(row.get("backup_size", 0) or 0) / 1024.0), 1)),
-                    str(row.get("message", "")),
-                ])
+            rows = self.report_service.get_backup_run_log_rows(self.backup_manager, limit=100)
 
             table.setRowCount(len(rows))
-            for r, values in enumerate(rows):
+            for r, row_data in enumerate(rows):
+                values = [
+                    str(row_data.get("run_at", "")),
+                    str(row_data.get("status", "")),
+                    str(row_data.get("trigger_source", "")),
+                    str(row_data.get("backup_file", "")),
+                    str(row_data.get("backup_size_kb", "")),
+                    str(row_data.get("message", "")),
+                ]
                 for c, value in enumerate(values):
                     item = QTableWidgetItem(value)
                     item.setFlags(item.flags() ^ Qt.ItemIsEditable)
                     if c == 1:
-                        status = value.lower()
-                        if status == "success":
-                            item.setForeground(QColor("#2e7d32"))
-                        elif status == "failed":
-                            item.setForeground(QColor("#b71c1c"))
-                        else:
-                            item.setForeground(QColor("#ef6c00"))
+                        item.setForeground(QColor(str(row_data.get("status_color", "#ef6c00"))))
                     table.setItem(r, c, item)
 
-            restore_rows = []
-            for row in self.backup_manager.get_restore_run_logs(limit=50):
-                restore_rows.append([
-                    str(row.get("run_at", "")),
-                    str(row.get("status", "")),
-                    str(row.get("backup_file", "")),
-                    str(row.get("message", "")),
-                ])
+            restore_rows = self.report_service.get_restore_run_log_rows(self.backup_manager, limit=50)
 
             restore_table.setRowCount(len(restore_rows))
-            for r, values in enumerate(restore_rows):
+            for r, row_data in enumerate(restore_rows):
+                values = [
+                    str(row_data.get("run_at", "")),
+                    str(row_data.get("status", "")),
+                    str(row_data.get("backup_file", "")),
+                    str(row_data.get("message", "")),
+                ]
                 for c, value in enumerate(values):
                     item = QTableWidgetItem(value)
                     item.setFlags(item.flags() ^ Qt.ItemIsEditable)
                     if c == 1:
-                        s = value.lower()
-                        if s == "success":
-                            item.setForeground(QColor("#2e7d32"))
-                        elif s == "failed":
-                            item.setForeground(QColor("#b71c1c"))
+                        item.setForeground(QColor(str(row_data.get("status_color", "#ef6c00"))))
                     restore_table.setItem(r, c, item)
 
             footer_label.setText(f"Backups shown: {len(rows)} | Restore runs shown: {len(restore_rows)}")
@@ -1783,162 +1730,11 @@ class DashboardWidget(QWidget):
 
 
     def get_reminder_queue_rows(self, include_hidden_states=False):
-        self.ensure_reminder_state_table()
-        rows = []
-
-        # Payment follow-up reminders (overdue + due soon)
-        payment_query = QSqlQuery()
-        payment_query.prepare("""
-            SELECT
-                s.id,
-                COALESCE(c.name, 'Walk-in Customer') AS customer_name,
-                COALESCE(s.receiveable, 0) AS outstanding,
-                DATE(s.due_date) AS due_date,
-                CAST(julianday('now', 'localtime') - julianday(s.due_date) AS INTEGER) AS due_delta_days
-            FROM sales s
-            LEFT JOIN customer c ON c.id = s.customer
-            WHERE COALESCE(s.receiveable, 0) > 0
-              AND COALESCE(s.writeoff, 0) = 0
-              AND s.due_date IS NOT NULL
-        """)
-
-        if payment_query.exec():
-            while payment_query.next():
-                invoice_id = int(payment_query.value(0) or 0)
-                customer_name = str(payment_query.value(1) or "")
-                outstanding = float(payment_query.value(2) or 0.0)
-                due_date = str(payment_query.value(3) or "")
-                due_delta = int(payment_query.value(4) or 0)
-
-                if due_delta > 30:
-                    priority = "High"
-                elif due_delta > 0:
-                    priority = "Medium"
-                elif due_delta >= -3:
-                    priority = "Low"
-                else:
-                    continue
-
-                if due_delta > 0:
-                    message = f"Invoice #{invoice_id} for {customer_name} is overdue by {due_delta} day(s)."
-                else:
-                    message = f"Invoice #{invoice_id} for {customer_name} is due in {abs(due_delta)} day(s)."
-
-                rows.append({
-                    "reminder_key": f"PAYMENT:SALE#{invoice_id}",
-                    "type": "Payment",
-                    "priority": priority,
-                    "entity": customer_name,
-                    "reference": f"SALE#{invoice_id}",
-                    "due_date": due_date,
-                    "message": message,
-                    "amount": outstanding,
-                })
-        else:
-            print("Payment reminder query failed:", payment_query.lastError().text())
-
-        # Low stock reminders
-        low_stock_query = QSqlQuery()
-        low_stock_query.prepare("""
-            SELECT
-                p.id,
-                p.display_name,
-                COALESCE(SUM(b.quantity_remaining), 0) AS available_qty,
-                MAX(COALESCE(pp.reorder_level, 0)) AS reorder_level
-            FROM product p
-            LEFT JOIN price_pack pp ON pp.product_id = p.id
-            LEFT JOIN batch b ON b.product_id = p.id
-            WHERE p.status = 'used'
-            GROUP BY p.id, p.display_name
-            HAVING COALESCE(SUM(b.quantity_remaining), 0) <= MAX(COALESCE(pp.reorder_level, 0))
-            ORDER BY available_qty ASC
-            LIMIT 25
-        """)
-
-        if low_stock_query.exec():
-            while low_stock_query.next():
-                product_id = int(low_stock_query.value(0) or 0)
-                product_name = str(low_stock_query.value(1) or "")
-                available_qty = float(low_stock_query.value(2) or 0.0)
-                reorder_level = float(low_stock_query.value(3) or 0.0)
-                priority = "High" if available_qty <= 0 else "Medium"
-                rows.append({
-                    "reminder_key": f"LOW_STOCK:PROD#{product_id}",
-                    "type": "Low Stock",
-                    "priority": priority,
-                    "entity": product_name,
-                    "reference": "",
-                    "due_date": "",
-                    "message": f"Available {available_qty:.0f} vs reorder {reorder_level:.0f}.",
-                    "amount": 0.0,
-                })
-        else:
-            print("Low stock reminder query failed:", low_stock_query.lastError().text())
-
-        # Expiry reminders
-        expiry_query = QSqlQuery()
-        expiry_query.prepare("""
-            WITH parsed AS (
-                SELECT
-                    b.id AS batch_id,
-                    p.display_name,
-                    COALESCE(b.batch_no, '-') AS batch_no,
-                    b.expiry_date,
-                    CASE
-                        WHEN b.expiry_date LIKE '____-__-__' THEN date(b.expiry_date)
-                        WHEN b.expiry_date LIKE '__-__-____'
-                            THEN date(substr(b.expiry_date, 7, 4) || '-' || substr(b.expiry_date, 4, 2) || '-' || substr(b.expiry_date, 1, 2))
-                        ELSE NULL
-                    END AS expiry_norm
-                FROM batch b
-                JOIN product p ON p.id = b.product_id
-                WHERE p.status = 'used'
-                  AND b.quantity_remaining > 0
-                  AND b.expiry_date IS NOT NULL
-            )
-            SELECT
-                batch_id,
-                display_name,
-                batch_no,
-                expiry_date,
-                CAST(julianday(expiry_norm) - julianday(date('now', 'localtime')) AS INTEGER) AS remaining_days
-            FROM parsed
-            WHERE expiry_norm IS NOT NULL
-              AND expiry_norm <= date('now', 'localtime', '+45 days')
-            ORDER BY expiry_norm ASC
-            LIMIT 25
-        """)
-
-        if expiry_query.exec():
-            while expiry_query.next():
-                batch_id = int(expiry_query.value(0) or 0)
-                product_name = str(expiry_query.value(1) or "")
-                batch_no = str(expiry_query.value(2) or "")
-                expiry_date = str(expiry_query.value(3) or "")
-                remaining_days = int(expiry_query.value(4) or 0)
-
-                if remaining_days < 0:
-                    priority = "High"
-                elif remaining_days <= 15:
-                    priority = "Medium"
-                else:
-                    priority = "Low"
-
-                rows.append({
-                    "reminder_key": f"EXPIRY:BATCH#{batch_id}",
-                    "type": "Expiry",
-                    "priority": priority,
-                    "entity": product_name,
-                    "reference": f"Batch {batch_no}",
-                    "due_date": expiry_date,
-                    "message": f"Batch {batch_no} expires in {remaining_days} day(s).",
-                    "amount": 0.0,
-                })
-        else:
-            print("Expiry reminder query failed:", expiry_query.lastError().text())
+        self.report_service.ensure_reminder_state_table()
+        rows = self.report_service.get_dashboard_reminder_queue_rows()
 
         active_keys = [str(r.get("reminder_key", "")) for r in rows if str(r.get("reminder_key", ""))]
-        state_map = self.get_reminder_state_map(active_keys)
+        state_map = self.report_service.get_reminder_state_map(active_keys)
 
         visible_rows = []
         for row in rows:
@@ -1952,11 +1748,7 @@ class DashboardWidget(QWidget):
 
             is_snoozed = False
             if snooze_until:
-                now_check = QSqlQuery()
-                now_check.prepare("SELECT CASE WHEN datetime('now','localtime') <= datetime(?) THEN 1 ELSE 0 END")
-                now_check.addBindValue(snooze_until)
-                if now_check.exec() and now_check.next():
-                    is_snoozed = int(now_check.value(0) or 0) == 1
+                is_snoozed = self.report_service.is_reminder_snoozed(snooze_until)
 
             if status == "acknowledged":
                 row["visibility_state"] = "acknowledged"
@@ -1977,7 +1769,7 @@ class DashboardWidget(QWidget):
 
             visible_rows.append(row)
 
-        self.cleanup_stale_reminder_state(active_keys)
+        self.report_service.cleanup_stale_reminder_state(active_keys)
 
         priority_order = {"High": 0, "Medium": 1, "Low": 2}
         visible_rows.sort(key=lambda r: (priority_order.get(str(r.get("priority")), 9), str(r.get("type", "")), str(r.get("entity", ""))))
@@ -1985,113 +1777,24 @@ class DashboardWidget(QWidget):
 
 
     def ensure_reminder_state_table(self):
-        query = QSqlQuery()
-        if not query.exec("""
-            CREATE TABLE IF NOT EXISTS reminder_state (
-                reminder_key TEXT PRIMARY KEY,
-                state TEXT NOT NULL DEFAULT 'open',
-                snooze_until TEXT,
-                updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-            )
-        """):
-            print("reminder_state table create failed:", query.lastError().text())
+        self.report_service.ensure_reminder_state_table()
 
 
     def get_reminder_state_map(self, reminder_keys):
-        state_map = {}
-        keys = [k for k in reminder_keys if k]
-        if not keys:
-            return state_map
-
-        placeholders = ",".join(["?"] * len(keys))
-        query = QSqlQuery()
-        query.prepare(f"""
-            SELECT reminder_key, state, COALESCE(snooze_until, '')
-            FROM reminder_state
-            WHERE reminder_key IN ({placeholders})
-        """)
-        for key in keys:
-            query.addBindValue(key)
-
-        if not query.exec():
-            print("reminder_state read failed:", query.lastError().text())
-            return state_map
-
-        while query.next():
-            r_key = str(query.value(0) or "")
-            state_map[r_key] = {
-                "state": str(query.value(1) or "open"),
-                "snooze_until": str(query.value(2) or ""),
-            }
-
-        return state_map
+        return self.report_service.get_reminder_state_map(reminder_keys)
 
 
     def set_reminder_state(self, reminder_key, state="open", snooze_days=None, clear_snooze=False):
-        if not reminder_key:
-            return
-
-        query = QSqlQuery()
-        if clear_snooze:
-            query.prepare("""
-                INSERT INTO reminder_state (reminder_key, state, snooze_until, updated_at)
-                VALUES (?, ?, NULL, datetime('now','localtime'))
-                ON CONFLICT(reminder_key) DO UPDATE SET
-                    state = excluded.state,
-                    snooze_until = NULL,
-                    updated_at = datetime('now','localtime')
-            """)
-            query.addBindValue(reminder_key)
-            query.addBindValue(state)
-        elif snooze_days is not None:
-            try:
-                snooze_days = int(snooze_days)
-            except Exception:
-                snooze_days = 1
-            if snooze_days < 1:
-                snooze_days = 1
-            query.prepare("""
-                INSERT INTO reminder_state (reminder_key, state, snooze_until, updated_at)
-                VALUES (?, 'open', datetime('now','localtime', ?), datetime('now','localtime'))
-                ON CONFLICT(reminder_key) DO UPDATE SET
-                    state = 'open',
-                    snooze_until = datetime('now','localtime', ?),
-                    updated_at = datetime('now','localtime')
-            """)
-            modifier = f"+{snooze_days} days"
-            query.addBindValue(reminder_key)
-            query.addBindValue(modifier)
-            query.addBindValue(modifier)
-        else:
-            query.prepare("""
-                INSERT INTO reminder_state (reminder_key, state, snooze_until, updated_at)
-                VALUES (?, ?, NULL, datetime('now','localtime'))
-                ON CONFLICT(reminder_key) DO UPDATE SET
-                    state = excluded.state,
-                    snooze_until = NULL,
-                    updated_at = datetime('now','localtime')
-            """)
-            query.addBindValue(reminder_key)
-            query.addBindValue(state)
-
-        if not query.exec():
-            print("reminder_state update failed:", query.lastError().text())
+        self.report_service.set_reminder_state(
+            reminder_key,
+            state=state,
+            snooze_days=snooze_days,
+            clear_snooze=clear_snooze,
+        )
 
 
     def cleanup_stale_reminder_state(self, active_keys):
-        keys = [k for k in active_keys if k]
-        query = QSqlQuery()
-        if not keys:
-            query.exec("DELETE FROM reminder_state")
-            return
-
-        placeholders = ",".join(["?"] * len(keys))
-        sql = f"DELETE FROM reminder_state WHERE reminder_key NOT IN ({placeholders})"
-        query.prepare(sql)
-        for key in keys:
-            query.addBindValue(key)
-        if not query.exec():
-            print("reminder_state cleanup failed:", query.lastError().text())
+        self.report_service.cleanup_stale_reminder_state(active_keys)
 
 
     def load_reminder_summary(self):
@@ -2318,42 +2021,7 @@ class DashboardWidget(QWidget):
 
     
     def load_low_stock_data(self):
-        rows = []
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                p.id,
-                p.display_name,
-                COALESCE(SUM(b.quantity_remaining), 0) AS available_qty,
-                MAX(COALESCE(pp.reorder_level, 0)) AS reorder_level
-            FROM product p
-            LEFT JOIN price_pack pp
-                ON pp.product_id = p.id
-            LEFT JOIN batch b
-                ON b.product_id = p.id
-            WHERE
-                p.status = 'used'
-            GROUP BY
-                p.id, p.display_name
-            HAVING
-                COALESCE(SUM(b.quantity_remaining), 0) <= MAX(COALESCE(pp.reorder_level, 0))
-            ORDER BY
-                available_qty ASC,
-                p.display_name ASC
-            LIMIT 10
-        """)
-
-        if not query.exec():
-            print("Low stock query failed:", query.lastError().text())
-            return
-
-        while query.next():
-            rows.append({
-                "product_id": int(query.value(0) or 0),
-                "product_name": str(query.value(1) or ""),
-                "available_qty": float(query.value(2) or 0.0),
-                "reorder_level": float(query.value(3) or 0.0),
-            })
+        rows = self.report_service.get_dashboard_low_stock_rows(limit=10)
 
         self.low_stock_rows = rows
         self.low_stock_count.setText(str(len(rows)))
@@ -2367,58 +2035,7 @@ class DashboardWidget(QWidget):
 
 
     def load_expiry_data(self):
-        rows = []
-        query = QSqlQuery()
-        query.prepare("""
-            WITH parsed AS (
-                SELECT
-                    p.display_name,
-                    COALESCE(b.batch_no, '-') AS batch_no,
-                    b.expiry_date,
-                    CASE
-                        WHEN b.expiry_date LIKE '____-__-__' THEN date(b.expiry_date)
-                        WHEN b.expiry_date LIKE '__-__-____'
-                            THEN date(substr(b.expiry_date, 7, 4) || '-' || substr(b.expiry_date, 4, 2) || '-' || substr(b.expiry_date, 1, 2))
-                        ELSE NULL
-                    END AS expiry_norm
-                FROM batch b
-                JOIN product p ON p.id = b.product_id
-                WHERE
-                    p.status = 'used'
-                    AND b.quantity_remaining > 0
-                    AND b.expiry_date IS NOT NULL
-            )
-            SELECT
-                display_name,
-                batch_no,
-                expiry_date,
-                CASE
-                    WHEN expiry_norm < date('now', 'localtime') THEN 'Expired'
-                    WHEN expiry_norm <= date('now', 'localtime', '+180 days') THEN 'Expiring Soon'
-                END AS alert_status,
-                CAST(julianday(expiry_norm) - julianday(date('now', 'localtime')) AS INTEGER) AS remaining_days
-            FROM parsed
-            WHERE
-                expiry_norm IS NOT NULL
-                AND expiry_norm <= date('now', 'localtime', '+180 days')
-            ORDER BY
-                expiry_norm ASC,
-                display_name ASC
-            LIMIT 10
-        """)
-
-        if not query.exec():
-            print("Expiry query failed:", query.lastError().text())
-            return
-
-        while query.next():
-            rows.append({
-                "product_name": str(query.value(0) or ""),
-                "batch_no": str(query.value(1) or ""),
-                "expiry_date": str(query.value(2) or ""),
-                "status": str(query.value(3) or ""),
-                "remaining_days": int(query.value(4) or 0),
-            })
+        rows = self.report_service.get_dashboard_expiry_rows(limit=10)
 
         self.expiry_rows = rows
         self.expiry_count.setText(str(len(rows)))
@@ -2428,6 +2045,118 @@ class DashboardWidget(QWidget):
             self.expiry_meta.setText(f"Expired: {expired} | Showing top {len(rows)} items")
         else:
             self.expiry_meta.setText("No expiry alerts")
+
+    def load_sales_snapshot_data(self):
+        selected_days = int(self.sales_snapshot_range_combo.currentData() or 7)
+        range_label = str(self.sales_snapshot_range_combo.currentText() or "Last 7 days")
+
+        trajectory_rows = self.report_service.get_dashboard_sales_trajectory_rows(days=selected_days)
+        top_rows = self.report_service.get_dashboard_top_selling_item_rows(limit=5, days=selected_days)
+
+        labels = [row.get("label", "") for row in trajectory_rows]
+        sales_values = [float(row.get("sales_total", 0.0) or 0.0) for row in trajectory_rows]
+
+        self.sales_trend_plot.clear()
+        self.sales_trend_scatter = None
+        self.sales_trend_points = []
+        if sales_values:
+            x_values = list(range(len(sales_values)))
+            self.sales_trend_plot.plot(
+                x_values,
+                sales_values,
+                pen=pg.mkPen("#264E70", width=2.5),
+            )
+            self.sales_trend_points = [
+                {"label": labels[index], "sales_total": sales_values[index]}
+                for index in range(len(labels))
+            ]
+            self.sales_trend_scatter = pg.ScatterPlotItem(
+                x=x_values,
+                y=sales_values,
+                size=9,
+                pen=pg.mkPen("#2A9D8F", width=1.4),
+                brush=pg.mkBrush("#2A9D8F"),
+                hoverable=True,
+                tip=None,
+                hoverPen=pg.mkPen("#1E6F66", width=2),
+                hoverBrush=pg.mkBrush("#49B7A8"),
+            )
+            self.sales_trend_scatter.sigHovered.connect(self._show_sales_trend_hover)
+            self.sales_trend_plot.addItem(self.sales_trend_scatter)
+            self.sales_trend_plot.getAxis("bottom").setTicks([list(enumerate(labels))])
+            self.sales_trend_plot.setXRange(-0.2, max(len(sales_values) - 0.8, 0.8), padding=0)
+            self.sales_trend_plot.setYRange(0, max(sales_values) * 1.18 if max(sales_values) > 0 else 10, padding=0)
+            self.sales_trend_meta.setText(
+                f"{range_label} | Peak {max(sales_values):,.0f} PKR"
+            )
+        else:
+            self.sales_trend_meta.setText(f"{range_label} | No sales yet")
+
+        self.top_selling_table.setRowCount(len(top_rows))
+        for row_index, row_data in enumerate(top_rows):
+            highlight = row_index == 0
+            secondary_highlight = row_index == 1
+            if highlight:
+                row_bg = QColor("#E6F3EF")
+            elif secondary_highlight:
+                row_bg = QColor("#F1F7FB")
+            else:
+                row_bg = QColor("#F8FBFD" if row_index % 2 == 0 else "#F1F6FA")
+
+            name_item = QTableWidgetItem(str(row_data.get("product_name", "")))
+            name_item.setFlags(name_item.flags() ^ Qt.ItemIsEditable)
+            name_item.setBackground(row_bg)
+            name_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            if highlight:
+                name_item.setForeground(QColor("#1E5A46"))
+            amount_item = QTableWidgetItem(f"{float(row_data.get('sales_amount', 0.0) or 0.0):,.0f}")
+            amount_item.setFlags(amount_item.flags() ^ Qt.ItemIsEditable)
+            amount_item.setBackground(row_bg)
+            amount_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            amount_item.setBackground(row_bg)
+            if highlight:
+                amount_item.setForeground(QColor("#1E5A46"))
+            self.top_selling_table.setItem(row_index, 0, name_item)
+            self.top_selling_table.setCellWidget(
+                row_index,
+                1,
+                self._build_sold_units_label(
+                    row_data.get("total_qty", 0.0),
+                    row_data.get("pack_size", 1.0),
+                    emphasized=highlight,
+                ),
+            )
+            self.top_selling_table.setItem(row_index, 2, amount_item)
+
+        if top_rows:
+            self.top_selling_meta.setText(
+                f"{range_label} | Top {len(top_rows)} items"
+            )
+        else:
+            self.top_selling_meta.setText(f"{range_label} | No sales yet")
+
+    def _show_sales_trend_hover(self, _scatter, points, _event):
+        if points is None or len(points) == 0:
+            QToolTip.hideText()
+            return
+
+        index = int(round(points[0].pos().x()))
+        if index < 0 or index >= len(self.sales_trend_points):
+            QToolTip.hideText()
+            return
+
+        row = self.sales_trend_points[index]
+        QToolTip.showText(
+            self.cursor().pos(),
+            (
+                f"<div style='line-height:1.25;'>"
+                f"<span style='font-size:11px; color:#B8D4E3;'>{row['label']}</span><br>"
+                f"<span style='font-size:13px; font-weight:700;'>"
+                f"{row['sales_total']:,.0f} PKR"
+                f"</span></div>"
+            ),
+            self.sales_trend_plot,
+        )
 
 
     def show_low_stock_queue_dialog(self):
@@ -2591,106 +2320,13 @@ class DashboardWidget(QWidget):
     
     
     def get_hourly_sales_data(self):
-        
-        
-        from zoneinfo import ZoneInfo
-        from datetime import datetime
-
-        
-        local_offset = datetime.now().astimezone().utcoffset()
-        offset_hours = int(local_offset.total_seconds() // 3600)
-        offset_str = f"{offset_hours:+d} hours"  # e.g. '+5 hours' or '-4 hours'
-
-        print("Local offset:", offset_str)
-
-        # Get today's date
-        today = datetime.now().strftime('%Y-%m-%d')
-
-        # Initialize hourly sales dictionary
-        hourly_sales = {i: 0 for i in range(24)}
-
-        query = QSqlQuery()
-        
-        query.prepare("""
-            SELECT 
-                strftime('%H', datetime(creation_date, :offset)) AS hour,
-                COALESCE(SUM(total), 0) AS total_sales
-            FROM sales
-            WHERE 
-                date(datetime(creation_date, :offset)) = date(:today)
-            GROUP BY hour
-            ORDER BY hour
-        """)
-
-        query.bindValue(":offset", offset_str)
-        query.bindValue(":today", today)
-
-        print("Today = ", today)
-
-        if query.exec():
-            while query.next():
-                hour = int(query.value(0))  # '09' → 9
-                total = float(query.value(1))
-                hourly_sales[hour] = total
-                print(f"Hour: {hour}, Total: {total}")
-        else:
-            print("Query failed:", query.lastError().text())
-
-        return hourly_sales
+        return self.report_service.get_hourly_sales_series()
 
 
 
     
     def get_monthly_sales_data(self):
-        
-        monthly_sales = {day: 0 for day in range(1, 32)}
-
-        query = QSqlQuery()
-        # query.prepare("""
-        #     SELECT
-        #         day::int,
-        #         COALESCE(SUM(total), 0) AS total_sales
-        #     FROM
-        #         generate_series(1, 31) AS day
-        #     LEFT JOIN
-        #         sales ON EXTRACT(DAY FROM creation_date) = day
-        #             AND date_trunc('month', creation_date) = date_trunc('month', CURRENT_DATE)
-        #     GROUP BY day
-        #     ORDER BY day;
-        # """)
-        
-        query.prepare("""
-            WITH RECURSIVE days(day) AS (
-                SELECT 1
-                UNION ALL
-                SELECT day + 1 FROM days WHERE day < 31
-            )
-            SELECT
-                days.day,
-                COALESCE(SUM(s.total), 0) AS total_sales
-            FROM
-                days
-            LEFT JOIN
-                sales s
-                ON CAST(STRFTIME('%d', s.creation_date) AS INTEGER) = days.day
-                AND STRFTIME('%Y-%m', s.creation_date) = STRFTIME('%Y-%m', 'now')
-            GROUP BY
-                days.day
-            ORDER BY
-                days.day;
-        """)
-
-
-        if query.exec():
-            while query.next():
-                day = int(query.value(0))
-                total = float(query.value(1))
-                monthly_sales[day] = total
-        else:
-            print("Query failed:", query.lastError().text())
-
-        # Return a list for days 1 to 31
-        return [monthly_sales[day] for day in range(1, 32)]
+        return self.report_service.get_monthly_sales_series()
 
 
 

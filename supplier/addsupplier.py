@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtCore import QFile, Qt, QEvent
-from PySide6.QtSql import QSqlQuery, QSqlDatabase
+from PySide6.QtSql import QSqlDatabase
 from PySide6.QtGui import QFocusEvent
 import traceback
 
@@ -15,6 +15,7 @@ from medic.utilities.permissions import Permissions
 
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
+from services.supplier_service import create_supplier, validate_supplier_payload
 
 
 
@@ -151,106 +152,6 @@ class AddSupplierWidget(BasePage):
         
         
         
-    def insert_supplier(self, name, contact, email, website, address, registeration, payable, receiveable):
-        
-        valid, message, cleaned = self.validate_supplier(name, contact, email, website, address, registeration, payable, receiveable)
-
-        if valid:
-            
-            print(f"[VALIDATION SUCCESS] {message}")
-            
-            name, contact, email, website, address, registeration, payable, receiveable = cleaned
-
-            try:
-                query = QSqlQuery()
-                query.prepare("""
-                    INSERT INTO supplier (name, contact, email, website, address, reg_no, payable, receiveable)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-                """)
-                query.addBindValue(name)
-                query.addBindValue(contact if contact else None)
-                query.addBindValue(email)
-                query.addBindValue(website)
-                query.addBindValue(address)
-                query.addBindValue(registeration)
-                query.addBindValue(payable)
-                query.addBindValue(receiveable)
-
-                if not query.exec():
-                    error_msg = query.lastError().text()
-                    print(f"[DB ERROR] Failed to insert customer.\n"
-                        f"Table: customer\n"
-                        f"Values: name={name}, contact={contact}, email={email}, "
-                        f"payable={payable}, receiveable={receiveable}\n"
-                        f"Reason: {error_msg}")
-                    return False
-
-                # return Id if insertion is successful
-                return query.lastInsertId()
-            
-
-            except Exception as e:
-                print(f"[PYTHON ERROR] Exception occurred while inserting customer.\n"
-                    f"Function: insert_customer\n"
-                    f"Values: name={name}, contact={contact}, email={email}, "
-                    f"payable={payable}, receiveable={receiveable}\n"
-                    f"Exception Type: {type(e).__name__}\n"
-                    f"Message: {e}")
-                return False
-            
-        
-        else:
-            
-            print(f"[VALIDATION ERROR] {message}")
-            AppMessageBox.warning(self, "Validation Error", message)
-            return False
-
-    
-    def validate_supplier(self, name, contact, email, website, address, registeration, payable, receiveable):
-        
-        print("Going to Validate Supplier")
-        
-        name = name.strip()
-        contact = contact.strip()
-        email = email.strip()
-        website = website.strip()
-        address = address.strip()
-        registeration = registeration.strip()
-        payable = payable.strip()
-        receiveable = receiveable.strip()
-        
-        website = website if website else None
-        address = address if address else None
-        registeration = registeration if registeration else None
-
-        if not name or not name.strip():
-            return False, "Supplier name cannot be empty.", ""
-
-        if contact and not contact.isdigit():
-            return False, "Contact must contain only digits.", ""
-
-        if contact and len(contact) < 7:
-            return False, "Contact must be at least 7 digits.", ""
-
-        if email and ("@" not in email or "." not in email):
-            return False, "Invalid email format.", ""
-
-
-        try:
-            payable_val = float(payable) if payable else 0.0
-            receiveable_val = float(receiveable) if receiveable else 0.0
-        except ValueError:
-            return False, "Payable and Receivable must be numbers.", ""
-
-        if payable_val < 0 or receiveable_val < 0:
-            return False, "Payable and Receivable cannot be negative.", ""
-
-        return True, "Supplier details are valid.", (name, contact, email, website, address, registeration, payable_val, receiveable_val)
-    
-    
-
-    
-    
     def horizontal_line(self):
         
         line = QFrame()
@@ -288,17 +189,30 @@ class AddSupplierWidget(BasePage):
         db.transaction()
         
         try:
-        
-            supplier_id = self.insert_supplier(
-                self.editname.text(),
-                self.editcontact.text(),
-                self.editemail.text(),
-                self.editwebsite.text(),
-                self.editaddress.text(),
-                self.editreg_no.text(),
-                self.editpayable.text(),
-                self.editreceiveable.text()
+            validate_supplier_payload(
+                name=self.editname.text(),
+                contact=self.editcontact.text(),
+                email=self.editemail.text(),
+                website=self.editwebsite.text(),
+                address=self.editaddress.text(),
+                registeration=self.editreg_no.text(),
+                payable=self.editpayable.text(),
+                receiveable=self.editreceiveable.text(),
             )
+            supplier_id = create_supplier(
+                name=self.editname.text(),
+                contact=self.editcontact.text(),
+                email=self.editemail.text(),
+                website=self.editwebsite.text(),
+                address=self.editaddress.text(),
+                registeration=self.editreg_no.text(),
+                payable=self.editpayable.text(),
+                receiveable=self.editreceiveable.text(),
+            )
+        except ValueError as e:
+            db.rollback()
+            AppMessageBox.warning(self, "Validation Error", str(e))
+            return
 
         
         except Exception as e:

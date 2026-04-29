@@ -1,10 +1,11 @@
 from PySide6.QtWidgets import QWidget, QPushButton,QMessageBox, QVBoxLayout, QHBoxLayout, QFrame, QLabel,QComboBox, QSpacerItem, QSizePolicy, QLineEdit
 from PySide6.QtCore import QFile, Qt, QEvent
-from PySide6.QtSql import QSqlDatabase, QSqlQuery
+from PySide6.QtSql import QSqlDatabase
 
 from medic.utilities.permissions import Permissions
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
+from services.employee_service import create_employee, employee_role_options, validate_employee_payload
 
 
 
@@ -60,7 +61,7 @@ class AddEmployeeWidget(QWidget):
         self.editaddress = QLineEdit()
         self.editbadge = QLineEdit()
         self.editrole = QComboBox()
-        self.editrole.addItems(['pharmacist', 'salesman'])
+        self.editrole.addItems(employee_role_options())
         
 
         fields = [self.editname, self.editcontact, self.editemail, self.editaddress, self.editbadge, self.editrole]
@@ -125,30 +126,30 @@ class AddEmployeeWidget(QWidget):
     @Permissions.require_permission('employee.create')
     def save_employee(self):
         
-        name = self.editname.text()
-        email = self.editemail.text()
-        contact = self.editcontact.text()
-        address = self.editaddress.text()
-        badge = self.editbadge.text()
-        role = self.editrole.currentText()
-        
-      
-        query = QSqlQuery()
-        
-        query.prepare("""
-                    INSERT INTO employee (name, contact, email, address, badge, role)
-                    VALUES (?, ?, ?, ?, ?, ?);
-                """)
-                
-        query.addBindValue(name)
-        query.addBindValue(contact)
-        query.addBindValue(email)
-        query.addBindValue(address)  
-        query.addBindValue(badge)
-        query.addBindValue(role)
-            
-        if not query.exec():
-            print("Insert failed:", query.lastError().text())
+        try:
+            validate_employee_payload(
+                name=self.editname.text(),
+                contact=self.editcontact.text(),
+                email=self.editemail.text(),
+                address=self.editaddress.text(),
+                badge=self.editbadge.text(),
+                role=self.editrole.currentText(),
+            )
+            create_employee(
+                name=self.editname.text(),
+                contact=self.editcontact.text(),
+                email=self.editemail.text(),
+                address=self.editaddress.text(),
+                badge=self.editbadge.text(),
+                role=self.editrole.currentText(),
+            )
+        except ValueError as exc:
+            AppMessageBox.warning(self, "Validation Error", str(exc))
+            return
+        except Exception as exc:
+            print("Insert failed:", str(exc))
+            AppMessageBox.critical(self, "Error", str(exc))
+            return
         else:
             AppMessageBox.information(None, "Success", 'Employee Record Saved Successfully')
             # Clear the input fields after saving
@@ -170,7 +171,6 @@ class AddEmployeeWidget(QWidget):
         
         
         
-
 
 
 

@@ -13,24 +13,24 @@ from utilities.database import SQLiteConnectionManager
 from PySide6.QtGui import QPalette, QColor, QPixmap, QIcon, QPainter
 from dashboard.base_dashboard_page import BaseDashboardWidget
 from dashboard.welcome import WelcomeWidget
-from business.basebusiness import BaseBusinessWidget
+from features.admin.ui.base_business import BaseBusinessWidget
 from supplier.basesupplier import BaseSupplierWidget
 from salesrep.basesalesrep import BaseSalesRepWidget
 from customer.basecustomer import BaseCustomerWidget
-from product.baseproduct import BaseProductWidget
-from userprofile.baseprofile import BaseProfileWidget
-from purchase.basepurchase import BasePurchaseWidget
-from purchase.base_po import BasePOWidget
-from purchase.base_grn import BaseGRNWidget
-from sales.basesales import BaseSalesWidget
+from features.inventory.ui.base_inventory import BaseInventoryWidget
+from features.admin.ui.base_profile import BaseProfileWidget
+from features.purchase.ui.base_purchase import BasePurchaseWidget
+from features.purchase.ui.base_po import BasePOWidget
+from features.purchase.ui.base_grn import BaseGRNWidget
+from features.sales.ui.base_sales import BaseSalesWidget
 from employee.baseemployee import BaseEmployeeWidget
 from payroll.basepayroll import BasePayrollWidget
-from transaction.basetransaction import BaseTransactionWidget
+from features.finance.ui.base_transactions import BaseTransactionWidget
 from purchasereturn.base_purchase_return import BasePurchaseReturnWidget
 from salesreturn.base_sales_return import BaseSalesReturnWidget
-from expense.baseexpense import BaseExpenseWidget
+from features.finance.ui.base_expenses import BaseExpenseWidget
 from reports.basereports import BaseReportsWidget
-from financialclose.basefinancialclose import BaseFinancialCloseWidget
+from features.finance.ui.base_financial_close import BaseFinancialCloseWidget
 from salehold.basehold import BaseHoldSalesWidget
 
 from utilities.sizehintfinder import print_size_hints
@@ -38,6 +38,7 @@ from functools import wraps
 from PySide6.QtWidgets import QMessageBox, QApplication
 from utilities.permissions import Permissions
 from utilities.license_core import get_current_license_payload, get_license_days_remaining, is_demo_license, is_pro_license
+from features.admin.services.business_service import fetch_business_name
 from utilities.stylus import load_stylesheets
 from medic.utilities.app_theme import get_theme_palette
 from services.scheduled_price_service import apply_due_scheduled_price_changes, ensure_scheduled_price_schema
@@ -624,6 +625,7 @@ class MainWindow(QMainWindow):
             self.customer_button,
             self.product_button,
             self.employee_button,
+            self.payroll_button,
             self.transaction_button,
             self.purchase_return,
             self.sales_return,
@@ -644,6 +646,7 @@ class MainWindow(QMainWindow):
             self.customer_button: "res/rail_icons/customer.svg",
             self.product_button: "res/rail_icons/product.svg",
             self.employee_button: "res/rail_icons/employee.svg",
+            self.payroll_button: "res/rail_icons/employee.svg",
             self.transaction_button: "res/rail_icons/transaction.svg",
             self.purchase_return: "res/rail_icons/purchase_return.svg",
             self.sales_return: "res/rail_icons/sales_return.svg",
@@ -713,7 +716,7 @@ class MainWindow(QMainWindow):
             "grn": lambda: BaseGRNWidget(),
             "base_sales": lambda: BaseSalesWidget(controller=self),
             "base_customer": lambda: BaseCustomerWidget(controller=self),
-            "product": lambda: BaseProductWidget(),
+            "product": lambda: BaseInventoryWidget(),
             "employee": lambda: BaseEmployeeWidget(),
             "payroll": lambda: BasePayrollWidget(),
             "transaction": lambda: BaseTransactionWidget(),
@@ -1096,19 +1099,11 @@ class MainWindow(QMainWindow):
     
     
     def set_business_name(self):
-        
-        query = QSqlQuery()
-        query.prepare("SELECT businessname FROM business WHERE id = ?")
-        query.addBindValue(1)
-
-        if not query.exec():
-            print("Error While Fetching Business", query.lastError().text())
+        try:
+            return fetch_business_name()
+        except Exception as exc:
+            print("Error While Fetching Business", str(exc))
             return False
-
-        if query.next():
-            
-            businessname = query.value(0)
-            return businessname
         
         
         

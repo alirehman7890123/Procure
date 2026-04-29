@@ -1,10 +1,11 @@
 from PySide6.QtWidgets import QWidget, QLineEdit ,QHBoxLayout, QFrame, QGridLayout, QLabel, QPushButton, QHeaderView, QSizePolicy, QVBoxLayout, QTableWidget, QTableWidgetItem
 from PySide6.QtCore import QFile, Qt, QDate, Signal
-from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from functools import partial
 from datetime import date
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.table_helpers import centered_cell_widget, style_table_action_button
+from medic.utilities.app_messagebox import AppMessageBox
+from services.employee_service import fetch_employee_list_rows
 
 
 
@@ -129,51 +130,34 @@ class EmployeeListWidget(QWidget):
 
 
     def load_employees_into_table(self):
-        
-        query = QSqlQuery()
-        query.exec("SELECT id, name, contact, role, badge, status FROM employee")
+        try:
+            rows = fetch_employee_list_rows()
+        except Exception as exc:
+            AppMessageBox.critical(self, "Employee List", str(exc))
+            return
 
-        self.table.setRowCount(0)  # Clear existing rows
+        self.table.setRowCount(0)
 
-        row = 0
-        
-        while query.next():
-            
-            self.table.insertRow(row)
-            
-            row_no = row + 1
-            employee_id = int(query.value(0))
-            name = query.value(1)
-            contact = query.value(2)
-            role = query.value(3)
-            badge = query.value(4)
-            status = query.value(5)
+        for row_index, employee in enumerate(rows):
+            self.table.insertRow(row_index)
 
-            
-            row_no_item = QTableWidgetItem(str(row_no))
-            name = QTableWidgetItem(name)
-            contact = QTableWidgetItem(contact)
-            role = QTableWidgetItem(role)
-            badge = QTableWidgetItem(badge)
-            status = QTableWidgetItem(status)
-            
-            
-            self.table.setItem(row, 0, row_no_item)
-            self.table.setItem(row, 1, name)
-            self.table.setItem(row, 2, contact)
-            self.table.setItem(row, 3, role)
-            self.table.setItem(row, 4, badge)
-            self.table.setItem(row, 5, status)
-            
-            
-            
+            values = [
+                QTableWidgetItem(str(row_index + 1)),
+                QTableWidgetItem(employee["name"]),
+                QTableWidgetItem(employee["contact"]),
+                QTableWidgetItem(employee["role"]),
+                QTableWidgetItem(employee["badge"]),
+                QTableWidgetItem(employee["status"]),
+            ]
+
+            for col_index, item in enumerate(values):
+                self.table.setItem(row_index, col_index, item)
+
             detail = style_table_action_button(QPushButton("Details"))
             detail.setCursor(Qt.PointingHandCursor)
-            
-            self.table.setCellWidget(row, 6, centered_cell_widget(detail))
-            detail.clicked.connect(partial(self.detailpagesignal.emit, employee_id))
-            
-            row += 1
+
+            self.table.setCellWidget(row_index, 6, centered_cell_widget(detail))
+            detail.clicked.connect(partial(self.detailpagesignal.emit, employee["id"]))
         
 
 
@@ -195,6 +179,5 @@ class MyTable(QTableWidget):
         for i, ratio in enumerate(self.column_ratios):
             col_width = int(width * (ratio / total))
             self.setColumnWidth(i, col_width)
-
 
 
