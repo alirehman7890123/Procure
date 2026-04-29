@@ -1,3 +1,6 @@
 """Finance feature expense-service bridge."""
 
-from medic.services.expense_service import *  # noqa: F403
+try:
+    from medic.services.expense_service import *  # noqa: F403
+except ModuleNotFoundError:
+    from services.expense_service import *  # noqa: F403

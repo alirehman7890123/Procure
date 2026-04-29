@@ -1,3 +1,6 @@
 """Inventory feature bridge for accounting settings helpers."""
 
-from medic.services.accounting_settings_service import *  # noqa: F403
+try:
+    from medic.services.accounting_settings_service import *  # noqa: F403
+except ModuleNotFoundError:
+    from services.accounting_settings_service import *  # noqa: F403

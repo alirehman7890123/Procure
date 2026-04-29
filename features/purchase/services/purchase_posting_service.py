@@ -1,3 +1,6 @@
 """Purchase feature purchase-posting-service bridge."""
 
-from medic.services.purchase_posting_service import *  # noqa: F403
+try:
+    from medic.services.purchase_posting_service import *  # noqa: F403
+except ModuleNotFoundError:
+    from services.purchase_posting_service import *  # noqa: F403

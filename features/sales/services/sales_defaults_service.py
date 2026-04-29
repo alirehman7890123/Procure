@@ -1,3 +1,6 @@
 """Sales feature bridge for sales defaults helpers."""
 
-from medic.services.sales_defaults_service import *  # noqa: F403
+try:
+    from medic.services.sales_defaults_service import *  # noqa: F403
+except ModuleNotFoundError:
+    from services.sales_defaults_service import *  # noqa: F403

@@ -1,6 +1,9 @@
 """Sales feature bridge for sales transaction helpers."""
 
-from medic.services.sales_transaction_service import *  # noqa: F403
+try:
+    from medic.services.sales_transaction_service import *  # noqa: F403
+except ModuleNotFoundError:
+    from services.sales_transaction_service import *  # noqa: F403
 
 from PySide6.QtSql import QSqlQuery
 
