@@ -51,10 +51,16 @@ if not os.environ.get("QT_QPA_PLATFORMTHEME"):
 from PySide6.QtWidgets import QApplication, QWidget, QMainWindow, QPushButton, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QFileDialog, QFrame, QSizePolicy
 from PySide6.QtGui import QPixmap
 
-from medic.utilities.database import SQLiteConnectionManager, QSqlDatabase
-from medic.utilities.app_messagebox import install_messagebox_theme
-from medic.utilities.dialog_scrolling import install_dialog_scrolling
-from medic.utilities.mylogin import MainWindow
+try:
+    from medic.utilities.database import SQLiteConnectionManager, QSqlDatabase
+    from medic.utilities.app_messagebox import install_messagebox_theme
+    from medic.utilities.dialog_scrolling import install_dialog_scrolling
+    from medic.utilities.mylogin import MainWindow
+except ModuleNotFoundError:
+    from utilities.database import SQLiteConnectionManager, QSqlDatabase
+    from utilities.app_messagebox import install_messagebox_theme
+    from utilities.dialog_scrolling import install_dialog_scrolling
+    from utilities.mylogin import MainWindow
 import bcrypt
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtSql import QSqlQuery
@@ -2788,8 +2794,12 @@ class AuthWindow(QMainWindow):
 
     
 
-from medic.utilities.license import ensure_valid_license
-from medic.utilities.app_messagebox import AppMessageBox
+try:
+    from medic.utilities.license import ensure_valid_license
+    from medic.utilities.app_messagebox import AppMessageBox
+except ModuleNotFoundError:
+    from utilities.license import ensure_valid_license
+    from utilities.app_messagebox import AppMessageBox
 
 if __name__ == '__main__':
 
