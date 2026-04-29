@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ProcureMedic Brochure Poster</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --navy: #163B5C;
+      --mid: #2F5D7C;
+      --deep: #102b43;
+      --sky: #3A9AD9;
+      --mint: #6DD3CE;
+      --white: #FFFFFF;
+      --ice: #EAF3FB;
+      --soft: #F5F8FB;
+      --text: #1E2D3A;
+      --muted: #5D7D95;
+      --line: #D9E4EC;
+      --gold: #F2C14E;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Montserrat', sans-serif;
+      background: radial-gradient(circle at 20% 15%, #dcecff, #f7fbff 40%, #eef4fa 100%);
+      color: var(--text);
+      padding: 24px;
+    }
+
+    .poster {
+      width: 1200px;
+      min-height: 1800px;
+      margin: 0 auto;
+      background: var(--white);
+      border-radius: 28px;
+      overflow: hidden;
+      border: 1px solid #cddfec;
+      box-shadow: 0 30px 70px rgba(16, 43, 67, 0.22);
+    }
+
+    .hero {
+      position: relative;
+      padding: 74px 78px 64px;
+      background: linear-gradient(130deg, var(--deep) 0%, var(--navy) 40%, var(--mid) 78%, var(--sky) 100%);
+      color: var(--white);
+      overflow: hidden;
+    }
+
+    .hero::before,
+    .hero::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .hero::before {
+      width: 420px;
+      height: 420px;
+      right: -120px;
+      top: -140px;
+    }
+
+    .hero::after {
+      width: 280px;
+      height: 280px;
+      left: 58%;
+      bottom: -110px;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 3px;
+      color: #99e6ff;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+
+    .title {
+      font-size: 86px;
+      font-weight: 900;
+      letter-spacing: -2px;
+      line-height: 0.95;
+      margin-bottom: 14px;
+    }
+
+    .title span {
+      color: #8be0ff;
+    }
+
+    .subtitle {
+      font-size: 28px;
+      font-weight: 600;
+      opacity: 0.92;
+      max-width: 760px;
+      line-height: 1.4;
+    }
+
+    .metrics {
+      margin-top: 30px;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      border-radius: 999px;
+      padding: 12px 20px;
+      font-size: 18px;
+      font-weight: 700;
+      backdrop-filter: blur(4px);
+    }
+
+    .content {
+      padding: 52px 62px 64px;
+    }
+
+    .top-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 20px;
+      margin-bottom: 26px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      background: var(--soft);
+      border-radius: 20px;
+      padding: 26px;
+    }
+
+    .section-title {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--navy);
+      margin-bottom: 14px;
+    }
+
+    .section-copy {
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.6;
+      font-weight: 500;
+    }
+
+    .price-box {
+      background: linear-gradient(145deg, var(--navy), var(--mid));
+      color: var(--white);
+      border-radius: 20px;
+      padding: 28px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 15px 35px rgba(31, 71, 102, 0.3);
+    }
+
+    .price-label {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: #9be5ff;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .price-amount {
+      font-size: 64px;
+      line-height: 1;
+      font-weight: 900;
+      margin-bottom: 8px;
+    }
+
+    .price-amount small {
+      font-size: 27px;
+      font-weight: 700;
+      opacity: 0.95;
+    }
+
+    .price-copy {
+      font-size: 18px;
+      font-weight: 600;
+      opacity: 0.9;
+      line-height: 1.4;
+    }
+
+    .feature-grid {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    .feature {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #ffffff;
+      padding: 18px 16px;
+      min-height: 146px;
+    }
+
+    .feature h4 {
+      color: var(--deep);
+      font-size: 18px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .feature p {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+      font-weight: 500;
+    }
+
+    .pricing-services {
+      margin-top: 24px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .service {
+      border-radius: 16px;
+      border: 1px dashed #9ebdd3;
+      background: #f8fcff;
+      padding: 20px;
+    }
+
+    .service h5 {
+      font-size: 20px;
+      color: var(--navy);
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .service .amount {
+      font-size: 34px;
+      font-weight: 900;
+      color: var(--mid);
+      line-height: 1.1;
+      margin-bottom: 8px;
+    }
+
+    .service .meta {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    .highlight-note {
+      margin-top: 22px;
+      border-radius: 18px;
+      padding: 22px 24px;
+      border: 1px solid #eed08a;
+      background: linear-gradient(135deg, #fff6dd 0%, #fffaf0 100%);
+      color: #6a4a0f;
+      font-size: 17px;
+      font-weight: 700;
+      line-height: 1.45;
+    }
+
+    .footer {
+      margin-top: 32px;
+      border-top: 1px solid var(--line);
+      padding-top: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 18px;
+    }
+
+    .footer .brand {
+      font-size: 30px;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      color: var(--deep);
+    }
+
+    .footer .brand span {
+      color: var(--sky);
+    }
+
+    .footer .line {
+      margin-top: 6px;
+      font-size: 15px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .contact {
+      text-align: right;
+    }
+
+    .contact p {
+      font-size: 16px;
+      font-weight: 700;
+      color: #314e64;
+      line-height: 1.45;
+    }
+
+    .contact .small {
+      font-size: 13px;
+      color: #6b8598;
+      font-weight: 600;
+      margin-top: 4px;
+    }
+
+    @media print {
+      body {
+        background: #fff;
+        padding: 0;
+      }
+      .poster {
+        box-shadow: none;
+        border: none;
+        border-radius: 0;
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <article class="poster" id="brochure">
+    <header class="hero">
+      <p class="eyebrow">Pharmacy Management System</p>
+      <h1 class="title">Procure<span>Medic</span></h1>
+      <p class="subtitle">Modern offline software for pharmacies across Pakistan. Fast billing, accurate stock, and confidence in daily operations.</p>
+      <div class="metrics">
+        <span class="pill">20,000+ Medicines Supported</span>
+        <span class="pill">Single-Branch Friendly</span>
+        <span class="pill">Role-Based Access</span>
+      </div>
+    </header>
+
+    <section class="content">
+      <div class="top-grid">
+        <div class="card">
+          <h2 class="section-title">Built For Real Pharmacy Work</h2>
+          <p class="section-copy">
+            ProcureMedic gives your team a complete workflow: sales billing, purchase entry, stock and expiry tracking, customer and supplier ledgers, and daily reports. It is designed for practical use with personal onboarding support.
+          </p>
+        </div>
+        <div class="price-box">
+          <p class="price-label">Promotional Price</p>
+          <p class="price-amount"><small>PKR</small> 20,000</p>
+          <p class="price-copy">Standard pricing starts at 30,000+, but early partner clients get a special launch rate.</p>
+        </div>
+      </div>
+
+      <div class="feature-grid">
+        <div class="feature">
+          <h4>Sales & Billing</h4>
+          <p>Fast invoice creation, discounts, tax support, hold and resume counters.</p>
+        </div>
+        <div class="feature">
+          <h4>Purchase & GRN</h4>
+          <p>Supplier purchases with structured receiving and direct stock updates.</p>
+        </div>
+        <div class="feature">
+          <h4>Batch + Expiry</h4>
+          <p>Track medicine batches and expiry dates to reduce dead stock risk.</p>
+        </div>
+        <div class="feature">
+          <h4>Inventory Control</h4>
+          <p>Product master, low stock alerts, quantity movement and valuation views.</p>
+        </div>
+        <div class="feature">
+          <h4>Returns Workflow</h4>
+          <p>Sales return and purchase return entries with stock and ledger adjustment.</p>
+        </div>
+        <div class="feature">
+          <h4>Reports & Ledger</h4>
+          <p>Daily sales, expenses, receivables, payables, and performance snapshots.</p>
+        </div>
+      </div>
+
+      <div class="pricing-services">
+        <div class="service">
+          <h5>Data Import</h5>
+          <p class="amount">PKR 10 / entry</p>
+          <p class="meta">or PKR 1,000 for 100 entries<br>Bulk migration from old records/Excel available.</p>
+        </div>
+        <div class="service">
+          <h5>Training</h5>
+          <p class="amount">PKR 2,000</p>
+          <p class="meta">1 week support<br>1 hour per day guided training for staff.</p>
+        </div>
+      </div>
+
+      <div class="highlight-note">
+        Personal Touch Promise: We do not just install software. We onboard your staff, help you shift confidently, and stay available during the transition period.
+      </div>
+
+      <footer class="footer">
+        <div>
+          <p class="brand">Procure<span>Medic</span></p>
+          <p class="line">Trusted Pharmacy Workflow • Offline • Secure • Practical</p>
+        </div>
+        <div class="contact">
+          <p>[Your Name / Team]</p>
+          <p>[Phone Number]</p>
+          <p>[Email Address]</p>
+          <p class="small">[City, Pakistan]</p>
+        </div>
+      </footer>
+    </section>
+  </article>
+</body>
+</html>
