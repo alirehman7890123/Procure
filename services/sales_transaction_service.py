@@ -7,7 +7,10 @@ def _new_query():
 import mimetypes
 import os
 import shutil
+import sys
 from datetime import datetime
+from importlib import machinery, util
+from pathlib import Path
 from medic.utilities.database import SQLiteConnectionManager
 
 
@@ -17,6 +20,66 @@ from medic.services.inventory_movement_service import (
     fetch_total_available_stock as fetch_total_available_stock_from_inventory,
     insert_sold_batch_record as insert_sold_batch_record_from_inventory,
 )
+from medic.services.sales_items_service import compute_fifo_allocation_plan
+
+
+_LEGACY_SALES_TXN_MODULE = None
+
+
+def _load_legacy_sales_transaction_module():
+    """Load the last feature-owned sales transaction implementation from pyc as a temporary recovery path."""
+    global _LEGACY_SALES_TXN_MODULE
+    if _LEGACY_SALES_TXN_MODULE is not None:
+        return _LEGACY_SALES_TXN_MODULE
+
+    cache_dir = (
+        Path(__file__).resolve().parents[1]
+        / "features"
+        / "sales"
+        / "services"
+        / "__pycache__"
+    )
+    module_specs = [
+        (
+            "medic.features.sales.services.sales_posting_service",
+            cache_dir / "sales_posting_service.cpython-312.pyc",
+        ),
+        (
+            "medic.features.sales.services.sales_items_service",
+            cache_dir / "sales_items_service.cpython-312.pyc",
+        ),
+        (
+            "medic.features.sales.services.sales_transaction_service",
+            cache_dir / "sales_transaction_service.cpython-312.pyc",
+        ),
+    ]
+
+    package_name = "medic.features.sales.services"
+    package_module = sys.modules.get(package_name)
+    if package_module is None:
+        import types
+
+        package_module = types.ModuleType(package_name)
+        package_module.__path__ = []
+        sys.modules[package_name] = package_module
+
+    loaded_modules = {}
+    for module_name, module_path in module_specs:
+        if not module_path.exists():
+            raise ImportError(
+                f"Missing legacy sales transaction recovery module: {module_path.name}"
+            )
+        loader = machinery.SourcelessFileLoader(module_name, str(module_path))
+        spec = util.spec_from_loader(module_name, loader)
+        module = util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        loader.exec_module(module)
+        loaded_modules[module_name] = module
+
+    _LEGACY_SALES_TXN_MODULE = loaded_modules[
+        "medic.features.sales.services.sales_transaction_service"
+    ]
+    return _LEGACY_SALES_TXN_MODULE
 
 
 def ensure_prescription_schema():
@@ -551,3 +614,91 @@ def decrement_batch_quantity(batch_id, take_qty):
 
 def insert_sold_batch_record(sale_item_id, allocation):
     return insert_sold_batch_record_from_inventory(sale_item_id, allocation)
+
+
+def resolve_salesman_id(username):
+    return _load_legacy_sales_transaction_module().resolve_salesman_id(username)
+
+
+def fetch_customer_credit_position(customer_id):
+    return _load_legacy_sales_transaction_module().fetch_customer_credit_position(customer_id)
+
+
+def persist_sales_customer_transaction(
+    *,
+    sales_id,
+    customer_id,
+    total_amount,
+    received,
+    remaining,
+    salesman_id,
+    session_id,
+    payment,
+):
+    return _load_legacy_sales_transaction_module().persist_sales_customer_transaction(
+        sales_id=sales_id,
+        customer_id=customer_id,
+        total_amount=total_amount,
+        received=received,
+        remaining=remaining,
+        salesman_id=salesman_id,
+        session_id=session_id,
+        payment=payment,
+    )
+
+
+def persist_sales_receipt_header_and_prescription(
+    header_payload, sales_prescription_payload=None
+):
+    return _load_legacy_sales_transaction_module().persist_sales_receipt_header_and_prescription(
+        header_payload, sales_prescription_payload=sales_prescription_payload
+    )
+
+
+def persist_sales_item_with_fifo(*, sales_id, row_payload, row_number):
+    product_id = int(row_payload.get("product_id") or 0)
+    qty_needed = float(row_payload.get("qty") or 0.0)
+
+    total_available = float(fetch_total_available_stock(product_id) or 0.0)
+    if total_available < qty_needed:
+        raise Exception(
+            f"Row {row_number}: Insufficient stock for product ID {product_id}. "
+            f"Available: {total_available:g}, required: {qty_needed:g}"
+        )
+
+    sale_item_id = insert_sales_item_record(sales_id, row_payload)
+    batch_rows = fetch_fifo_batch_rows(product_id)
+    allocation_result = compute_fifo_allocation_plan(batch_rows, qty_needed)
+
+    remaining_qty = float(allocation_result.get("remaining_qty") or 0.0)
+    if remaining_qty > 0:
+        raise Exception(
+            f"FIFO allocation failed for product ID {product_id}. "
+            f"Unallocated qty: {remaining_qty:g}"
+        )
+
+    for allocation in allocation_result.get("allocations", []):
+        decrement_batch_quantity(allocation["batch_id"], allocation["take_qty"])
+        insert_sold_batch_record(sale_item_id, allocation)
+
+    return {
+        "sale_item_id": sale_item_id,
+        "total_available": total_available,
+        "allocation_result": allocation_result,
+    }
+
+
+def upsert_hold_sale_header(payload, hold_id=None):
+    return _load_legacy_sales_transaction_module().upsert_hold_sale_header(
+        payload, hold_id=hold_id
+    )
+
+
+def replace_hold_sale_items(hold_id, item_rows):
+    return _load_legacy_sales_transaction_module().replace_hold_sale_items(
+        hold_id, item_rows
+    )
+
+
+def delete_hold_sale(hold_id):
+    return _load_legacy_sales_transaction_module().delete_hold_sale(hold_id)
