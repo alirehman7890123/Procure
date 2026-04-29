@@ -2,10 +2,10 @@ from PySide6.QtWidgets import QStackedLayout
 
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions
-from features.purchase.ui.add_po import AddPOWidget
-from features.purchase.ui.grn_detail import GRNDetailWidget
-from features.purchase.ui.po_detail import PODetailWidget
-from features.purchase.ui.po_list import POListWidget
+from medic.features.purchase.ui.add_po import AddPOWidget
+from medic.features.purchase.ui.grn_detail import GRNDetailWidget
+from medic.features.purchase.ui.po_detail import PODetailWidget
+from medic.features.purchase.ui.po_list import POListWidget
 
 
 class BasePOWidget(BasePage):

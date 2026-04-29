@@ -8,24 +8,24 @@ from medic.utilities.product_search_widget import ProductSearchBox
 from medic.utilities.product_form_options import get_product_form_options
 import sys
 import pandas as pd  # <-- for reading CSV/Excel easily
-from services.sales_transaction_service import ensure_prescription_schema
+from medic.services.sales_transaction_service import ensure_prescription_schema
 
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.file_preview import preview_file
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.permissions import Permissions
-from features.inventory.services.accounting_settings_service import (
+from medic.features.inventory.services.accounting_settings_service import (
     load_opening_inventory_value,
     save_opening_inventory_value,
 )
-from features.inventory.services.product_media_service import (
+from medic.features.inventory.services.product_media_service import (
     clear_product_media_fields,
     ensure_product_media_schema,
     fetch_product_media,
     save_product_media,
     update_product_media_fields,
 )
-from features.inventory.services.product_write_service import (
+from medic.features.inventory.services.product_write_service import (
     fetch_discount_group_options,
     fetch_manufacturer_options,
     fetch_product_autofill,

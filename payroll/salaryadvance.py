@@ -5,12 +5,12 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QDate, Signal
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 
-from utilities.stylus import load_stylesheets
-from utilities.permissions import Permissions
-from utilities.app_messagebox import AppMessageBox
-from utilities.session_gate import require_open_session
-from utilities.session_service import get_active_session_id
-from services.payroll_service import (
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.permissions import Permissions
+from medic.utilities.app_messagebox import AppMessageBox
+from medic.utilities.session_gate import require_open_session
+from medic.utilities.session_service import get_active_session_id
+from medic.services.payroll_service import (
     get_all_active_employees, insert_salary_advance,
     update_employee_advance_balance
 )

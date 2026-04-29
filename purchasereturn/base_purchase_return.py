@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QWidget, QStackedLayout, QScrollArea
 
-from purchasereturn.create_purchase_return import AddPurchaseReturnWidget
-from purchasereturn.purchase_return_list import PurchaseReturnListWidget
-from purchasereturn.purchase_return_detail import PurchaseReturnDetailWidget
+from medic.purchasereturn.create_purchase_return import AddPurchaseReturnWidget
+from medic.purchasereturn.purchase_return_list import PurchaseReturnListWidget
+from medic.purchasereturn.purchase_return_detail import PurchaseReturnDetailWidget
 from medic.utilities.basepage import BasePage
 
 from medic.utilities.permissions import Permissions

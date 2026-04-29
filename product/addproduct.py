@@ -1,3 +1,3 @@
 """Compatibility import for the inventory feature add-product screen."""
 
-from features.inventory.ui.add_product import AddProductWidget
+from medic.features.inventory.ui.add_product import AddProductWidget

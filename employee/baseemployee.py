@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QWidget, QStackedLayout, QScrollArea
 
-from employee.addemployee import AddEmployeeWidget
-from employee.employeelist import EmployeeListWidget
-from employee.employeedetails import EmployeeDetailWidget
+from medic.employee.addemployee import AddEmployeeWidget
+from medic.employee.employeelist import EmployeeListWidget
+from medic.employee.employeedetails import EmployeeDetailWidget
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions
 

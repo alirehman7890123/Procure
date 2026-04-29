@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QWidget, QStackedLayout, QScrollArea, QSizePolicy, QApplication, QMessageBox
 
-from supplier.addsupplier import AddSupplierWidget
-from supplier.supplierlist import SupplierListWidget
-from supplier.supplierdetail import SupplierDetailWidget
+from medic.supplier.addsupplier import AddSupplierWidget
+from medic.supplier.supplierlist import SupplierListWidget
+from medic.supplier.supplierdetail import SupplierDetailWidget
 
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions

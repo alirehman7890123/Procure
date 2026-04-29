@@ -4,8 +4,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QDate, Signal
 
-from utilities.stylus import load_stylesheets
-from services.payroll_service import get_payroll_list, get_all_active_employees
+from medic.utilities.stylus import load_stylesheets
+from medic.services.payroll_service import get_payroll_list, get_all_active_employees
 
 
 _MONTH_NAMES = [

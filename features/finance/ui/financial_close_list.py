@@ -17,14 +17,14 @@ from PySide6.QtWidgets import (
     QHeaderView,
 )
 
-from features.finance.services.financial_closing_service import (
+from medic.features.finance.services.financial_closing_service import (
     list_financial_close_audit_events,
     list_recent_period_closures,
     reopen_financial_period,
 )
-from utilities.app_messagebox import AppMessageBox
-from utilities.permissions import Permissions
-from utilities.stylus import load_stylesheets
+from medic.utilities.app_messagebox import AppMessageBox
+from medic.utilities.permissions import Permissions
+from medic.utilities.stylus import load_stylesheets
 
 
 class FinancialClosingListPage(QWidget):

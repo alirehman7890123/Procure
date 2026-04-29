@@ -1,3 +1,3 @@
 """Compatibility import for the sales feature base widget."""
 
-from features.sales.ui.base_sales import BaseSalesWidget
+from medic.features.sales.ui.base_sales import BaseSalesWidget

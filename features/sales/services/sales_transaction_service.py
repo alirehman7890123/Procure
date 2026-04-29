@@ -1,14 +1,14 @@
 """Sales feature bridge for sales transaction helpers."""
 
-from services.sales_transaction_service import *  # noqa: F403
+from medic.services.sales_transaction_service import *  # noqa: F403
 
 from PySide6.QtSql import QSqlQuery
 
-from features.sales.services.sales_posting_service import (
+from medic.features.sales.services.sales_posting_service import (
     build_customer_transaction_note,
     compute_customer_transaction_balances,
 )
-from features.sales.services.sales_items_service import compute_fifo_allocation_plan
+from medic.features.sales.services.sales_items_service import compute_fifo_allocation_plan
 
 
 def upsert_hold_sale_header(payload, hold_id=None):

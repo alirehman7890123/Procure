@@ -5,7 +5,7 @@ from PySide6.QtSql import QSqlDatabase
 from medic.utilities.permissions import Permissions
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
-from services.employee_service import create_employee, employee_role_options, validate_employee_payload
+from medic.services.employee_service import create_employee, employee_role_options, validate_employee_payload
 
 
 

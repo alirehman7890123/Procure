@@ -14,17 +14,17 @@ from medic.utilities.session_gate import require_open_session
 from medic.utilities.session_service import get_active_session_id
 from medic.utilities.payment_handler import PaymentMethodHandler
 from medic.utilities.app_messagebox import AppMessageBox
-from services.inventory_movement_service import (
+from medic.services.inventory_movement_service import (
     fetch_batch_snapshot,
     fetch_supplier_purchase_batches,
 )
-from services.purchase_return_service import (
+from medic.services.purchase_return_service import (
     build_purchase_return_header_payload,
     build_purchase_return_transaction_payload,
     compute_purchase_return_settlement,
     normalize_purchase_return_item_row,
 )
-from services.purchase_return_transaction_service import (
+from medic.services.purchase_return_transaction_service import (
     decrement_batch_quantity_for_purchase_return,
     fetch_batch_remaining_for_return,
     fetch_supplier_balances_for_return,

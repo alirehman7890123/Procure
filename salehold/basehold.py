@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QWidget, QStackedLayout, QScrollArea
 
-from salehold.saleholdlist import SaleHoldListWidget
-from salehold.salehold_detail import HoldSalesDetailWidget
+from medic.salehold.saleholdlist import SaleHoldListWidget
+from medic.salehold.salehold_detail import HoldSalesDetailWidget
 from medic.utilities.basepage import BasePage
 
 

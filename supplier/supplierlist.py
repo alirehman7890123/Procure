@@ -5,7 +5,7 @@ from functools import partial
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.table_helpers import centered_cell_widget, style_table_action_button
 from medic.utilities.app_messagebox import AppMessageBox
-from services.supplier_service import fetch_supplier_list_rows
+from medic.services.supplier_service import fetch_supplier_list_rows
 
 
 

@@ -3,7 +3,7 @@ from datetime import date, datetime
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 
 from medic.utilities.activity_logger import log_activity
-from services.product_admin_service import (
+from medic.services.product_admin_service import (
     insert_price_change_log,
     resolve_auth_user_id,
     update_product_default_pack_price,

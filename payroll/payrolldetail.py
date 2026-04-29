@@ -4,8 +4,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
-from utilities.stylus import load_stylesheets
-from services.payroll_service import get_payroll_detail
+from medic.utilities.stylus import load_stylesheets
+from medic.services.payroll_service import get_payroll_detail
 
 
 class PayrollDetailWidget(QWidget):

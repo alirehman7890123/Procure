@@ -6,7 +6,7 @@ from PySide6.QtCore import Signal, Qt
 
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
-from features.purchase.services.grn_transaction_service import fetch_grn_detail, fetch_grn_line_rows
+from medic.features.purchase.services.grn_transaction_service import fetch_grn_detail, fetch_grn_line_rows
 
 
 class MyTable(QTableWidget):

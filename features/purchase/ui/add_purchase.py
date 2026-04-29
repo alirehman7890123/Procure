@@ -18,24 +18,24 @@ from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.file_preview import preview_file
 from medic.utilities.product_form_options import get_product_form_options
 from medic.utilities.product_search_widget import ProductSearchBox
-from services.product_media_service import (
+from medic.services.product_media_service import (
     ensure_product_media_schema,
     save_product_media,
     update_product_media_fields,
 )
-from services.sales_transaction_service import ensure_prescription_schema
-from features.purchase.services.purchase_posting_service import (
+from medic.services.sales_transaction_service import ensure_prescription_schema
+from medic.features.purchase.services.purchase_posting_service import (
     build_purchase_header_payload,
     build_supplier_transaction_payload,
     compute_purchase_settlement,
 )
-from features.purchase.services.purchase_items_service import (
+from medic.features.purchase.services.purchase_items_service import (
     build_batch_payload,
     compute_purchase_distribution_factor,
     normalize_purchase_item_row,
     parse_expiry_to_db_date,
 )
-from features.purchase.services.purchase_transaction_service import (
+from medic.features.purchase.services.purchase_transaction_service import (
     fetch_product_pack_size,
     fetch_supplier_balances,
     insert_batch_record,
@@ -45,12 +45,12 @@ from features.purchase.services.purchase_transaction_service import (
     mark_product_used,
     update_supplier_balances,
 )
-from features.purchase.services.purchase_draft_service import (
+from medic.features.purchase.services.purchase_draft_service import (
     delete_purchase_draft,
     load_latest_purchase_draft,
     save_purchase_draft,
 )
-from services.scheduled_price_service import (
+from medic.services.scheduled_price_service import (
     ensure_scheduled_price_schema,
     save_scheduled_price_change,
 )

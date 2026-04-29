@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt, Signal, QDateTime
 
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
-from features.finance.services.party_transaction_service import fetch_customer_transaction_list_rows
+from medic.features.finance.services.party_transaction_service import fetch_customer_transaction_list_rows
 
 
 class CustomerTransactionListWidget(QWidget):

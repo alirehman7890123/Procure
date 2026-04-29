@@ -1,6 +1,6 @@
 from PySide6.QtSql import QSqlQuery
 
-from services.accounting_settings_service import load_sales_policy_settings as load_sales_policy_settings_from_accounting
+from medic.services.accounting_settings_service import load_sales_policy_settings as load_sales_policy_settings_from_accounting
 
 
 def load_sales_policy_settings():

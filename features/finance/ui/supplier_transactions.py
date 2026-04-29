@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, Signal
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
-from features.finance.services.party_transaction_service import fetch_supplier_balance_rows, reconcile_supplier_internal_balance
+from medic.features.finance.services.party_transaction_service import fetch_supplier_balance_rows, reconcile_supplier_internal_balance
 
 
 class SupplierTransactionWidget(QWidget):

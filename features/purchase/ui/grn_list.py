@@ -8,7 +8,7 @@ from medic.utilities.stylus import load_stylesheets
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.table_helpers import centered_cell_widget, style_table_action_button
-from features.purchase.services.grn_transaction_service import (
+from medic.features.purchase.services.grn_transaction_service import (
     fetch_grn_health_check_counts,
     fetch_grn_list_rows,
 )

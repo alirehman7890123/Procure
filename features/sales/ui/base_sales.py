@@ -2,9 +2,9 @@ from PySide6.QtWidgets import QStackedLayout
 
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions
-from features.sales.ui.create_sales import CreateSalesWidget
-from features.sales.ui.receipt_list import ReceiptListWidget
-from features.sales.ui.sales_detail import SalesDetailWidget
+from medic.features.sales.ui.create_sales import CreateSalesWidget
+from medic.features.sales.ui.receipt_list import ReceiptListWidget
+from medic.features.sales.ui.sales_detail import SalesDetailWidget
 
 
 class BaseSalesWidget(BasePage):

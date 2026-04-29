@@ -1,10 +1,10 @@
 from PySide6.QtWidgets import QStackedLayout
 
-from features.admin.ui.add_user import AddUserWidget
-from features.admin.ui.change_password import ChangePasswordWidget
-from features.admin.ui.profile import ProfileWidget
-from features.admin.ui.user_detail import UserDetailWidget
-from features.admin.ui.users_list import UserListWidget
+from medic.features.admin.ui.add_user import AddUserWidget
+from medic.features.admin.ui.change_password import ChangePasswordWidget
+from medic.features.admin.ui.profile import ProfileWidget
+from medic.features.admin.ui.user_detail import UserDetailWidget
+from medic.features.admin.ui.users_list import UserListWidget
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions
 

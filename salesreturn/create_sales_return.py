@@ -15,15 +15,15 @@ from medic.utilities.session_gate import require_open_session
 from medic.utilities.session_service import get_active_session_id
 from medic.utilities.payment_handler import PaymentMethodHandler
 from medic.utilities.app_messagebox import AppMessageBox
-from services.inventory_movement_service import fetch_product_batch_numbers
-from services.sales_return_service import (
+from medic.services.inventory_movement_service import fetch_product_batch_numbers
+from medic.services.sales_return_service import (
     build_sales_return_header_payload,
     build_sales_return_transaction_payload,
     compute_sales_return_inventory_plan,
     compute_sales_return_settlement,
     normalize_sales_return_item_row,
 )
-from services.sales_return_transaction_service import (
+from medic.services.sales_return_transaction_service import (
     fetch_already_returned_qty,
     fetch_customer_balances_for_return,
     fetch_sales_item_qty_sold,

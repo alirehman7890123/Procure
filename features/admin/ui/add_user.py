@@ -4,7 +4,7 @@ from PySide6.QtCore import QSize, Qt, QEvent
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
-from features.admin.services.user_service import create_user
+from medic.features.admin.services.user_service import create_user
 
 
 class AddUserWidget(QWidget):

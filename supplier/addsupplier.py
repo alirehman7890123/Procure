@@ -15,7 +15,7 @@ from medic.utilities.permissions import Permissions
 
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
-from services.supplier_service import create_supplier, validate_supplier_payload
+from medic.services.supplier_service import create_supplier, validate_supplier_payload
 
 
 

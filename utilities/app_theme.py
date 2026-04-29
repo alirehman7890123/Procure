@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 
-from services.accounting_settings_service import load_theme_settings as load_theme_settings_from_service
+from medic.services.accounting_settings_service import load_theme_settings as load_theme_settings_from_service
 
 DEFAULT_THEME = {
     "theme_primary_color": "#163B5C",

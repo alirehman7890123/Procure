@@ -8,19 +8,19 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QDate, Signal
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 
-from utilities.stylus import load_stylesheets
-from utilities.permissions import Permissions
-from utilities.app_messagebox import AppMessageBox
-from utilities.session_gate import require_open_session
-from utilities.session_service import get_active_session_id
-from utilities.payment_handler import PaymentMethodHandler
-from services.payroll_service import (
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.permissions import Permissions
+from medic.utilities.app_messagebox import AppMessageBox
+from medic.utilities.session_gate import require_open_session
+from medic.utilities.session_service import get_active_session_id
+from medic.utilities.payment_handler import PaymentMethodHandler
+from medic.services.payroll_service import (
     get_all_active_employees, get_pending_advances,
     get_attendance_summary, payroll_exists,
     insert_payroll, apply_advance_recovery,
     update_employee_advance_balance
 )
-from services.payroll_posting_service import (
+from medic.services.payroll_posting_service import (
     get_working_days, build_payroll_payload
 )
 

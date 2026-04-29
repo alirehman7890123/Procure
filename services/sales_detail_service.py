@@ -1,7 +1,7 @@
 from PySide6.QtCore import QDate, QDateTime
 from PySide6.QtSql import QSqlQuery
-from services.accounting_settings_service import load_sales_policy_settings
-from services.sales_transaction_service import (
+from medic.services.accounting_settings_service import load_sales_policy_settings
+from medic.services.sales_transaction_service import (
     ensure_prescription_schema,
     fetch_sales_prescription_attachments,
     fetch_sales_prescription_by_sales_id,

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.permissions import Permissions
 from medic.utilities.stylus import load_stylesheets
-from services.accounting_settings_service import (
+from medic.services.accounting_settings_service import (
     load_sales_discount_settings as load_sales_discount_settings_from_service,
     save_sales_discount_settings as save_sales_discount_settings_to_service,
 )

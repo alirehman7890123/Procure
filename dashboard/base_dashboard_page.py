@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QWidget, QStackedLayout, QScrollArea
 
-from features.finance.ui.daily_session import DailySession
-from dashboard.dashboard import DashboardWidget
-from dashboard.welcome import WelcomeWidget
+from medic.features.finance.ui.daily_session import DailySession
+from medic.dashboard.dashboard import DashboardWidget
+from medic.dashboard.welcome import WelcomeWidget
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions
 

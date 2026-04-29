@@ -4,7 +4,7 @@ def _new_query():
     return QSqlQuery()
 
 
-from services.inventory_movement_service import (
+from medic.services.inventory_movement_service import (
     decrement_batch_quantity_by_number as decrement_batch_quantity_by_number_from_inventory,
     fetch_batch_remaining as fetch_batch_remaining_from_inventory,
 )

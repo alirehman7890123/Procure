@@ -7,7 +7,7 @@ from medic.utilities.permissions import Permissions
 from medic.utilities.session_gate import require_open_session
 from medic.utilities.session_service import get_active_session_id
 from medic.utilities.app_messagebox import AppMessageBox
-from features.finance.services.expense_service import create_expense
+from medic.features.finance.services.expense_service import create_expense
 
 
 class AddExpenseWidget(QWidget):

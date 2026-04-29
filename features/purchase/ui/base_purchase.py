@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QStackedLayout
 
-from features.purchase.ui.add_purchase import AddPurchaseWidget
-from features.purchase.ui.purchase_detail import PurchaseDetailWidget
-from features.purchase.ui.purchase_list import PurchaseListWidget
+from medic.features.purchase.ui.add_purchase import AddPurchaseWidget
+from medic.features.purchase.ui.purchase_detail import PurchaseDetailWidget
+from medic.features.purchase.ui.purchase_list import PurchaseListWidget
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions
 

@@ -4,7 +4,7 @@ import math
 import bcrypt
 from PySide6.QtSql import  QSqlQuery
 from PySide6.QtCore import QDate
-from services.accounting_settings_service import load_opening_inventory_value
+from medic.services.accounting_settings_service import load_opening_inventory_value
 
 
 

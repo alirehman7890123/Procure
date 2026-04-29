@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QStackedLayout, QScrollArea
 
-from reports.mainpage import MainReportsPage
+from medic.reports.mainpage import MainReportsPage
 from medic.utilities.basepage import BasePage
 
 from medic.utilities.permissions import Permissions

@@ -1,3 +1,3 @@
 """Compatibility import for the finance feature customer-transaction create screen."""
 
-from features.finance.ui.create_customer_transaction import CreateCustomerTransactionWidget
+from medic.features.finance.ui.create_customer_transaction import CreateCustomerTransactionWidget

@@ -8,10 +8,10 @@ import mimetypes
 import os
 import shutil
 from datetime import datetime
-from utilities.database import SQLiteConnectionManager
+from medic.utilities.database import SQLiteConnectionManager
 
 
-from services.inventory_movement_service import (
+from medic.services.inventory_movement_service import (
     decrement_batch_quantity as decrement_batch_quantity_from_inventory,
     fetch_fifo_batch_rows as fetch_fifo_batch_rows_from_inventory,
     fetch_total_available_stock as fetch_total_available_stock_from_inventory,

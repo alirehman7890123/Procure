@@ -2,7 +2,7 @@ from PySide6.QtWidgets import QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLa
 
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
-from features.finance.services.party_transaction_service import fetch_supplier_transaction_detail
+from medic.features.finance.services.party_transaction_service import fetch_supplier_transaction_detail
 
 
 class SupplierTransactionDetailWidget(QWidget):

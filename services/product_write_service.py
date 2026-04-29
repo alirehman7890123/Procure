@@ -2,13 +2,13 @@ from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from datetime import datetime
 import bcrypt
 
-from services.product_media_service import (
+from medic.services.product_media_service import (
     clear_product_media_fields,
     fetch_product_media,
     save_product_media,
     update_product_media_fields,
 )
-from services.product_admin_service import insert_price_change_log
+from medic.services.product_admin_service import insert_price_change_log
 
 
 DEFAULT_MARGIN_PERCENT = 14.5

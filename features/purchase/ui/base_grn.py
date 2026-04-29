@@ -2,9 +2,9 @@ from PySide6.QtWidgets import QStackedLayout
 
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions
-from features.purchase.ui.create_grn import CreateGRNWidget
-from features.purchase.ui.grn_detail import GRNDetailWidget
-from features.purchase.ui.grn_list import GRNListWidget
+from medic.features.purchase.ui.create_grn import CreateGRNWidget
+from medic.features.purchase.ui.grn_detail import GRNDetailWidget
+from medic.features.purchase.ui.grn_list import GRNListWidget
 
 
 class BaseGRNWidget(BasePage):

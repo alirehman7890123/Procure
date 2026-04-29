@@ -4,7 +4,7 @@ from functools import partial
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.modern_date_picker import ModernDatePickerDialog
 from medic.utilities.app_messagebox import AppMessageBox
-from features.purchase.services.purchase_transaction_service import fetch_purchase_list_rows
+from medic.features.purchase.services.purchase_transaction_service import fetch_purchase_list_rows
 
 
 

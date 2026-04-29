@@ -1,12 +1,12 @@
 from PySide6.QtWidgets import QStackedLayout
 
-from payroll.attendance import AttendanceWidget
-from payroll.attendancelist import AttendanceListWidget
-from payroll.salaryadvance import SalaryAdvanceWidget
-from payroll.advancelist import AdvanceListWidget
-from payroll.addpayroll import AddPayrollWidget
-from payroll.payrolllist import PayrollListWidget
-from payroll.payrolldetail import PayrollDetailWidget
+from medic.payroll.attendance import AttendanceWidget
+from medic.payroll.attendancelist import AttendanceListWidget
+from medic.payroll.salaryadvance import SalaryAdvanceWidget
+from medic.payroll.advancelist import AdvanceListWidget
+from medic.payroll.addpayroll import AddPayrollWidget
+from medic.payroll.payrolllist import PayrollListWidget
+from medic.payroll.payrolldetail import PayrollDetailWidget
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions
 

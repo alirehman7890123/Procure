@@ -11,7 +11,7 @@ from medic.utilities.activity_logger import log_activity
 from medic.utilities.permissions import Permissions
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
-from features.purchase.services.purchase_order_service import (
+from medic.features.purchase.services.purchase_order_service import (
     close_purchase_order,
     fetch_purchase_order_detail,
     fetch_purchase_order_grn_rows,

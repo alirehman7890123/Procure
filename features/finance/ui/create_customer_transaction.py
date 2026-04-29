@@ -8,7 +8,7 @@ from medic.utilities.payment_handler import PaymentMethodHandler
 from medic.utilities.permissions import Permissions
 from medic.utilities.session_gate import require_open_session
 from medic.utilities.app_messagebox import AppMessageBox
-from features.finance.services.party_transaction_service import (
+from medic.features.finance.services.party_transaction_service import (
     fetch_customer_transaction_form_context,
     prepare_customer_transaction_payload,
     save_customer_transaction_payload,

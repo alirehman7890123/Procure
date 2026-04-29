@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QStackedLayout
 
-from features.finance.ui.add_expense import AddExpenseWidget
-from features.finance.ui.expense_detail import ExpenseDetailWidget
-from features.finance.ui.expense_list import ExpenseListWidget
+from medic.features.finance.ui.add_expense import AddExpenseWidget
+from medic.features.finance.ui.expense_detail import ExpenseDetailWidget
+from medic.features.finance.ui.expense_list import ExpenseListWidget
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions
 

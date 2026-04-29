@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import QWidget, QStackedLayout
 
-from salesrep.addsalesrep import AddSalesRepWidget
-from salesrep.salesreplist import SalesRepListWidget
-from salesrep.salesrepdetail import SalesRepDetailWidget
+from medic.salesrep.addsalesrep import AddSalesRepWidget
+from medic.salesrep.salesreplist import SalesRepListWidget
+from medic.salesrep.salesrepdetail import SalesRepDetailWidget
 from medic.utilities.basepage import BasePage
 
 from medic.utilities.permissions import Permissions

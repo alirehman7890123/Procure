@@ -15,13 +15,13 @@ from medic.utilities.session_gate import require_open_session
 from medic.utilities.session_service import get_active_session_id
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
-from features.purchase.services.grn_posting_service import (
+from medic.features.purchase.services.grn_posting_service import (
     build_goods_receipt_payload,
     collect_grn_billing_data,
     collect_grn_totals_payload,
     normalize_grn_receipt_line,
 )
-from features.purchase.services.grn_transaction_service import (
+from medic.features.purchase.services.grn_transaction_service import (
     fetch_next_grn_number,
     fetch_open_po_option_rows,
     fetch_po_receipt_line_rows,
@@ -34,7 +34,7 @@ from features.purchase.services.grn_transaction_service import (
     insert_goods_receipt_line,
     update_goods_receipt_status,
 )
-from features.purchase.services.purchase_transaction_service import (
+from medic.features.purchase.services.purchase_transaction_service import (
     fetch_product_pack_size,
     insert_batch_record,
     fetch_supplier_balances,
@@ -44,8 +44,8 @@ from features.purchase.services.purchase_transaction_service import (
     mark_product_used,
     update_supplier_balances,
 )
-from features.purchase.services.purchase_posting_service import build_purchase_header_payload, build_supplier_transaction_payload
-from features.purchase.services.grn_draft_service import (
+from medic.features.purchase.services.purchase_posting_service import build_purchase_header_payload, build_supplier_transaction_payload
+from medic.features.purchase.services.grn_draft_service import (
     delete_grn_draft,
     load_latest_grn_draft,
     save_grn_draft,

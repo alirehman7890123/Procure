@@ -1,10 +1,10 @@
 from PySide6.QtWidgets import QStackedLayout
 
-from features.finance.ui.financial_close_list import FinancialClosingListPage
-from features.finance.ui.financial_close_page import FinancialClosingPage
-from features.finance.ui.financial_quarter_summary import FinancialQuarterSummaryPage
-from utilities.basepage import BasePage
-from utilities.permissions import Permissions
+from medic.features.finance.ui.financial_close_list import FinancialClosingListPage
+from medic.features.finance.ui.financial_close_page import FinancialClosingPage
+from medic.features.finance.ui.financial_quarter_summary import FinancialQuarterSummaryPage
+from medic.utilities.basepage import BasePage
+from medic.utilities.permissions import Permissions
 
 
 class BaseFinancialCloseWidget(BasePage):

@@ -4,7 +4,7 @@ from PySide6.QtCore import QFile, Qt, QDate, QDateTime
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
-from features.purchase.services.purchase_transaction_service import (
+from medic.features.purchase.services.purchase_transaction_service import (
     fetch_purchase_detail,
     fetch_purchase_item_rows,
     update_purchase_due_date,

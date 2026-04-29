@@ -22,17 +22,17 @@ from medic.utilities.app_theme import get_theme_palette
 from medic.utilities.file_preview import preview_file
 from medic.utilities.product_form_options import get_product_form_options
 from medic.utilities.activity_logger import log_activity
-from features.sales.ui.pricing_logic import compute_header_totals, compute_line_pricing
-from features.sales.services.product_media_service import (
+from medic.features.sales.ui.pricing_logic import compute_header_totals, compute_line_pricing
+from medic.features.sales.services.product_media_service import (
     clear_product_media_fields,
     ensure_product_media_schema,
     fetch_product_media,
     save_product_media,
     update_product_media_fields,
 )
-from features.sales.services.accounting_settings_service import load_sales_policy_settings
-from features.sales.services.sales_defaults_service import resolve_sales_header_pricing
-from features.sales.services.sales_detail_service import (
+from medic.features.sales.services.accounting_settings_service import load_sales_policy_settings
+from medic.features.sales.services.sales_defaults_service import resolve_sales_header_pricing
+from medic.features.sales.services.sales_detail_service import (
     create_sales_customer,
     ensure_sales_manufacturer,
     fetch_active_customer_option_rows,
@@ -44,15 +44,15 @@ from features.sales.services.sales_detail_service import (
     fetch_saved_sale_tax_breakdown,
     insert_sales_customer_quick,
 )
-from features.sales.services.sales_posting_service import (
+from medic.features.sales.services.sales_posting_service import (
     build_sales_header_payload,
     compute_due_date_from_option,
     resolve_sales_settlement,
 )
-from features.sales.services.sales_items_service import (
+from medic.features.sales.services.sales_items_service import (
     normalize_sales_item_row,
 )
-from features.sales.services.sales_transaction_service import (
+from medic.features.sales.services.sales_transaction_service import (
     delete_hold_sale,
     ensure_prescription_schema,
     fetch_prescription_required_products,

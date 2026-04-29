@@ -5,43 +5,43 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtWidgets import QScrollArea
-from utilities.sidebarbutton import SideBarButton
-from utilities.activity_logger import log_activity
+from medic.utilities.sidebarbutton import SideBarButton
+from medic.utilities.activity_logger import log_activity
 
-from utilities.database import SQLiteConnectionManager
+from medic.utilities.database import SQLiteConnectionManager
 # from database import PostgresConnectionManager
 from PySide6.QtGui import QPalette, QColor, QPixmap, QIcon, QPainter
-from dashboard.base_dashboard_page import BaseDashboardWidget
-from dashboard.welcome import WelcomeWidget
-from features.admin.ui.base_business import BaseBusinessWidget
-from supplier.basesupplier import BaseSupplierWidget
-from salesrep.basesalesrep import BaseSalesRepWidget
-from customer.basecustomer import BaseCustomerWidget
-from features.inventory.ui.base_inventory import BaseInventoryWidget
-from features.admin.ui.base_profile import BaseProfileWidget
-from features.purchase.ui.base_purchase import BasePurchaseWidget
-from features.purchase.ui.base_po import BasePOWidget
-from features.purchase.ui.base_grn import BaseGRNWidget
-from features.sales.ui.base_sales import BaseSalesWidget
-from employee.baseemployee import BaseEmployeeWidget
-from payroll.basepayroll import BasePayrollWidget
-from features.finance.ui.base_transactions import BaseTransactionWidget
-from purchasereturn.base_purchase_return import BasePurchaseReturnWidget
-from salesreturn.base_sales_return import BaseSalesReturnWidget
-from features.finance.ui.base_expenses import BaseExpenseWidget
-from reports.basereports import BaseReportsWidget
-from features.finance.ui.base_financial_close import BaseFinancialCloseWidget
-from salehold.basehold import BaseHoldSalesWidget
+from medic.dashboard.base_dashboard_page import BaseDashboardWidget
+from medic.dashboard.welcome import WelcomeWidget
+from medic.features.admin.ui.base_business import BaseBusinessWidget
+from medic.supplier.basesupplier import BaseSupplierWidget
+from medic.salesrep.basesalesrep import BaseSalesRepWidget
+from medic.customer.basecustomer import BaseCustomerWidget
+from medic.features.inventory.ui.base_inventory import BaseInventoryWidget
+from medic.features.admin.ui.base_profile import BaseProfileWidget
+from medic.features.purchase.ui.base_purchase import BasePurchaseWidget
+from medic.features.purchase.ui.base_po import BasePOWidget
+from medic.features.purchase.ui.base_grn import BaseGRNWidget
+from medic.features.sales.ui.base_sales import BaseSalesWidget
+from medic.employee.baseemployee import BaseEmployeeWidget
+from medic.payroll.basepayroll import BasePayrollWidget
+from medic.features.finance.ui.base_transactions import BaseTransactionWidget
+from medic.purchasereturn.base_purchase_return import BasePurchaseReturnWidget
+from medic.salesreturn.base_sales_return import BaseSalesReturnWidget
+from medic.features.finance.ui.base_expenses import BaseExpenseWidget
+from medic.reports.basereports import BaseReportsWidget
+from medic.features.finance.ui.base_financial_close import BaseFinancialCloseWidget
+from medic.salehold.basehold import BaseHoldSalesWidget
 
-from utilities.sizehintfinder import print_size_hints
+from medic.utilities.sizehintfinder import print_size_hints
 from functools import wraps
 from PySide6.QtWidgets import QMessageBox, QApplication
-from utilities.permissions import Permissions
-from utilities.license_core import get_current_license_payload, get_license_days_remaining, is_demo_license, is_pro_license
-from features.admin.services.business_service import fetch_business_name
-from utilities.stylus import load_stylesheets
+from medic.utilities.permissions import Permissions
+from medic.utilities.license_core import get_current_license_payload, get_license_days_remaining, is_demo_license, is_pro_license
+from medic.features.admin.services.business_service import fetch_business_name
+from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_theme import get_theme_palette
-from services.scheduled_price_service import apply_due_scheduled_price_changes, ensure_scheduled_price_schema
+from medic.services.scheduled_price_service import apply_due_scheduled_price_changes, ensure_scheduled_price_schema
 
 
 

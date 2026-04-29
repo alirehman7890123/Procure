@@ -1,9 +1,9 @@
 from PySide6.QtWidgets import QStackedLayout
 
-from features.admin.ui.business_profile import BusinessWidget
-from features.admin.ui.discount_settings import DiscountSettingsWidget
-from features.admin.ui.tax_settings import TaxSettingsWidget
-from features.admin.ui.theme_settings import ThemeSettingsWidget
+from medic.features.admin.ui.business_profile import BusinessWidget
+from medic.features.admin.ui.discount_settings import DiscountSettingsWidget
+from medic.features.admin.ui.tax_settings import TaxSettingsWidget
+from medic.features.admin.ui.theme_settings import ThemeSettingsWidget
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions
 

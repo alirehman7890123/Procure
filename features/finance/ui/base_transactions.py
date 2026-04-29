@@ -1,14 +1,14 @@
 from PySide6.QtWidgets import QStackedLayout
 
-from features.finance.ui.create_customer_transaction import CreateCustomerTransactionWidget
-from features.finance.ui.create_supplier_transaction import CreateSupplierTransactionWidget
-from features.finance.ui.customer_transaction_detail import CustomerTransactionDetailWidget
-from features.finance.ui.customer_transaction_list import CustomerTransactionListWidget
-from features.finance.ui.customer_transactions import CustomerTransactionWidget
-from features.finance.ui.supplier_transaction_detail import SupplierTransactionDetailWidget
-from features.finance.ui.supplier_transaction_list import SupplierTransactionListWidget
-from features.finance.ui.supplier_transactions import SupplierTransactionWidget
-from features.finance.ui.transaction_hub import MainTransactionWidget
+from medic.features.finance.ui.create_customer_transaction import CreateCustomerTransactionWidget
+from medic.features.finance.ui.create_supplier_transaction import CreateSupplierTransactionWidget
+from medic.features.finance.ui.customer_transaction_detail import CustomerTransactionDetailWidget
+from medic.features.finance.ui.customer_transaction_list import CustomerTransactionListWidget
+from medic.features.finance.ui.customer_transactions import CustomerTransactionWidget
+from medic.features.finance.ui.supplier_transaction_detail import SupplierTransactionDetailWidget
+from medic.features.finance.ui.supplier_transaction_list import SupplierTransactionListWidget
+from medic.features.finance.ui.supplier_transactions import SupplierTransactionWidget
+from medic.features.finance.ui.transaction_hub import MainTransactionWidget
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions
 

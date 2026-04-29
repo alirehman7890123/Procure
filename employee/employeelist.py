@@ -5,7 +5,7 @@ from datetime import date
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.table_helpers import centered_cell_widget, style_table_action_button
 from medic.utilities.app_messagebox import AppMessageBox
-from services.employee_service import fetch_employee_list_rows
+from medic.services.employee_service import fetch_employee_list_rows
 
 
 

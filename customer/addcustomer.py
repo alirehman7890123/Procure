@@ -5,7 +5,7 @@ import traceback
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
-from services.customer_service import (
+from medic.services.customer_service import (
     create_customer,
     create_discount_group,
     create_tax_group,

@@ -2,9 +2,9 @@ from PySide6.QtWidgets import QStackedLayout, QWidget
 
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions
-from features.inventory.ui.add_product import AddProductWidget
-from features.inventory.ui.product_detail import ProductDetailWidget
-from features.inventory.ui.product_list import ProductListWidget
+from medic.features.inventory.ui.add_product import AddProductWidget
+from medic.features.inventory.ui.product_detail import ProductDetailWidget
+from medic.features.inventory.ui.product_list import ProductListWidget
 
 
 class BaseInventoryWidget(BasePage):

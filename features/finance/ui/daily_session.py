@@ -13,8 +13,8 @@ from PySide6.QtGui import QColor
 from medic.utilities.session_service import SessionErrorCode, check_active_session
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
-from features.finance.services import daily_session_service
-from features.finance.services.financial_closing_service import get_month_close_prompt_state
+from medic.features.finance.services import daily_session_service
+from medic.features.finance.services.financial_closing_service import get_month_close_prompt_state
 
 
 logger = logging.getLogger(__name__)
