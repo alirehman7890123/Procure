@@ -9,7 +9,7 @@ import pyqtgraph as pg
 import sys
 import html
 from medic.utilities.stylus import load_stylesheets
-from reports import report_service
+from medic.reports import report_service
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.license_core import get_current_license_payload, is_demo_license
 

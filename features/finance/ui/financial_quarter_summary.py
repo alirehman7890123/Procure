@@ -1,7 +1,7 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
-from medic.features.finance.services.financial_closing_service import get_quarter_summary
+from medic.services.financial_closing_service import get_quarter_summary
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.stylus import load_stylesheets
 

@@ -2,22 +2,12 @@ from datetime import date, datetime
 
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 
-try:
-    from medic.utilities.activity_logger import log_activity
-except ModuleNotFoundError:
-    from utilities.activity_logger import log_activity
-try:
-    from medic.services.product_admin_service import (
-        insert_price_change_log,
-        resolve_auth_user_id,
-        update_product_default_pack_price,
-    )
-except ModuleNotFoundError:
-    from services.product_admin_service import (
-        insert_price_change_log,
-        resolve_auth_user_id,
-        update_product_default_pack_price,
-    )
+from medic.utilities.activity_logger import log_activity
+from medic.services.product_admin_service import (
+    insert_price_change_log,
+    resolve_auth_user_id,
+    update_product_default_pack_price,
+)
 
 
 def _new_query():

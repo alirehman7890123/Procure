@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt, QEvent
 
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
-from medic.features.admin.services.user_service import change_user_password
+from medic.services.user_service import change_user_password
 
 
 class ChangePasswordWidget(QWidget):

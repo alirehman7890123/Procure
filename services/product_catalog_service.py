@@ -170,7 +170,7 @@ def _resolve_catalog_path(relative_path):
 
 def fetch_master_catalog_rows(*, relative_path="master_products.csv", manufacturer_lookup=None):
     if manufacturer_lookup is None:
-        from services.product_admin_service import fetch_manufacturer_lookup
+        from medic.services.product_admin_service import fetch_manufacturer_lookup
 
         manufacturer_lookup = fetch_manufacturer_lookup()
 

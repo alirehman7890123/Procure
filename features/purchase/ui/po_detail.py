@@ -7,11 +7,10 @@ from PySide6.QtGui import QPdfWriter, QPainter, QPageSize, QFont, QTextOption, Q
 import os
 import platform
 import subprocess
-from medic.utilities.activity_logger import log_activity
 from medic.utilities.permissions import Permissions
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
-from medic.features.purchase.services.purchase_order_service import (
+from medic.services.purchase_order_service import (
     close_purchase_order,
     fetch_purchase_order_detail,
     fetch_purchase_order_grn_rows,
@@ -454,6 +453,8 @@ class PODetailWidget(QWidget):
             return
 
         try:
+            from medic.utilities.activity_logger import log_activity
+
             log_activity(
                 category="procurement",
                 action="po_closed",

@@ -4,18 +4,11 @@ def _new_query():
     return QSqlQuery()
 
 
-try:
-    from medic.services.inventory_movement_service import (
-        fetch_sold_batch_rows_for_return as fetch_sold_batch_rows_for_return_from_inventory,
-        increment_sold_batch_returned as increment_sold_batch_returned_in_inventory,
-        restore_batch_quantity as restore_batch_quantity_in_inventory,
-    )
-except ModuleNotFoundError:
-    from services.inventory_movement_service import (
-        fetch_sold_batch_rows_for_return as fetch_sold_batch_rows_for_return_from_inventory,
-        increment_sold_batch_returned as increment_sold_batch_returned_in_inventory,
-        restore_batch_quantity as restore_batch_quantity_in_inventory,
-    )
+from medic.services.inventory_movement_service import (
+    fetch_sold_batch_rows_for_return as fetch_sold_batch_rows_for_return_from_inventory,
+    increment_sold_batch_returned as increment_sold_batch_returned_in_inventory,
+    restore_batch_quantity as restore_batch_quantity_in_inventory,
+)
 
 
 def insert_sales_return_header(payload):

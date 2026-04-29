@@ -1,9 +1,5 @@
 from PySide6.QtWidgets import QStackedLayout
 
-from medic.features.admin.ui.business_profile import BusinessWidget
-from medic.features.admin.ui.discount_settings import DiscountSettingsWidget
-from medic.features.admin.ui.tax_settings import TaxSettingsWidget
-from medic.features.admin.ui.theme_settings import ThemeSettingsWidget
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions
 
@@ -22,6 +18,8 @@ class BaseBusinessWidget(BasePage):
 
     def _ensure_business_widget(self):
         if self.business_widget is None:
+            from medic.features.admin.ui.business_profile import BusinessWidget
+
             self.business_widget = BusinessWidget()
             self.business_widget.theme_settings_requested.connect(self.set_theme_settings_widget)
             self.business_widget.discount_settings_requested.connect(self.set_discount_settings_widget)
@@ -31,6 +29,8 @@ class BaseBusinessWidget(BasePage):
 
     def _ensure_theme_settings_widget(self):
         if self.theme_settings_widget is None:
+            from medic.features.admin.ui.theme_settings import ThemeSettingsWidget
+
             self.theme_settings_widget = ThemeSettingsWidget()
             self.theme_settings_widget.back_requested.connect(self.set_business_widget)
             self.stacked_layout.addWidget(self.theme_settings_widget)
@@ -38,6 +38,8 @@ class BaseBusinessWidget(BasePage):
 
     def _ensure_discount_settings_widget(self):
         if self.discount_settings_widget is None:
+            from medic.features.admin.ui.discount_settings import DiscountSettingsWidget
+
             self.discount_settings_widget = DiscountSettingsWidget()
             self.discount_settings_widget.back_requested.connect(self.set_business_widget)
             self.stacked_layout.addWidget(self.discount_settings_widget)
@@ -45,6 +47,8 @@ class BaseBusinessWidget(BasePage):
 
     def _ensure_tax_settings_widget(self):
         if self.tax_settings_widget is None:
+            from medic.features.admin.ui.tax_settings import TaxSettingsWidget
+
             self.tax_settings_widget = TaxSettingsWidget()
             self.tax_settings_widget.back_requested.connect(self.set_business_widget)
             self.stacked_layout.addWidget(self.tax_settings_widget)

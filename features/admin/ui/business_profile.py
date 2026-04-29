@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt, Signal
 from medic.utilities.permissions import Permissions
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
-from medic.features.admin.services.business_service import fetch_business_profile, update_business_profile
+from medic.services.business_service import fetch_business_profile, update_business_profile
 
 
 class BusinessWidget(QWidget):

@@ -4,16 +4,10 @@ def _new_query():
     return QSqlQuery()
 
 
-try:
-    from medic.services.inventory_movement_service import (
-        decrement_batch_quantity_by_number as decrement_batch_quantity_by_number_from_inventory,
-        fetch_batch_remaining as fetch_batch_remaining_from_inventory,
-    )
-except ModuleNotFoundError:
-    from services.inventory_movement_service import (
-        decrement_batch_quantity_by_number as decrement_batch_quantity_by_number_from_inventory,
-        fetch_batch_remaining as fetch_batch_remaining_from_inventory,
-    )
+from medic.services.inventory_movement_service import (
+    decrement_batch_quantity_by_number as decrement_batch_quantity_by_number_from_inventory,
+    fetch_batch_remaining as fetch_batch_remaining_from_inventory,
+)
 
 
 def insert_purchase_return_header(payload):

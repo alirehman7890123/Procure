@@ -539,7 +539,7 @@ class AuthWindow(QMainWindow):
                     )
 
                 try:
-                    from utilities.activity_logger import log_activity
+                    from medic.utilities.activity_logger import log_activity
                     log_activity(
                         category="login",
                         action="login",

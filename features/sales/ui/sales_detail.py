@@ -5,8 +5,7 @@ from PySide6.QtGui import QPdfWriter, QPainter, QPageSize, QFont, QTextOption, Q
 from PySide6.QtCore import Qt, QRectF
 
 from medic.utilities.stylus import load_stylesheets
-from medic.utilities.file_preview import preview_file
-from medic.features.sales.services.sales_detail_service import (
+from medic.services.sales_detail_service import (
     fetch_sales_detail,
     fetch_sales_detail_items,
     fetch_sales_invoice_context,

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from medic.features.finance.services.financial_closing_service import (
+from medic.services.financial_closing_service import (
     close_financial_period,
     collect_preclose_checks,
     get_month_close_prompt_state,

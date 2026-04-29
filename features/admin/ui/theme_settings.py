@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
 )
 
 from medic.utilities.app_messagebox import AppMessageBox
-from medic.utilities.app_theme import DEFAULT_THEME, apply_app_theme, normalize_hex
 from medic.utilities.permissions import Permissions
 from medic.utilities.stylus import load_stylesheets
 from medic.services.accounting_settings_service import (
@@ -26,8 +25,11 @@ class ThemeSettingsWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.primary_color = DEFAULT_THEME["theme_primary_color"]
-        self.sidebar_color = DEFAULT_THEME["theme_sidebar_color"]
+        from medic.utilities.app_theme import DEFAULT_THEME
+
+        self.default_theme = DEFAULT_THEME
+        self.primary_color = self.default_theme["theme_primary_color"]
+        self.sidebar_color = self.default_theme["theme_sidebar_color"]
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(10, 10, 10, 10)
@@ -128,9 +130,11 @@ class ThemeSettingsWidget(QWidget):
         )
 
     def load_theme_settings(self):
+        from medic.utilities.app_theme import normalize_hex
+
         settings = load_theme_settings_from_service()
-        self.primary_color = normalize_hex(settings["theme_primary_color"], DEFAULT_THEME["theme_primary_color"])
-        self.sidebar_color = normalize_hex(settings["theme_sidebar_color"], DEFAULT_THEME["theme_sidebar_color"])
+        self.primary_color = normalize_hex(settings["theme_primary_color"], self.default_theme["theme_primary_color"])
+        self.sidebar_color = normalize_hex(settings["theme_sidebar_color"], self.default_theme["theme_sidebar_color"])
         self._apply_preview(self.primary_preview, self.primary_color)
         self._apply_preview(self.sidebar_preview, self.sidebar_color)
 
@@ -147,13 +151,15 @@ class ThemeSettingsWidget(QWidget):
             self._apply_preview(self.sidebar_preview, self.sidebar_color)
 
     def reset_defaults(self):
-        self.primary_color = DEFAULT_THEME["theme_primary_color"]
-        self.sidebar_color = DEFAULT_THEME["theme_sidebar_color"]
+        self.primary_color = self.default_theme["theme_primary_color"]
+        self.sidebar_color = self.default_theme["theme_sidebar_color"]
         self._apply_preview(self.primary_preview, self.primary_color)
         self._apply_preview(self.sidebar_preview, self.sidebar_color)
 
     @Permissions.require_permission("business.update")
     def save_theme(self):
+        from medic.utilities.app_theme import apply_app_theme
+
         try:
             save_theme_settings_to_service(
                 primary_color=self.primary_color,

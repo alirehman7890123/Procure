@@ -1,9 +1,6 @@
 from PySide6.QtSql import QSqlQuery
 
-try:
-    from medic.utilities.session_service import get_active_session_id
-except ModuleNotFoundError:
-    from utilities.session_service import get_active_session_id
+from medic.utilities.session_service import get_active_session_id
 
 
 def _new_query():

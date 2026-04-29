@@ -8,26 +8,15 @@ import mimetypes
 import os
 import shutil
 from datetime import datetime
-try:
-    from medic.utilities.database import SQLiteConnectionManager
-except ModuleNotFoundError:
-    from utilities.database import SQLiteConnectionManager
+from medic.utilities.database import SQLiteConnectionManager
 
 
-try:
-    from medic.services.inventory_movement_service import (
-        decrement_batch_quantity as decrement_batch_quantity_from_inventory,
-        fetch_fifo_batch_rows as fetch_fifo_batch_rows_from_inventory,
-        fetch_total_available_stock as fetch_total_available_stock_from_inventory,
-        insert_sold_batch_record as insert_sold_batch_record_from_inventory,
-    )
-except ModuleNotFoundError:
-    from services.inventory_movement_service import (
-        decrement_batch_quantity as decrement_batch_quantity_from_inventory,
-        fetch_fifo_batch_rows as fetch_fifo_batch_rows_from_inventory,
-        fetch_total_available_stock as fetch_total_available_stock_from_inventory,
-        insert_sold_batch_record as insert_sold_batch_record_from_inventory,
-    )
+from medic.services.inventory_movement_service import (
+    decrement_batch_quantity as decrement_batch_quantity_from_inventory,
+    fetch_fifo_batch_rows as fetch_fifo_batch_rows_from_inventory,
+    fetch_total_available_stock as fetch_total_available_stock_from_inventory,
+    insert_sold_batch_record as insert_sold_batch_record_from_inventory,
+)
 
 
 def ensure_prescription_schema():

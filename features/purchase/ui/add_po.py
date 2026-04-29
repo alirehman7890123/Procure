@@ -16,7 +16,7 @@ from medic.utilities.session_service import get_active_session_id
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.product_search_widget import ProductSearchBox
-from medic.features.purchase.services.purchase_order_service import (
+from medic.services.purchase_order_service import (
     build_purchase_order_header_payload,
     create_supplier_option,
     compute_reorder_suggestion,

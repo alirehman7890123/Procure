@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, Signal
 
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.table_helpers import centered_cell_widget, style_table_action_button
-from medic.features.finance.services.expense_service import fetch_expense_list_rows
+from medic.services.expense_service import fetch_expense_list_rows
 
 
 class ExpenseListWidget(QWidget):

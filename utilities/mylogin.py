@@ -62,9 +62,9 @@ from PySide6.QtWidgets import QMessageBox, QApplication
 from .permissions import Permissions
 from .license_core import get_current_license_payload, get_license_days_remaining, is_demo_license, is_pro_license
 try:
-    from medic.features.admin.services.business_service import fetch_business_name
+    from medic.services.business_service import fetch_business_name
 except ModuleNotFoundError:
-    from features.admin.services.business_service import fetch_business_name
+    from services.business_service import fetch_business_name
 from .stylus import load_stylesheets
 from .app_theme import get_theme_palette
 try:

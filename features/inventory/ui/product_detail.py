@@ -9,7 +9,7 @@ from medic.utilities.stylus import load_stylesheets
 from medic.utilities.activity_logger import log_activity
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
-from medic.features.inventory.services.product_media_service import (
+from medic.services.product_media_service import (
     clear_product_media_fields,
     ensure_product_media_schema,
     fetch_product_media,
@@ -17,7 +17,7 @@ from medic.features.inventory.services.product_media_service import (
     update_product_media_fields,
 )
 from medic.services.sales_transaction_service import ensure_prescription_schema
-from medic.features.inventory.services.product_write_service import (
+from medic.services.product_write_service import (
     fetch_discount_group_options,
     fetch_product_detail_context,
     fetch_tax_group_options,

@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.stylus import load_stylesheets
-from medic.features.admin.services.user_service import fetch_profile_by_username, update_user_profile
+from medic.services.user_service import fetch_profile_by_username, update_user_profile
 
 
 class ProfileWidget(QWidget):

@@ -15,7 +15,6 @@ from medic.utilities.session_gate import require_open_session
 from medic.utilities.session_service import get_active_session_id
 from PySide6.QtGui import QShortcut
 
-from medic.utilities.payment_handler import PaymentMethodHandler
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.app_theme import get_theme_palette
@@ -23,16 +22,16 @@ from medic.utilities.file_preview import preview_file
 from medic.utilities.product_form_options import get_product_form_options
 from medic.utilities.activity_logger import log_activity
 from medic.features.sales.ui.pricing_logic import compute_header_totals, compute_line_pricing
-from medic.features.sales.services.product_media_service import (
+from medic.services.product_media_service import (
     clear_product_media_fields,
     ensure_product_media_schema,
     fetch_product_media,
     save_product_media,
     update_product_media_fields,
 )
-from medic.features.sales.services.accounting_settings_service import load_sales_policy_settings
-from medic.features.sales.services.sales_defaults_service import resolve_sales_header_pricing
-from medic.features.sales.services.sales_detail_service import (
+from medic.services.accounting_settings_service import load_sales_policy_settings
+from medic.services.sales_defaults_service import resolve_sales_header_pricing
+from medic.services.sales_detail_service import (
     create_sales_customer,
     ensure_sales_manufacturer,
     fetch_active_customer_option_rows,
@@ -44,15 +43,15 @@ from medic.features.sales.services.sales_detail_service import (
     fetch_saved_sale_tax_breakdown,
     insert_sales_customer_quick,
 )
-from medic.features.sales.services.sales_posting_service import (
+from medic.services.sales_posting_service import (
     build_sales_header_payload,
     compute_due_date_from_option,
     resolve_sales_settlement,
 )
-from medic.features.sales.services.sales_items_service import (
+from medic.services.sales_items_service import (
     normalize_sales_item_row,
 )
-from medic.features.sales.services.sales_transaction_service import (
+from medic.services.sales_transaction_service import (
     delete_hold_sale,
     ensure_prescription_schema,
     fetch_prescription_required_products,
@@ -103,7 +102,6 @@ class SelectAllLineEdit(QLineEdit):
 
 class SalesQuickProductDialog(QDialog):
     DEFAULT_MARGIN_PERCENT = 14.5
-    FORM_OPTIONS = get_product_form_options()
 
     def __init__(self, parent=None, initial_name=""):
         super().__init__(parent)
@@ -205,7 +203,7 @@ class SalesQuickProductDialog(QDialog):
         self.form_input.setEditable(True)
         self.form_input.setLineEdit(SelectAllLineEdit())
         self.form_input.setInsertPolicy(QComboBox.NoInsert)
-        self.form_input.addItems(self.FORM_OPTIONS)
+        self.form_input.addItems(get_product_form_options())
         self.form_input.setPlaceholderText("Form")
         if self.form_input.lineEdit() is not None:
             self.form_input.lineEdit().textEdited.connect(
@@ -1103,6 +1101,7 @@ class CreateSalesWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        from medic.utilities.payment_handler import PaymentMethodHandler
         
         
         # === Main Vertical Layout ===

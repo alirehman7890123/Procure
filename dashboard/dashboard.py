@@ -10,7 +10,7 @@ from medic.utilities.activity_logger import log_activity
 from medic.utilities.permissions import Permissions
 from medic.utilities.session_service import SessionErrorCode, check_active_session
 from medic.services.financial_closing_service import get_month_close_prompt_state
-from services import daily_session_service
+from medic.services import daily_session_service
 from medic.reports.report_service import ReportService
 import pyqtgraph as pg
 from medic.features.finance.ui.daily_session import DailySession

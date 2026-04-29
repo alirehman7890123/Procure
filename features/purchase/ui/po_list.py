@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, Signal, QDate, QTimer
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.table_helpers import centered_cell_widget, style_table_action_button
 from medic.utilities.app_messagebox import AppMessageBox
-from medic.features.purchase.services.purchase_order_service import fetch_purchase_order_list_rows
+from medic.services.purchase_order_service import fetch_purchase_order_list_rows
 
 
 

@@ -2,17 +2,17 @@ from PySide6.QtWidgets import QWidget, QApplication, QPushButton, QComboBox, QVB
 from PySide6.QtCore import Qt, QEvent
 
 from medic.utilities.stylus import load_stylesheets
-from medic.utilities.payment_handler import PaymentMethodHandler
 from medic.utilities.permissions import Permissions
 from medic.utilities.session_gate import require_open_session
 from medic.utilities.session_service import get_active_session_id
 from medic.utilities.app_messagebox import AppMessageBox
-from medic.features.finance.services.expense_service import create_expense
+from medic.services.expense_service import create_expense
 
 
 class AddExpenseWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        from medic.utilities.payment_handler import PaymentMethodHandler
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(10, 10, 10, 10)

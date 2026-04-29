@@ -1,11 +1,7 @@
 import re
 
-try:
-    from medic.services.purchase_posting_service import compute_purchase_settlement
-    from medic.services.purchase_items_service import normalize_expiry_text
-except ModuleNotFoundError:
-    from services.purchase_posting_service import compute_purchase_settlement
-    from services.purchase_items_service import normalize_expiry_text
+from medic.services.purchase_posting_service import compute_purchase_settlement
+from medic.services.purchase_items_service import normalize_expiry_text
 
 
 def build_goods_receipt_payload(

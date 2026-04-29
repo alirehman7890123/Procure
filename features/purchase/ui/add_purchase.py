@@ -11,7 +11,6 @@ from medic.utilities.session_gate import require_open_session
 from medic.utilities.session_service import get_active_session_id
 
 from medic.utilities.stylus import load_stylesheets
-from medic.utilities.payment_handler import PaymentMethodHandler
 from medic.utilities.activity_logger import log_activity
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
@@ -24,18 +23,18 @@ from medic.services.product_media_service import (
     update_product_media_fields,
 )
 from medic.services.sales_transaction_service import ensure_prescription_schema
-from medic.features.purchase.services.purchase_posting_service import (
+from medic.services.purchase_posting_service import (
     build_purchase_header_payload,
     build_supplier_transaction_payload,
     compute_purchase_settlement,
 )
-from medic.features.purchase.services.purchase_items_service import (
+from medic.services.purchase_items_service import (
     build_batch_payload,
     compute_purchase_distribution_factor,
     normalize_purchase_item_row,
     parse_expiry_to_db_date,
 )
-from medic.features.purchase.services.purchase_transaction_service import (
+from medic.services.purchase_transaction_service import (
     fetch_product_pack_size,
     fetch_supplier_balances,
     insert_batch_record,
@@ -45,7 +44,7 @@ from medic.features.purchase.services.purchase_transaction_service import (
     mark_product_used,
     update_supplier_balances,
 )
-from medic.features.purchase.services.purchase_draft_service import (
+from medic.services.purchase_draft_service import (
     delete_purchase_draft,
     load_latest_purchase_draft,
     save_purchase_draft,
@@ -109,6 +108,7 @@ class AddPurchaseWidget(QWidget):
     def __init__(self, parent=None):
 
         super().__init__(parent)
+        from medic.utilities.payment_handler import PaymentMethodHandler
         
         
         

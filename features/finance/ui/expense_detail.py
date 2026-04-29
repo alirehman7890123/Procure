@@ -2,7 +2,7 @@ from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QFrame, QLabel,
 from PySide6.QtCore import Qt
 
 from medic.utilities.stylus import load_stylesheets
-from medic.features.finance.services.expense_service import fetch_expense_detail
+from medic.services.expense_service import fetch_expense_detail
 
 
 class ExpenseDetailWidget(QWidget):

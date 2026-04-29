@@ -5,7 +5,7 @@ from functools import partial
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.table_helpers import centered_cell_widget, style_table_action_button
-from medic.features.sales.services.sales_detail_service import fetch_sales_receipt_list_rows
+from medic.services.sales_detail_service import fetch_sales_receipt_list_rows
 
 
 class ReceiptListWidget(QWidget):

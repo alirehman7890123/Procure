@@ -4,28 +4,25 @@ from PySide6.QtCore import QSize, Qt, QFile, QDate, QEvent, QStringListModel, Si
 from PySide6.QtSql import QSqlDatabase
 from datetime import date, datetime
 import re
-from medic.utilities.product_search_widget import ProductSearchBox
-from medic.utilities.product_form_options import get_product_form_options
 import sys
 import pandas as pd  # <-- for reading CSV/Excel easily
 from medic.services.sales_transaction_service import ensure_prescription_schema
 
 from medic.utilities.app_messagebox import AppMessageBox
-from medic.utilities.file_preview import preview_file
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.permissions import Permissions
-from medic.features.inventory.services.accounting_settings_service import (
+from medic.services.accounting_settings_service import (
     load_opening_inventory_value,
     save_opening_inventory_value,
 )
-from medic.features.inventory.services.product_media_service import (
+from medic.services.product_media_service import (
     clear_product_media_fields,
     ensure_product_media_schema,
     fetch_product_media,
     save_product_media,
     update_product_media_fields,
 )
-from medic.features.inventory.services.product_write_service import (
+from medic.services.product_write_service import (
     fetch_discount_group_options,
     fetch_manufacturer_options,
     fetch_product_autofill,
@@ -287,6 +284,8 @@ class AddProductWidget(QWidget):
         self.product_media_clear_btn.setEnabled(has_media or self.product_media_removed)
 
     def preview_product_media(self):
+        from medic.utilities.file_preview import preview_file
+
         media_path = str(self.selected_product_media_path or "").strip()
         mime_type = ""
         if not media_path and self.selected_product_media_info:
@@ -515,11 +514,10 @@ class AddProductWidget(QWidget):
     
     
     def populate_product_fields(self):
-        
-        forms = get_product_form_options()
+        from medic.utilities.product_form_options import get_product_form_options
+        from medic.utilities.product_search_widget import ProductSearchBox
 
-        
-        
+        forms = get_product_form_options()
         self.name_input = ProductSearchBox(self)
         self.name_input.lineEdit().textEdited.connect(self.force_uppercase)
         self.name_input.setStyleSheet("""

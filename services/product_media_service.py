@@ -5,10 +5,7 @@ from datetime import datetime
 
 from PySide6.QtSql import QSqlQuery
 
-try:
-    from medic.utilities.database import SQLiteConnectionManager
-except ModuleNotFoundError:
-    from utilities.database import SQLiteConnectionManager
+from medic.utilities.database import SQLiteConnectionManager
 
 
 def _new_query():

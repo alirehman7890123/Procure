@@ -2,10 +2,7 @@ import bcrypt
 
 from PySide6.QtSql import QSqlQuery
 
-try:
-    from medic.utilities.permissions import Permissions
-except ModuleNotFoundError:
-    from utilities.permissions import Permissions
+from medic.utilities.permissions import Permissions
 
 
 def _new_query():

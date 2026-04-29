@@ -10,14 +10,14 @@ from medic.utilities.stylus import load_stylesheets
 from medic.utilities.activity_logger import log_activity
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
-from medic.features.inventory.services.stock_adjustment_service import (
+from medic.services.stock_adjustment_service import (
     apply_stock_adjustments,
     build_stock_adjustment_log_note,
     fetch_adjustable_products,
     fetch_adjustment_batches_for_product,
     normalize_stock_adjustment_row,
 )
-from medic.features.inventory.services.product_catalog_service import (
+from medic.services.product_catalog_service import (
     build_product_stock_filter_clause,
     fetch_expired_product_rows,
     fetch_low_stock_rows,
@@ -27,7 +27,7 @@ from medic.features.inventory.services.product_catalog_service import (
     fetch_used_product_count,
     search_products,
 )
-from medic.features.inventory.services.product_admin_service import (
+from medic.services.product_admin_service import (
     insert_price_change_log,
     resolve_auth_user_id,
     resolve_price_change_product,

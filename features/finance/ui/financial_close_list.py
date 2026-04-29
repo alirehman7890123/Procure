@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
 )
 
-from medic.features.finance.services.financial_closing_service import (
+from medic.services.financial_closing_service import (
     list_financial_close_audit_events,
     list_recent_period_closures,
     reopen_financial_period,

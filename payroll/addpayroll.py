@@ -291,7 +291,7 @@ class AddPayrollWidget(QWidget):
         att = getattr(self, "_attendance", {})
         working_days = getattr(self, "_working_days", 26)
 
-        from services.payroll_posting_service import compute_deduction, compute_net_salary
+        from medic.services.payroll_posting_service import compute_deduction, compute_net_salary
         deduction = compute_deduction(
             basic, att.get("absent", 0), att.get("half_day", 0), working_days
         )

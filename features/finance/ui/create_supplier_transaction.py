@@ -4,11 +4,10 @@ from PySide6.QtSql import QSqlDatabase
 from PySide6.QtGui import QKeySequence, QShortcut
 
 from medic.utilities.stylus import load_stylesheets
-from medic.utilities.payment_handler import PaymentMethodHandler
 from medic.utilities.permissions import Permissions
 from medic.utilities.session_gate import require_open_session
 from medic.utilities.app_messagebox import AppMessageBox
-from medic.features.finance.services.party_transaction_service import (
+from medic.services.party_transaction_service import (
     fetch_supplier_transaction_form_context,
     prepare_supplier_transaction_payload,
     save_supplier_transaction_payload,
@@ -18,6 +17,7 @@ from medic.features.finance.services.party_transaction_service import (
 class CreateSupplierTransactionWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        from medic.utilities.payment_handler import PaymentMethodHandler
 
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(10, 10, 10, 10)

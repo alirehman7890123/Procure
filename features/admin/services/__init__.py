@@ -1,5 +1,3 @@
-"""Admin feature service exports."""
+"""Admin feature service package placeholder."""
 
-from . import business_service, user_service
-
-__all__ = ["business_service", "user_service"]
+__all__ = []

@@ -2,9 +2,6 @@ from PySide6.QtWidgets import QStackedLayout
 
 from medic.utilities.basepage import BasePage
 from medic.utilities.permissions import Permissions
-from medic.features.sales.ui.create_sales import CreateSalesWidget
-from medic.features.sales.ui.receipt_list import ReceiptListWidget
-from medic.features.sales.ui.sales_detail import SalesDetailWidget
 
 
 class BaseSalesWidget(BasePage):
@@ -19,6 +16,8 @@ class BaseSalesWidget(BasePage):
 
     def _ensure_createsales_widget(self):
         if self.createsales_widget is None:
+            from medic.features.sales.ui.create_sales import CreateSalesWidget
+
             self.createsales_widget = CreateSalesWidget()
             self.createsales_widget.invoicelist.clicked.connect(self.set_saleslist_widget)
             self.stacked_layout.addWidget(self.createsales_widget)
@@ -26,6 +25,8 @@ class BaseSalesWidget(BasePage):
 
     def _ensure_receiptlist_widget(self):
         if self.receiptlist_widget is None:
+            from medic.features.sales.ui.receipt_list import ReceiptListWidget
+
             self.receiptlist_widget = ReceiptListWidget()
             self.receiptlist_widget.addinvoice.clicked.connect(self.set_createsales_widget)
             self.receiptlist_widget.salesdetailsignal.connect(self.set_salesdetail_widget)
@@ -34,6 +35,8 @@ class BaseSalesWidget(BasePage):
 
     def _ensure_salesdetail_widget(self):
         if self.salesdetail_widget is None:
+            from medic.features.sales.ui.sales_detail import SalesDetailWidget
+
             self.salesdetail_widget = SalesDetailWidget()
             self.salesdetail_widget.receiptlist.clicked.connect(self.set_saleslist_widget)
             self.stacked_layout.addWidget(self.salesdetail_widget)

@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt
 
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
-from medic.features.admin.services.user_service import fetch_user_detail
+from medic.services.user_service import fetch_user_detail
 
 
 class UserDetailWidget(QWidget):
