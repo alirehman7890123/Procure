@@ -1,16 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
+from pathlib import Path
+
+from PyInstaller.utils.hooks import collect_all, collect_submodules
+
+
+PROJECT_ROOT = Path(SPECPATH).resolve().parent
+PACKAGE_PARENT = str(PROJECT_ROOT.parent)
 
 datas = [('res', 'res'), ('styles', 'styles'), ('manufacturers.csv', '.'), ('master_products.csv', '.'), ('licensing/public_key.json', 'licensing'), ('purchase/med-template.ods', 'purchase')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('PySide6')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+hiddenimports += collect_submodules('medic')
 
 
 a = Analysis(
     ['starting.py'],
-    pathex=[],
+    pathex=[PACKAGE_PARENT],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
