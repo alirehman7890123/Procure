@@ -1,0 +1,181 @@
+from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QHeaderView, QSizePolicy, QVBoxLayout, QLineEdit, QHBoxLayout, QFrame, QTableWidget, QTableWidgetItem
+from PySide6.QtCore import QFile, Qt, Signal
+from functools import partial
+from medic.utilities.stylus import load_stylesheets
+from medic.utilities.table_helpers import centered_cell_widget, style_table_action_button
+from medic.utilities.app_messagebox import AppMessageBox
+from medic.services.salesrep_service import fetch_salesrep_list_rows
+
+
+
+
+class SalesRepListWidget(QWidget):
+    
+    detailpagesignal = Signal(int)
+
+    def __init__(self, parent=None):
+
+        super().__init__(parent)
+
+
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
+
+        # === Header Row ===
+        header_layout = QHBoxLayout()
+        heading = QLabel("Sales Rep Information", objectName="SectionTitle")
+        self.addsalesrep = QPushButton("Add Sales Rep", objectName="TopRightButton")
+        self.addsalesrep.setCursor(Qt.PointingHandCursor)
+        header_layout.setContentsMargins(0, 0, 0, 10)
+        header_layout.addWidget(heading)
+        header_layout.addStretch()
+        header_layout.addWidget(self.addsalesrep)
+
+        self.layout.addLayout(header_layout)
+        
+
+        line = QFrame()
+        line.setObjectName("lineSeparator")
+
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        line.setStyleSheet("""
+                QFrame#lineSeparator {
+                    border: none;
+                    border-top: 2px solid #333;
+                }
+            """)
+
+
+        self.layout.addWidget(line)
+        self.layout.addSpacing(20)
+        
+        # Search Field
+        search_layout = QHBoxLayout()
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.setSpacing(10)
+        search_edit = QLineEdit()
+        search_edit.setPlaceholderText("Search Product...")
+        search_edit.textChanged.connect(self.search_rows)
+        search_layout.addWidget(search_edit)
+        self.layout.addLayout(search_layout)
+        self.layout.addSpacing(10)
+        
+        
+        self.row_height = 35
+
+        self.table = MyTable(column_ratios=[0.05, 0.20, 0.20, 0.10, 0.15, 0.10])
+        headers = ['Sr. No.', 'Sales Rep', 'Supplier', 'Contact', 'Status', 'Detail']
+        self.table.setColumnCount(len(headers))
+        self.table.setHorizontalHeaderLabels(headers)
+        
+        
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.table.verticalHeader().setDefaultSectionSize(self.row_height)
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        detail_col = headers.index("Detail")
+        self.table.horizontalHeaderItem(detail_col).setTextAlignment(Qt.AlignCenter)
+        
+        self.table.setStyleSheet("QTableWidget::item { color: #333; }")
+
+        self.table.verticalHeader().setFixedWidth(0)
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(True)   
+
+        self.table.setMinimumWidth(700)
+        
+        # Hide vertical header (row numbers)
+        self.table.verticalHeader().setVisible(False)
+        
+
+        # Alternating row colors
+        self.table.setAlternatingRowColors(True)
+
+        # Selection behaviour
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+
+        self.layout.addWidget(self.table)
+        
+        self.layout.addStretch()
+
+
+
+
+        self.setStyleSheet(load_stylesheets())
+        
+
+        
+
+
+    def search_rows(self, text):
+        
+        for row in range(self.table.rowCount()):
+            match = False
+            for col in range(self.table.columnCount() - 1):
+                item = self.table.item(row, col)
+                if item and text.lower() in item.text().lower():
+                    match = True
+                    break
+            self.table.setRowHidden(row, not match)
+            
+
+    
+    def showEvent(self, event):
+        
+        super().showEvent(event)
+        print("Widget shown — refreshing data")
+        self.load_salesreps_into_table()
+        
+
+
+      
+    def load_salesreps_into_table(self):
+        try:
+            rows = fetch_salesrep_list_rows()
+        except Exception as exc:
+            AppMessageBox.critical(self, "Sales Rep List", str(exc))
+            return
+
+        self.table.setRowCount(0)
+        for row, rep in enumerate(rows):
+            self.table.insertRow(row)
+
+            self.table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
+            self.table.setItem(row, 1, QTableWidgetItem(rep["name"]))
+            self.table.setItem(row, 2, QTableWidgetItem(rep["supplier_name"]))
+            self.table.setItem(row, 3, QTableWidgetItem(rep["contact"]))
+            self.table.setItem(row, 4, QTableWidgetItem(rep["status"]))
+
+            detail = style_table_action_button(QPushButton("Details"))
+            detail.clicked.connect(partial(self.detailpagesignal.emit, rep["id"]))
+            self.table.setCellWidget(row, 5, centered_cell_widget(detail))
+
+
+
+class MyTable(QTableWidget):
+    def __init__(self, rows=0, cols=0, column_ratios=None, parent=None):
+        super().__init__(rows, cols, parent)
+        self.column_ratios = column_ratios or []
+        header = self.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Interactive)  # user can drag
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self.column_ratios:
+            return
+        total = sum(self.column_ratios)
+        width = self.viewport().width()
+        for i, ratio in enumerate(self.column_ratios):
+            col_width = int(width * (ratio / total))
+            self.setColumnWidth(i, col_width)
+
+
+
+
+
+
+            
+        

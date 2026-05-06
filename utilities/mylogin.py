@@ -15,20 +15,20 @@ try:
     from medic.dashboard.base_dashboard_page import BaseDashboardWidget
     from medic.dashboard.welcome import WelcomeWidget
     from medic.features.admin.ui.base_business import BaseBusinessWidget
-    from medic.supplier.basesupplier import BaseSupplierWidget
-    from medic.salesrep.basesalesrep import BaseSalesRepWidget
-    from medic.customer.basecustomer import BaseCustomerWidget
+    from medic.features.supplier.ui.base_supplier import BaseSupplierWidget
+    from medic.features.salesrep.ui.base_salesrep import BaseSalesRepWidget
+    from medic.features.customer.ui.base_customer import BaseCustomerWidget
     from medic.features.inventory.ui.base_inventory import BaseInventoryWidget
     from medic.features.admin.ui.base_profile import BaseProfileWidget
     from medic.features.purchase.ui.base_purchase import BasePurchaseWidget
     from medic.features.purchase.ui.base_po import BasePOWidget
     from medic.features.purchase.ui.base_grn import BaseGRNWidget
     from medic.features.sales.ui.base_sales import BaseSalesWidget
-    from medic.employee.baseemployee import BaseEmployeeWidget
-    from medic.payroll.basepayroll import BasePayrollWidget
+    from medic.features.employee.ui.base_employee import BaseEmployeeWidget
+    from medic.features.payroll.ui.base_payroll import BasePayrollWidget
     from medic.features.finance.ui.base_transactions import BaseTransactionWidget
-    from medic.purchasereturn.base_purchase_return import BasePurchaseReturnWidget
-    from medic.salesreturn.base_sales_return import BaseSalesReturnWidget
+    from medic.features.purchasereturn.ui.base_purchase_return import BasePurchaseReturnWidget
+    from medic.features.salesreturn.ui.base_sales_return import BaseSalesReturnWidget
     from medic.features.finance.ui.base_expenses import BaseExpenseWidget
     from medic.reports.basereports import BaseReportsWidget
     from medic.features.finance.ui.base_financial_close import BaseFinancialCloseWidget
@@ -37,20 +37,20 @@ except ModuleNotFoundError:
     from dashboard.base_dashboard_page import BaseDashboardWidget
     from dashboard.welcome import WelcomeWidget
     from features.admin.ui.base_business import BaseBusinessWidget
-    from supplier.basesupplier import BaseSupplierWidget
-    from salesrep.basesalesrep import BaseSalesRepWidget
-    from customer.basecustomer import BaseCustomerWidget
+    from features.supplier.ui.base_supplier import BaseSupplierWidget
+    from features.salesrep.ui.base_salesrep import BaseSalesRepWidget
+    from features.customer.ui.base_customer import BaseCustomerWidget
     from features.inventory.ui.base_inventory import BaseInventoryWidget
     from features.admin.ui.base_profile import BaseProfileWidget
     from features.purchase.ui.base_purchase import BasePurchaseWidget
     from features.purchase.ui.base_po import BasePOWidget
     from features.purchase.ui.base_grn import BaseGRNWidget
     from features.sales.ui.base_sales import BaseSalesWidget
-    from employee.baseemployee import BaseEmployeeWidget
-    from payroll.basepayroll import BasePayrollWidget
+    from features.employee.ui.base_employee import BaseEmployeeWidget
+    from features.payroll.ui.base_payroll import BasePayrollWidget
     from features.finance.ui.base_transactions import BaseTransactionWidget
-    from purchasereturn.base_purchase_return import BasePurchaseReturnWidget
-    from salesreturn.base_sales_return import BaseSalesReturnWidget
+    from features.purchasereturn.ui.base_purchase_return import BasePurchaseReturnWidget
+    from features.salesreturn.ui.base_sales_return import BaseSalesReturnWidget
     from features.finance.ui.base_expenses import BaseExpenseWidget
     from reports.basereports import BaseReportsWidget
     from features.finance.ui.base_financial_close import BaseFinancialCloseWidget

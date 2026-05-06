@@ -52,6 +52,15 @@ def get_employee_by_id(employee_id):
     return None
 
 
+def resolve_payroll_auth_user_id(username):
+    """Resolve an auth user id from username for payroll recording flows."""
+    query = QSqlQuery()
+    query.prepare("SELECT id FROM auth WHERE username = ? LIMIT 1")
+    query.addBindValue(username)
+    query.exec()
+    return query.value(0) if query.next() else None
+
+
 # ---------------------------------------------------------------------------
 # Attendance
 # ---------------------------------------------------------------------------
