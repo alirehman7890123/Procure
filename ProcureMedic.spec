@@ -12,14 +12,35 @@ workspace_root = project_dir.parent
 # to an empty set in CI when the checkout root is the package directory.
 if str(workspace_root) not in sys.path:
     sys.path.insert(0, str(workspace_root))
+if str(project_dir) not in sys.path:
+    sys.path.insert(0, str(project_dir))
 
-hiddenimports = collect_submodules("medic")
-datas = collect_data_files("medic")
+hiddenimports = []
+datas = []
+
+
+def _extend_package_collection(package_name):
+    hiddenimports.extend(collect_submodules(package_name))
+    datas.extend(collect_data_files(package_name))
+
+
+# Canonical package surface.
+_extend_package_collection("medic")
+
+# Transitional startup fallback surface. These are still used by starting.py
+# and utilities/mylogin.py when absolute `medic...` imports are unavailable in
+# a frozen environment, so we bundle both import styles for now.
+for package_name in ("utilities", "services", "features", "dashboard", "reports"):
+    _extend_package_collection(package_name)
+
+# De-duplicate while preserving order for stable builds.
+hiddenimports = list(dict.fromkeys(hiddenimports))
+datas = list(dict.fromkeys(datas))
 
 
 a = Analysis(
     ["starting.py"],
-    pathex=[str(workspace_root)],
+    pathex=[str(workspace_root), str(project_dir)],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
