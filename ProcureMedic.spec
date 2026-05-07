@@ -37,6 +37,26 @@ for package_name in ("utilities", "services", "features", "dashboard", "reports"
 hiddenimports = list(dict.fromkeys(hiddenimports))
 datas = list(dict.fromkeys(datas))
 
+# Non-package runtime assets that live at the repo root must be added
+# explicitly; these used to come from the old CLI `--add-data` workflow.
+extra_datas = [
+    (str(project_dir / "licensing" / "public_key.json"), "licensing"),
+    (str(project_dir / "manufacturers.csv"), "."),
+    (str(project_dir / "master_products.csv"), "."),
+    (str(project_dir / "purchase" / "med-template.ods"), "purchase"),
+]
+
+for pattern in ("*.css",):
+    for path in (project_dir / "styles").glob(pattern):
+        extra_datas.append((str(path), "styles"))
+
+for path in (project_dir / "res").rglob("*"):
+    if path.is_file():
+        extra_datas.append((str(path), str(Path("res") / path.relative_to(project_dir / "res").parent)))
+
+datas.extend(extra_datas)
+datas = list(dict.fromkeys(datas))
+
 
 a = Analysis(
     ["starting.py"],
