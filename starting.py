@@ -17,15 +17,18 @@ if CURRENT_DIR not in sys.path:
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-# When packaged, this entry point may execute from inside the app folder
-# without the parent directory being import-resolvable as a top-level
-# package named ``medic``. Register the current source root explicitly so
-# absolute imports like ``from medic.utilities ...`` still work.
-if "medic" not in sys.modules:
-    medic_pkg = types.ModuleType("medic")
-    medic_pkg.__file__ = os.path.join(CURRENT_DIR, "__init__.py")
-    medic_pkg.__path__ = [CURRENT_DIR]
-    sys.modules["medic"] = medic_pkg
+# When running from source (for example `python medic/starting.py`), the
+# package root may not be importable as ``medic`` yet. In the frozen app we
+# must not shadow the real bundled package with a synthetic module object.
+if not getattr(sys, "frozen", False):
+    try:
+        import_module("medic")
+    except ModuleNotFoundError:
+        if "medic" not in sys.modules:
+            medic_pkg = types.ModuleType("medic")
+            medic_pkg.__file__ = os.path.join(CURRENT_DIR, "__init__.py")
+            medic_pkg.__path__ = [CURRENT_DIR]
+            sys.modules["medic"] = medic_pkg
 
 
 def _import_symbol(module_name, fallback_module_name, symbol_name):
