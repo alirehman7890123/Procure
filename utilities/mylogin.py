@@ -11,66 +11,15 @@ from .activity_logger import log_activity
 from .database import SQLiteConnectionManager
 # from database import PostgresConnectionManager
 from PySide6.QtGui import QPalette, QColor, QPixmap, QIcon, QPainter
-try:
-    from medic.dashboard.base_dashboard_page import BaseDashboardWidget
-    from medic.dashboard.welcome import WelcomeWidget
-    from medic.features.admin.ui.base_business import BaseBusinessWidget
-    from medic.features.supplier.ui.base_supplier import BaseSupplierWidget
-    from medic.features.salesrep.ui.base_salesrep import BaseSalesRepWidget
-    from medic.features.customer.ui.base_customer import BaseCustomerWidget
-    from medic.features.inventory.ui.base_inventory import BaseInventoryWidget
-    from medic.features.admin.ui.base_profile import BaseProfileWidget
-    from medic.features.purchase.ui.base_purchase import BasePurchaseWidget
-    from medic.features.purchase.ui.base_po import BasePOWidget
-    from medic.features.purchase.ui.base_grn import BaseGRNWidget
-    from medic.features.sales.ui.base_sales import BaseSalesWidget
-    from medic.features.employee.ui.base_employee import BaseEmployeeWidget
-    from medic.features.payroll.ui.base_payroll import BasePayrollWidget
-    from medic.features.finance.ui.base_transactions import BaseTransactionWidget
-    from medic.features.purchasereturn.ui.base_purchase_return import BasePurchaseReturnWidget
-    from medic.features.salesreturn.ui.base_sales_return import BaseSalesReturnWidget
-    from medic.features.finance.ui.base_expenses import BaseExpenseWidget
-    from medic.reports.basereports import BaseReportsWidget
-    from medic.features.finance.ui.base_financial_close import BaseFinancialCloseWidget
-    from medic.salehold.basehold import BaseHoldSalesWidget
-except ModuleNotFoundError:
-    from dashboard.base_dashboard_page import BaseDashboardWidget
-    from dashboard.welcome import WelcomeWidget
-    from features.admin.ui.base_business import BaseBusinessWidget
-    from features.supplier.ui.base_supplier import BaseSupplierWidget
-    from features.salesrep.ui.base_salesrep import BaseSalesRepWidget
-    from features.customer.ui.base_customer import BaseCustomerWidget
-    from features.inventory.ui.base_inventory import BaseInventoryWidget
-    from features.admin.ui.base_profile import BaseProfileWidget
-    from features.purchase.ui.base_purchase import BasePurchaseWidget
-    from features.purchase.ui.base_po import BasePOWidget
-    from features.purchase.ui.base_grn import BaseGRNWidget
-    from features.sales.ui.base_sales import BaseSalesWidget
-    from features.employee.ui.base_employee import BaseEmployeeWidget
-    from features.payroll.ui.base_payroll import BasePayrollWidget
-    from features.finance.ui.base_transactions import BaseTransactionWidget
-    from features.purchasereturn.ui.base_purchase_return import BasePurchaseReturnWidget
-    from features.salesreturn.ui.base_sales_return import BaseSalesReturnWidget
-    from features.finance.ui.base_expenses import BaseExpenseWidget
-    from reports.basereports import BaseReportsWidget
-    from features.finance.ui.base_financial_close import BaseFinancialCloseWidget
-    from salehold.basehold import BaseHoldSalesWidget
 
 from .sizehintfinder import print_size_hints
 from functools import wraps
 from PySide6.QtWidgets import QMessageBox, QApplication
 from .permissions import Permissions
 from .license_core import get_current_license_payload, get_license_days_remaining, is_demo_license, is_pro_license
-try:
-    from medic.services.business_service import fetch_business_name
-except ModuleNotFoundError:
-    from services.business_service import fetch_business_name
+from importlib import import_module
 from .stylus import load_stylesheets
 from .app_theme import get_theme_palette
-try:
-    from medic.services.scheduled_price_service import apply_due_scheduled_price_changes, ensure_scheduled_price_schema
-except ModuleNotFoundError:
-    from services.scheduled_price_service import apply_due_scheduled_price_changes, ensure_scheduled_price_schema
 
 
 
@@ -81,6 +30,41 @@ import sys
 import os
 from pathlib import Path
 from .app_messagebox import AppMessageBox
+
+
+def _import_symbol(module_name, fallback_module_name, symbol_name):
+    try:
+        module = import_module(module_name)
+    except ModuleNotFoundError:
+        module = import_module(fallback_module_name)
+    return getattr(module, symbol_name)
+
+
+def fetch_business_name():
+    func = _import_symbol(
+        "medic.services.business_service",
+        "services.business_service",
+        "fetch_business_name",
+    )
+    return func()
+
+
+def apply_due_scheduled_price_changes(*args, **kwargs):
+    func = _import_symbol(
+        "medic.services.scheduled_price_service",
+        "services.scheduled_price_service",
+        "apply_due_scheduled_price_changes",
+    )
+    return func(*args, **kwargs)
+
+
+def ensure_scheduled_price_schema(*args, **kwargs):
+    func = _import_symbol(
+        "medic.services.scheduled_price_service",
+        "services.scheduled_price_service",
+        "ensure_scheduled_price_schema",
+    )
+    return func(*args, **kwargs)
 
 
 def resource_path(relative_path):
@@ -734,26 +718,106 @@ class MainWindow(QMainWindow):
         self.reports = None
 
         self._page_factories = {
-            "dashboard": lambda: BaseDashboardWidget(),
-            "welcome": lambda: WelcomeWidget(),
-            "profile": lambda: BaseProfileWidget(),
-            "business": lambda: BaseBusinessWidget(),
-            "supplier": lambda: BaseSupplierWidget(),
-            "salesrep": lambda: BaseSalesRepWidget(),
-            "purchase": lambda: BasePurchaseWidget(),
-            "po": lambda: BasePOWidget(),
-            "grn": lambda: BaseGRNWidget(),
-            "base_sales": lambda: BaseSalesWidget(controller=self),
-            "base_customer": lambda: BaseCustomerWidget(controller=self),
-            "product": lambda: BaseInventoryWidget(),
-            "employee": lambda: BaseEmployeeWidget(),
-            "payroll": lambda: BasePayrollWidget(),
-            "transaction": lambda: BaseTransactionWidget(),
-            "purchasereturn": lambda: BasePurchaseReturnWidget(),
-            "salesreturn": lambda: BaseSalesReturnWidget(),
-            "expense": lambda: BaseExpenseWidget(),
-            "financial_close": lambda: BaseFinancialCloseWidget(pro_enabled=self.pro_mode),
-            "reports": lambda: BaseReportsWidget(),
+            "dashboard": lambda: _import_symbol(
+                "medic.dashboard.base_dashboard_page",
+                "dashboard.base_dashboard_page",
+                "BaseDashboardWidget",
+            )(),
+            "welcome": lambda: _import_symbol(
+                "medic.dashboard.welcome",
+                "dashboard.welcome",
+                "WelcomeWidget",
+            )(),
+            "profile": lambda: _import_symbol(
+                "medic.features.admin.ui.base_profile",
+                "features.admin.ui.base_profile",
+                "BaseProfileWidget",
+            )(),
+            "business": lambda: _import_symbol(
+                "medic.features.admin.ui.base_business",
+                "features.admin.ui.base_business",
+                "BaseBusinessWidget",
+            )(),
+            "supplier": lambda: _import_symbol(
+                "medic.features.supplier.ui.base_supplier",
+                "features.supplier.ui.base_supplier",
+                "BaseSupplierWidget",
+            )(),
+            "salesrep": lambda: _import_symbol(
+                "medic.features.salesrep.ui.base_salesrep",
+                "features.salesrep.ui.base_salesrep",
+                "BaseSalesRepWidget",
+            )(),
+            "purchase": lambda: _import_symbol(
+                "medic.features.purchase.ui.base_purchase",
+                "features.purchase.ui.base_purchase",
+                "BasePurchaseWidget",
+            )(),
+            "po": lambda: _import_symbol(
+                "medic.features.purchase.ui.base_po",
+                "features.purchase.ui.base_po",
+                "BasePOWidget",
+            )(),
+            "grn": lambda: _import_symbol(
+                "medic.features.purchase.ui.base_grn",
+                "features.purchase.ui.base_grn",
+                "BaseGRNWidget",
+            )(),
+            "base_sales": lambda: _import_symbol(
+                "medic.features.sales.ui.base_sales",
+                "features.sales.ui.base_sales",
+                "BaseSalesWidget",
+            )(controller=self),
+            "base_customer": lambda: _import_symbol(
+                "medic.features.customer.ui.base_customer",
+                "features.customer.ui.base_customer",
+                "BaseCustomerWidget",
+            )(controller=self),
+            "product": lambda: _import_symbol(
+                "medic.features.inventory.ui.base_inventory",
+                "features.inventory.ui.base_inventory",
+                "BaseInventoryWidget",
+            )(),
+            "employee": lambda: _import_symbol(
+                "medic.features.employee.ui.base_employee",
+                "features.employee.ui.base_employee",
+                "BaseEmployeeWidget",
+            )(),
+            "payroll": lambda: _import_symbol(
+                "medic.features.payroll.ui.base_payroll",
+                "features.payroll.ui.base_payroll",
+                "BasePayrollWidget",
+            )(),
+            "transaction": lambda: _import_symbol(
+                "medic.features.finance.ui.base_transactions",
+                "features.finance.ui.base_transactions",
+                "BaseTransactionWidget",
+            )(),
+            "purchasereturn": lambda: _import_symbol(
+                "medic.features.purchasereturn.ui.base_purchase_return",
+                "features.purchasereturn.ui.base_purchase_return",
+                "BasePurchaseReturnWidget",
+            )(),
+            "salesreturn": lambda: _import_symbol(
+                "medic.features.salesreturn.ui.base_sales_return",
+                "features.salesreturn.ui.base_sales_return",
+                "BaseSalesReturnWidget",
+            )(),
+            "expense": lambda: _import_symbol(
+                "medic.features.finance.ui.base_expenses",
+                "features.finance.ui.base_expenses",
+                "BaseExpenseWidget",
+            )(),
+            "financial_close": lambda: _import_symbol(
+                "medic.features.finance.ui.base_financial_close",
+                "features.finance.ui.base_financial_close",
+                "BaseFinancialCloseWidget",
+            )(pro_enabled=self.pro_mode),
+            "reports": lambda: _import_symbol(
+                "medic.reports.basereports",
+                "reports.basereports",
+                "BaseReportsWidget",
+            )(),
         }
         self._page_sidebar_buttons = {
             "dashboard": self.dashboard_button,

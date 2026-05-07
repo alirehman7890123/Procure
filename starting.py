@@ -6,6 +6,7 @@ import sqlite3
 import secrets
 import time
 import types
+from importlib import import_module
 
 # Allow running this file directly (e.g., `python medic/starting.py`) while
 # preserving package-style imports like `from medic.utilities ...`.
@@ -25,6 +26,14 @@ if "medic" not in sys.modules:
     medic_pkg.__file__ = os.path.join(CURRENT_DIR, "__init__.py")
     medic_pkg.__path__ = [CURRENT_DIR]
     sys.modules["medic"] = medic_pkg
+
+
+def _import_symbol(module_name, fallback_module_name, symbol_name):
+    try:
+        module = import_module(module_name)
+    except ModuleNotFoundError:
+        module = import_module(fallback_module_name)
+    return getattr(module, symbol_name)
 
 def resource_path(relative_path: str) -> str:
     base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
@@ -50,17 +59,31 @@ if not os.environ.get("QT_QPA_PLATFORMTHEME"):
 
 from PySide6.QtWidgets import QApplication, QWidget, QMainWindow, QPushButton, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QFileDialog, QFrame, QSizePolicy
 from PySide6.QtGui import QPixmap
-
-try:
-    from medic.utilities.database import SQLiteConnectionManager, QSqlDatabase
-    from medic.utilities.app_messagebox import install_messagebox_theme
-    from medic.utilities.dialog_scrolling import install_dialog_scrolling
-    from medic.utilities.mylogin import MainWindow
-except ModuleNotFoundError:
-    from utilities.database import SQLiteConnectionManager, QSqlDatabase
-    from utilities.app_messagebox import install_messagebox_theme
-    from utilities.dialog_scrolling import install_dialog_scrolling
-    from utilities.mylogin import MainWindow
+SQLiteConnectionManager = _import_symbol(
+    "medic.utilities.database",
+    "utilities.database",
+    "SQLiteConnectionManager",
+)
+QSqlDatabase = _import_symbol(
+    "medic.utilities.database",
+    "utilities.database",
+    "QSqlDatabase",
+)
+install_messagebox_theme = _import_symbol(
+    "medic.utilities.app_messagebox",
+    "utilities.app_messagebox",
+    "install_messagebox_theme",
+)
+install_dialog_scrolling = _import_symbol(
+    "medic.utilities.dialog_scrolling",
+    "utilities.dialog_scrolling",
+    "install_dialog_scrolling",
+)
+MainWindow = _import_symbol(
+    "medic.utilities.mylogin",
+    "utilities.mylogin",
+    "MainWindow",
+)
 import bcrypt
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtSql import QSqlQuery
@@ -539,7 +562,11 @@ class AuthWindow(QMainWindow):
                     )
 
                 try:
-                    from medic.utilities.activity_logger import log_activity
+                    log_activity = _import_symbol(
+                        "medic.utilities.activity_logger",
+                        "utilities.activity_logger",
+                        "log_activity",
+                    )
                     log_activity(
                         category="login",
                         action="login",
@@ -2802,13 +2829,16 @@ class AuthWindow(QMainWindow):
         return True
 
     
-
-try:
-    from medic.utilities.license import ensure_valid_license
-    from medic.utilities.app_messagebox import AppMessageBox
-except ModuleNotFoundError:
-    from utilities.license import ensure_valid_license
-    from utilities.app_messagebox import AppMessageBox
+ensure_valid_license = _import_symbol(
+    "medic.utilities.license",
+    "utilities.license",
+    "ensure_valid_license",
+)
+AppMessageBox = _import_symbol(
+    "medic.utilities.app_messagebox",
+    "utilities.app_messagebox",
+    "AppMessageBox",
+)
 
 if __name__ == '__main__':
 

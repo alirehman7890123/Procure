@@ -433,11 +433,20 @@ def fetch_hold_sale_detail(hold_id):
     query.prepare(
         """
         SELECT
-            customer, salesman, subtotal, discount_amount, taxable_amount,
+            h.customer,
+            h.salesman,
+            COALESCE(c.name, 'Walk-in Customer') AS customer_name,
+            COALESCE(a.username, e.name, '-') AS user_name,
+            COALESCE(h.status, 'hold'),
+            h.creation_date,
+            subtotal, discount_amount, taxable_amount,
             tax_amount, additional_charges, final_amount, received_amount,
             remaining_amount, payment_method, due_date
-        FROM holdsale
-        WHERE id = ?
+        FROM holdsale h
+        LEFT JOIN customer c ON c.id = h.customer
+        LEFT JOIN auth a ON a.id = h.salesman
+        LEFT JOIN employee e ON e.id = h.salesman
+        WHERE h.id = ?
         """
     )
     query.addBindValue(int(hold_id))
@@ -450,16 +459,20 @@ def fetch_hold_sale_detail(hold_id):
     return {
         "customer_id": query.value(0),
         "salesman_id": query.value(1),
-        "subtotal": float(query.value(2) or 0.0),
-        "discount_amount": float(query.value(3) or 0.0),
-        "taxable_amount": float(query.value(4) or 0.0),
-        "tax_amount": float(query.value(5) or 0.0),
-        "additional_charges": float(query.value(6) or 0.0),
-        "final_amount": float(query.value(7) or 0.0),
-        "received_amount": float(query.value(8) or 0.0),
-        "remaining_amount": float(query.value(9) or 0.0),
-        "payment_method": str(query.value(10) or "Cash").strip() or "Cash",
-        "due_date": str(query.value(11) or "").strip(),
+        "customer_name": str(query.value(2) or "Walk-in Customer"),
+        "user_name": str(query.value(3) or "-"),
+        "status": str(query.value(4) or "hold"),
+        "created_at": query.value(5),
+        "subtotal": float(query.value(6) or 0.0),
+        "discount_amount": float(query.value(7) or 0.0),
+        "taxable_amount": float(query.value(8) or 0.0),
+        "tax_amount": float(query.value(9) or 0.0),
+        "additional_charges": float(query.value(10) or 0.0),
+        "final_amount": float(query.value(11) or 0.0),
+        "received_amount": float(query.value(12) or 0.0),
+        "remaining_amount": float(query.value(13) or 0.0),
+        "payment_method": str(query.value(14) or "Cash").strip() or "Cash",
+        "due_date": str(query.value(15) or "").strip(),
     }
 
 
@@ -468,10 +481,18 @@ def fetch_hold_sale_item_rows(hold_id):
     query.prepare(
         """
         SELECT
-            product, qty, unitrate, discount, discountamount,
-            COALESCE(tax, 0), COALESCE(discount_input_mode, 'percent'), total
-        FROM holditems
-        WHERE holdsale = ?
+            hi.product,
+            COALESCE(p.display_name, '-') AS product_name,
+            hi.qty,
+            hi.unitrate,
+            hi.discount,
+            hi.discountamount,
+            COALESCE(hi.tax, 0),
+            COALESCE(hi.discount_input_mode, 'percent'),
+            hi.total
+        FROM holditems hi
+        LEFT JOIN product p ON p.id = hi.product
+        WHERE hi.holdsale = ?
         """
     )
     query.addBindValue(int(hold_id))
@@ -484,13 +505,14 @@ def fetch_hold_sale_item_rows(hold_id):
         rows.append(
             {
                 "product_id": int(query.value(0) or 0),
-                "qty": int(query.value(1) or 0),
-                "unitrate": float(query.value(2) or 0.0),
-                "discount_percent": float(query.value(3) or 0.0),
-                "discount_amount": float(query.value(4) or 0.0),
-                "tax_percent": float(query.value(5) or 0.0),
-                "discount_input_mode": str(query.value(6) or "percent"),
-                "total": float(query.value(7) or 0.0),
+                "product_name": str(query.value(1) or "-"),
+                "qty": int(query.value(2) or 0),
+                "unitrate": float(query.value(3) or 0.0),
+                "discount_percent": float(query.value(4) or 0.0),
+                "discount_amount": float(query.value(5) or 0.0),
+                "tax_percent": float(query.value(6) or 0.0),
+                "discount_input_mode": str(query.value(7) or "percent"),
+                "total": float(query.value(8) or 0.0),
             }
         )
     return rows
@@ -525,6 +547,7 @@ def fetch_hold_sale_list_rows():
                 "id": int(query.value(0) or 0),
                 "customer": str(query.value(1) or "Walk-in Customer"),
                 "user": str(query.value(2) or "-"),
+                "status": "hold",
                 "final_amount": float(query.value(3) or 0.0),
                 "items": int(query.value(4) or 0),
                 "created_at": str(query.value(5) or "-"),

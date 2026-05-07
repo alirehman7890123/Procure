@@ -1,6 +1,5 @@
 from PySide6.QtWidgets import QWidget, QStackedLayout, QScrollArea
 
-from medic.reports.mainpage import MainReportsPage
 from medic.utilities.basepage import BasePage
 
 from medic.utilities.permissions import Permissions
@@ -19,6 +18,8 @@ class BaseReportsWidget(BasePage):
 
     def _ensure_main_reports_page(self):
         if self.main_reports_page is None:
+            from medic.reports.mainpage import MainReportsPage
+
             self.main_reports_page = MainReportsPage()
             self.stacked_layout.addWidget(self.main_reports_page)
         return self.main_reports_page
@@ -26,7 +27,6 @@ class BaseReportsWidget(BasePage):
 
     @Permissions.require_permission('reports.view')
     def set_reports_widget(self):
-        print("Setting reports widget")
         self.stacked_layout.setCurrentWidget(self._ensure_main_reports_page())
 
     def reset_to_default(self):

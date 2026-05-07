@@ -1,5 +1,3 @@
-"""Dashboard package compatibility exports."""
+"""Dashboard package exports."""
 
-from . import dashboard
-
-__all__ = ["dashboard"]
+__all__ = ["base_dashboard_page", "dashboard", "welcome"]

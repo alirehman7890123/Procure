@@ -5,20 +5,31 @@ import sys, os
 from PySide6.QtSql import QSqlDatabase
 from PySide6.QtCore import QDate
 from functools import partial
-from medic.utilities.database import SQLiteConnectionManager
-from medic.utilities.activity_logger import log_activity
-from medic.utilities.permissions import Permissions
-from medic.utilities.session_service import SessionErrorCode, check_active_session
-from medic.services.financial_closing_service import get_month_close_prompt_state
-from medic.services import daily_session_service
-from medic.reports.report_service import ReportService
+
+try:
+    from medic.utilities.database import SQLiteConnectionManager
+    from medic.utilities.activity_logger import log_activity
+    from medic.utilities.permissions import Permissions
+    from medic.utilities.session_service import SessionErrorCode, check_active_session
+    from medic.services.financial_closing_service import get_month_close_prompt_state
+    from medic.services import daily_session_service
+    from medic.reports.report_service import ReportService
+    from medic.utilities.app_messagebox import AppMessageBox
+except ModuleNotFoundError:
+    from utilities.database import SQLiteConnectionManager
+    from utilities.activity_logger import log_activity
+    from utilities.permissions import Permissions
+    from utilities.session_service import SessionErrorCode, check_active_session
+    from services.financial_closing_service import get_month_close_prompt_state
+    from services import daily_session_service
+    from reports.report_service import ReportService
+    from utilities.app_messagebox import AppMessageBox
+
 import pyqtgraph as pg
-from medic.features.finance.ui.daily_session import DailySession
 
 
 import os
 import sys
-from medic.utilities.app_messagebox import AppMessageBox
 from functools import lru_cache
 
 
@@ -49,6 +60,14 @@ def load_stylesheets():
 
 
 sys.modules.setdefault("dashboard.dashboard", sys.modules[__name__])
+
+
+def _get_daily_session_class():
+    try:
+        from medic.features.finance.ui.daily_session import DailySession
+    except ModuleNotFoundError:
+        from features.finance.ui.daily_session import DailySession
+    return DailySession
 
 
 
@@ -1290,10 +1309,10 @@ class DashboardWidget(QWidget):
             self.open_financial_close_page()
 
     def _show_session_state_error(self, result, action_label="continue"):
-        return DailySession._show_session_state_error(self, result, action_label)
+        return _get_daily_session_class()._show_session_state_error(self, result, action_label)
 
     def _get_strict_active_session_id(self, action_label="continue"):
-        return DailySession._get_strict_active_session_id(self, action_label)
+        return _get_daily_session_class()._get_strict_active_session_id(self, action_label)
 
     def get_open_session(self):
         active_session_id = self._get_strict_active_session_id(action_label="view session details")
@@ -1302,7 +1321,7 @@ class DashboardWidget(QWidget):
         return daily_session_service.get_open_session(session_id=active_session_id)
 
     def open_session_dialog(self):
-        return DailySession.open_session_dialog(self)
+        return _get_daily_session_class().open_session_dialog(self)
 
     def get_previous_balance(self):
         return daily_session_service.get_previous_balance()
@@ -1320,7 +1339,7 @@ class DashboardWidget(QWidget):
         return daily_session_service.get_session_payment_method_summary(session_id=active_session_id, methods=methods)
 
     def close_session_dialog(self, session_data):
-        return DailySession.close_session_dialog(self, session_data)
+        return _get_daily_session_class().close_session_dialog(self, session_data)
 
     def get_opening_cash(self):
         active_session_id = self._get_strict_active_session_id(action_label="close the session")

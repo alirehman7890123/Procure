@@ -5634,7 +5634,6 @@ class MainReportsPage(QWidget):
         
         super().showEvent(event)
         if not self._overview_loaded_once:
-            print("Showing Reports page")
             self.current_duration_key = "today"
             if hasattr(self, "duration_combo"):
                 self.duration_combo.blockSignals(True)
@@ -5664,7 +5663,6 @@ class MainReportsPage(QWidget):
 
     def get_today_data(self):
         
-        print("Going to Populate Summary Totals for today")
         today = QDate.currentDate().toString("yyyy-MM-dd")
         totals = report_service.ReportService().get_summary_totals(today, today)
         self.set_overview_totals(
@@ -5677,15 +5675,12 @@ class MainReportsPage(QWidget):
     
     def get_past_seven_days_data(self):
         
-        print("Going to Populate Summary Totals for past 7 days")
         today = QDate.currentDate()
         seven_days_ago = today.addDays(-6)  # Include today, so -6
         date_from = seven_days_ago.toString("yyyy-MM-dd")
         date_to = today.toString("yyyy-MM-dd")
 
         totals = report_service.ReportService().get_summary_totals(date_from, date_to)
-        
-        print("Totals for past 7 days:", totals)
 
         self.set_overview_totals(
             str(round(totals["sales"], 2)),
@@ -5790,7 +5785,6 @@ class MainReportsPage(QWidget):
         try:
             rows = report_service.ReportService().get_near_expiry_rows(days=60)
         except Exception as exc:
-            print(str(exc))
             footer_layout.addStretch()
             close_btn = QPushButton("Close")
             close_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -5865,7 +5859,6 @@ class MainReportsPage(QWidget):
         try:
             rows = report_service.ReportService().get_low_stock_rows()
         except Exception as exc:
-            print(str(exc))
             footer_layout.addStretch()
             close_btn = QPushButton("Close")
             close_btn.setCursor(QCursor(Qt.PointingHandCursor))
