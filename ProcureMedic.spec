@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
@@ -5,6 +6,12 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 project_dir = Path(SPECPATH).resolve()
 workspace_root = project_dir.parent
+
+# Make the parent of the `medic` package importable before PyInstaller's
+# collection helpers run; otherwise collect_submodules("medic") can resolve
+# to an empty set in CI when the checkout root is the package directory.
+if str(workspace_root) not in sys.path:
+    sys.path.insert(0, str(workspace_root))
 
 hiddenimports = collect_submodules("medic")
 datas = collect_data_files("medic")
