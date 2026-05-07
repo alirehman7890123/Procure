@@ -48,6 +48,9 @@ def load_stylesheets():
     return css_content
 
 
+sys.modules.setdefault("dashboard.dashboard", sys.modules[__name__])
+
+
 
 
 

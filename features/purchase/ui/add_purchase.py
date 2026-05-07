@@ -2461,7 +2461,7 @@ class AddPurchaseWidget(QWidget):
             batch = batch_edit.text().strip()
             expiry = expiry_edit.text().strip()
             if expiry:
-                expiry = parse_expiry_to_db_date(expiry)
+                expiry = parse_expiry_to_db_date(expiry, reject_past=False)
 
             qty = qty_edit.text().strip()
             bonus = bonus_edit.text().strip()

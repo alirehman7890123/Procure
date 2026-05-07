@@ -18,6 +18,10 @@ from medic.services.inventory_movement_service import (
     insert_sold_batch_record as insert_sold_batch_record_from_inventory,
 )
 from medic.services.sales_items_service import compute_fifo_allocation_plan
+from medic.services.sales_posting_service import (
+    build_customer_transaction_note,
+    compute_customer_transaction_balances,
+)
 
 
 def ensure_prescription_schema():

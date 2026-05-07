@@ -42,7 +42,7 @@ def float_or_default(value, default=0.0):
         return float(default)
 
 
-def parse_expiry_to_db_date(text, today=None):
+def parse_expiry_to_db_date(text, today=None, reject_past=True):
     raw = normalize_expiry_text(text)
     if not raw:
         return ""
@@ -53,10 +53,11 @@ def parse_expiry_to_db_date(text, today=None):
         if month < 1 or month > 12:
             return ""
         normalized = date(year, month, 1)
-        current = today or date.today()
-        current_month = date(current.year, current.month, 1)
-        if normalized < current_month:
-            return ""
+        if reject_past:
+            current = today or date.today()
+            current_month = date(current.year, current.month, 1)
+            if normalized < current_month:
+                return ""
         return normalized.strftime("%Y-%m-%d")
 
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
@@ -126,7 +127,10 @@ def normalize_purchase_item_row(
 ):
     product_id = int(product_id)
     batch = str(batch_text or "").strip() or None
-    expiry = parse_expiry_to_db_date(expiry_text)
+    # Preserve a syntactically valid expiry during row normalization.
+    # Entry-time UI validation can reject past month/year values earlier,
+    # but saved rows should not silently lose expiry data later as time passes.
+    expiry = parse_expiry_to_db_date(expiry_text, reject_past=False)
     qty = float_or_default(qty_text, 0.0)
     bonus = float_or_default(bonus_text, 0.0)
     rate = float_or_default(rate_text, 0.0)

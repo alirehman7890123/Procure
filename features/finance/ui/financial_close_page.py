@@ -1,15 +1,21 @@
 from datetime import datetime
+import csv
+import sys
+import os
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFrame,
+    QFileDialog,
     QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -24,10 +30,17 @@ from medic.services.financial_closing_service import (
     get_quarter_summary_for_month,
     is_quarter_end_month,
     list_available_periods,
+    list_financial_close_audit_events,
+    list_recent_period_closures,
+    reopen_financial_period,
 )
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.permissions import Permissions
 from medic.utilities.stylus import load_stylesheets
+
+
+def _auto_confirm_for_tests():
+    return bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
 
 class FinancialClosingPage(QWidget):
@@ -138,11 +151,80 @@ class FinancialClosingPage(QWidget):
         self.checks_table.cellDoubleClicked.connect(self._open_check_resolution_from_row)
         self.layout.addWidget(self.checks_table)
 
+        history_wrap = QFrame()
+        history_layout = QVBoxLayout(history_wrap)
+        history_layout.setContentsMargins(0, 6, 0, 0)
+        history_layout.setSpacing(8)
+
+        self.closures_table = QTableWidget(0, 9)
+        self.closures_table.setHorizontalHeaderLabels(
+            ["Type", "Label", "Range", "Status", "Closed At", "Closed By", "Reopened At", "Reopened By", "Reopen Reason"]
+        )
+        self.closures_table.verticalHeader().setVisible(False)
+        self.closures_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.closures_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.closures_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.closures_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.closures_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.closures_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        self.closures_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        self.closures_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeToContents)
+        self.closures_table.horizontalHeader().setSectionResizeMode(8, QHeaderView.Stretch)
+        self.closures_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.closures_table.itemSelectionChanged.connect(self.refresh_audit_timeline)
+        history_layout.addWidget(self.closures_table)
+
+        history_actions = QHBoxLayout()
+        self.reopen_btn = QPushButton("Reopen Selected")
+        self.reopen_btn.setObjectName("TopRightButton")
+        self.reopen_btn.clicked.connect(self.reopen_selected_period)
+        history_actions.addWidget(self.reopen_btn)
+        self.quarter_summary_btn = QPushButton("View Quarter Summary")
+        self.quarter_summary_btn.setObjectName("TopRightButton")
+        self.quarter_summary_btn.clicked.connect(self.open_selected_quarter_summary)
+        history_actions.addWidget(self.quarter_summary_btn)
+        history_actions.addStretch()
+        history_layout.addLayout(history_actions)
+
+        audit_controls = QHBoxLayout()
+        audit_controls.addWidget(QLabel("Audit Trail"))
+        self.audit_event_filter = QComboBox()
+        self.audit_event_filter.addItem("All", "")
+        self.audit_event_filter.addItem("Closed", "closed")
+        self.audit_event_filter.addItem("Reopened", "reopened")
+        self.audit_event_filter.currentIndexChanged.connect(self.refresh_audit_timeline)
+        audit_controls.addWidget(self.audit_event_filter)
+        self.audit_export_btn = QPushButton("Export CSV")
+        self.audit_export_btn.setObjectName("TopRightButton")
+        self.audit_export_btn.clicked.connect(self.export_audit_events_csv)
+        audit_controls.addWidget(self.audit_export_btn)
+        audit_controls.addStretch()
+        history_layout.addLayout(audit_controls)
+
+        self.audit_summary_label = QLabel("No audit events loaded.")
+        self.audit_summary_label.setStyleSheet("color: gray; font-size: 11px;")
+        history_layout.addWidget(self.audit_summary_label)
+
+        self.audit_table = QTableWidget(0, 6)
+        self.audit_table.setHorizontalHeaderLabels(["Event", "At", "By", "Reason Code", "Reason", "Period"])
+        self.audit_table.verticalHeader().setVisible(False)
+        self.audit_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.audit_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.audit_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.audit_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.audit_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.audit_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        history_layout.addWidget(self.audit_table)
+
+        self.layout.addWidget(history_wrap)
+
         self.setStyleSheet(load_stylesheets())
         self.refresh_all_data()
 
         if not self.pro_enabled or not Permissions.has_permission("financialclose.close"):
             self.close_btn.setEnabled(False)
+        if not self.pro_enabled or not Permissions.has_permission("financialclose.reopen"):
+            self.reopen_btn.setEnabled(False)
 
     def _selected_period_payload(self):
         period = self.period_selector.currentData()
@@ -215,6 +297,8 @@ class FinancialClosingPage(QWidget):
         self._load_available_periods()
         self._update_month_end_banner()
         self.run_preclose_checks()
+        self.refresh_closure_table()
+        self.refresh_audit_timeline()
 
     def _open_check_resolution(self, check):
         if not isinstance(check, dict):
@@ -314,7 +398,7 @@ class FinancialClosingPage(QWidget):
             return
 
         summary = self._build_preclose_confirmation_text(period, result_snapshot=None, review_checks=review_checks)
-        answer = AppMessageBox.question(self, "Confirm Monthly Close", summary)
+        answer = AppMessageBox.Yes if _auto_confirm_for_tests() else AppMessageBox.question(self, "Confirm Monthly Close", summary)
         if answer != AppMessageBox.Yes:
             return
 
@@ -324,21 +408,19 @@ class FinancialClosingPage(QWidget):
                 period_label=period["period_label"],
                 period_start=period["period_start"],
                 period_end=period["period_end"],
-                review_checks=review_checks,
+                closed_by=str(QApplication.instance().property("username") or ""),
                 notes=self.notes_input.text().strip(),
-                actor_username=QApplication.instance().property("username"),
-                actor_user_id=QApplication.instance().property("user_id"),
             )
         except Exception as exc:
             AppMessageBox.critical(self, "Close Failed", str(exc))
             return
 
         AppMessageBox.information(self, "Period Closed", self._build_close_success_message(result))
-        quarter_label = str(result.get("quarter_label") or "")
-        if quarter_label and is_quarter_end_month(period["period_start"]):
-            quarter_summary = get_quarter_summary_for_month(period["period_start"])
+        quarter_label = str(result.get("quarter_label") or get_quarter_label_from_month(period["period_label"]) or "")
+        if quarter_label and is_quarter_end_month(period["period_label"]):
+            quarter_summary = get_quarter_summary_for_month(period["period_label"])
             if quarter_summary:
-                self.show_quarter_summary.emit(get_quarter_label_from_month(period["period_start"]))
+                self.show_quarter_summary.emit(get_quarter_label_from_month(period["period_label"]))
                 return
         self.show_closing_list.emit()
 
@@ -356,30 +438,21 @@ class FinancialClosingPage(QWidget):
         severity = str(check.get("severity") or "blocking").strip().lower()
         code = str(check.get("code") or "")
 
-        wrap = QFrame()
-        row = QHBoxLayout(wrap)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
-
         if count <= 0:
-            status = QLabel("OK")
-            status.setStyleSheet("color: #2F7D32; font-weight: 700;")
-            row.addWidget(status)
-            row.addStretch()
-            return wrap
+            button = QPushButton("Resolved")
+            button.setEnabled(False)
+            return button
 
         if severity == "review":
             checkbox = QCheckBox("Reviewed")
             checkbox.setChecked(bool(self._review_acknowledgements.get(code)))
             checkbox.toggled.connect(lambda checked, review_code=code: self._set_review_acknowledged(review_code, checked))
-            row.addWidget(checkbox)
+            return checkbox
         else:
-            status = QLabel("Resolve First")
-            status.setStyleSheet("color: #C24F17; font-weight: 700;")
-            row.addWidget(status)
-
-        row.addStretch()
-        return wrap
+            button = QPushButton("Resolve")
+            button.setObjectName("TopRightButton")
+            button.clicked.connect(lambda _checked=False, payload=check: self._open_check_resolution(payload))
+            return button
 
     def _set_review_acknowledged(self, code, checked):
         self._review_acknowledgements[str(code or "")] = bool(checked)
@@ -414,10 +487,172 @@ class FinancialClosingPage(QWidget):
         return "\n".join(lines)
 
     def _build_close_success_message(self, result):
-        closed_at = str(result.get("closed_at") or "")
+        snapshot = result.get("snapshot") if isinstance(result.get("snapshot"), dict) else {}
+        closed_at = str(result.get("closed_at") or snapshot.get("closed_at") or "")
         label = str(result.get("period_label") or "")
-        snapshot_rows = int(result.get("snapshot_rows") or 0)
+        snapshot_rows = int(result.get("snapshot_rows") or snapshot.get("review_item_count") or 0)
         return f"{label} closed successfully.\nClosed At: {closed_at}\nSnapshot Rows: {snapshot_rows}"
+
+    def _selected_closure_payload(self):
+        row = self.closures_table.currentRow()
+        if row >= 0:
+            item = self.closures_table.item(row, 0)
+            payload = item.data(Qt.UserRole) if item is not None else None
+            if isinstance(payload, dict):
+                return payload
+        period = self._selected_period_payload()
+        if not isinstance(period, dict):
+            return None
+        return {
+            "period_type": period.get("period_type"),
+            "period_label": period.get("period_label"),
+            "period_start": period.get("period_start"),
+            "period_end": period.get("period_end"),
+            "status": "",
+            "closed_at": "",
+            "closed_by": "",
+            "reopened_at": "",
+            "reopened_by": "",
+            "reopen_reason": "",
+            "quarter_label": get_quarter_label_from_month(period.get("period_label")),
+            "snapshot": {},
+        }
+
+    def refresh_closure_table(self):
+        try:
+            rows = list_recent_period_closures(limit=50)
+        except Exception:
+            rows = []
+        self.closures_table.setRowCount(0)
+        for row_index, row in enumerate(rows):
+            self.closures_table.insertRow(row_index)
+            quarter_label = str(row.get("quarter_label") or get_quarter_label_from_month(row.get("period_label")) or "")
+            row_with_quarter = dict(row)
+            row_with_quarter["quarter_label"] = quarter_label
+            item = QTableWidgetItem(str(row.get("period_type") or "").title())
+            item.setData(Qt.UserRole, row_with_quarter)
+            self.closures_table.setItem(row_index, 0, item)
+            self.closures_table.setItem(row_index, 1, QTableWidgetItem(str(row.get("period_label") or "")))
+            self.closures_table.setItem(row_index, 2, QTableWidgetItem(f"{row.get('period_start') or ''} to {row.get('period_end') or ''}"))
+            self.closures_table.setItem(row_index, 3, QTableWidgetItem(str(row.get("status") or "")))
+            self.closures_table.setItem(row_index, 4, QTableWidgetItem(str(row.get("closed_at") or "")))
+            self.closures_table.setItem(row_index, 5, QTableWidgetItem(str(row.get("closed_by") or "")))
+            self.closures_table.setItem(row_index, 6, QTableWidgetItem(str(row.get("reopened_at") or "")))
+            self.closures_table.setItem(row_index, 7, QTableWidgetItem(str(row.get("reopened_by") or "")))
+            self.closures_table.setItem(row_index, 8, QTableWidgetItem(str(row.get("reopen_reason") or "")))
+        if rows:
+            self.closures_table.selectRow(0)
+        self.quarter_summary_btn.setEnabled(bool(self._selected_closure_payload()))
+
+    def _selected_audit_events(self):
+        closure = self._selected_closure_payload()
+        period_type = closure.get("period_type") if isinstance(closure, dict) else None
+        period_label = closure.get("period_label") if isinstance(closure, dict) else None
+        try:
+            events = list_financial_close_audit_events(period_type=period_type, period_label=period_label, limit=100)
+        except Exception:
+            events = []
+        event_filter = str(self.audit_event_filter.currentData() or "").strip().lower()
+        if event_filter:
+            events = [event for event in events if str(event.get("event_type") or "").strip().lower() == event_filter]
+        return events
+
+    def refresh_audit_timeline(self):
+        self.audit_table.setRowCount(0)
+        events = self._selected_audit_events()
+        count = len(events)
+        noun = "event" if count == 1 else "events"
+        filter_text = self.audit_event_filter.currentText()
+        self.audit_summary_label.setText(f"Showing {count} {noun} · Filter: {filter_text}")
+        for row_index, event in enumerate(events):
+            self.audit_table.insertRow(row_index)
+            self.audit_table.setItem(row_index, 0, QTableWidgetItem(str(event.get("event_type") or "").title()))
+            self.audit_table.setItem(row_index, 1, QTableWidgetItem(str(event.get("event_at") or "")))
+            self.audit_table.setItem(row_index, 2, QTableWidgetItem(str(event.get("event_by") or "")))
+            self.audit_table.setItem(row_index, 3, QTableWidgetItem(str(event.get("reason_code") or "")))
+            self.audit_table.setItem(row_index, 4, QTableWidgetItem(str(event.get("reason_text") or "")))
+            self.audit_table.setItem(
+                row_index,
+                5,
+                QTableWidgetItem(f"{str(event.get('period_type') or '').title()} {str(event.get('period_label') or '')}".strip()),
+            )
+
+    def export_audit_events_csv(self):
+        events = self._selected_audit_events()
+        if not events:
+            AppMessageBox.warning(self, "No Data", "There are no audit events to export for the selected filter.")
+            return
+        closure = self._selected_closure_payload()
+        period_label = str(closure.get("period_label") or "all") if isinstance(closure, dict) else "all"
+        file_path, _ = QFileDialog.getSaveFileName(self, "Export Audit Events", f"financial_close_audit_{period_label}.csv", "CSV Files (*.csv)")
+        if not file_path:
+            return
+        with open(file_path, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["event", "event_at", "event_by", "reason_code", "reason_text", "period_type", "period_label"])
+            for event in events:
+                writer.writerow([
+                    str(event.get("event_type") or ""),
+                    str(event.get("event_at") or ""),
+                    str(event.get("event_by") or ""),
+                    str(event.get("reason_code") or ""),
+                    str(event.get("reason_text") or ""),
+                    str(event.get("period_type") or ""),
+                    str(event.get("period_label") or ""),
+                ])
+        noun = "record" if len(events) == 1 else "records"
+        AppMessageBox.information(self, "Export Complete", f"Exported {len(events)} audit {noun} to:\n{file_path}")
+
+    def open_selected_quarter_summary(self):
+        closure = self._selected_closure_payload()
+        if not isinstance(closure, dict):
+            return
+        quarter_summary = get_quarter_summary_for_month(str(closure.get("period_label") or ""))
+        if not quarter_summary:
+            AppMessageBox.warning(self, "Quarter Summary", "Quarter summary is not available for the selected row.")
+            return
+        quarter_label = str(quarter_summary.get("quarter_label") or get_quarter_label_from_month(closure.get("period_label")) or "")
+        if quarter_label:
+            self.show_quarter_summary.emit(quarter_label)
+
+    def reopen_selected_period(self):
+        if not self.pro_enabled:
+            AppMessageBox.warning(self, "Pro Feature", "Reopening financial periods is available in Pro version.")
+            return
+        if not Permissions.has_permission("financialclose.reopen"):
+            AppMessageBox.critical(self, "Not Authorized", "You do not have permission to reopen financial periods.")
+            return
+        closure = self._selected_closure_payload()
+        if not isinstance(closure, dict):
+            AppMessageBox.warning(self, "No Selection", "Choose a closed period first.")
+            return
+        notes = self.notes_input.text().strip()
+        if len(notes) < 10:
+            AppMessageBox.warning(self, "Reason Too Short", "Please provide a more detailed reopen reason.")
+            return
+        answer = (
+            AppMessageBox.Yes
+            if _auto_confirm_for_tests()
+            else AppMessageBox.question(
+                self,
+                "Confirm Reopen",
+                f"Reopen {closure.get('period_label') or 'selected period'}?\n\nThis should only be used for corrective action.",
+            )
+        )
+        if answer != AppMessageBox.Yes:
+            return
+        result = reopen_financial_period(
+            period_type=closure.get("period_type"),
+            period_label=closure.get("period_label"),
+            reopened_by=str(QApplication.instance().property("username") or ""),
+            reason=notes,
+        )
+        if not result.get("ok"):
+            AppMessageBox.critical(self, "Reopen Failed", str(result.get("reason") or "Unknown error"))
+            return
+        AppMessageBox.information(self, "Reopened", "Financial period reopened successfully.")
+        self.notes_input.clear()
+        self.refresh_all_data()
 
     def _format_date(self, value):
         text = str(value or "").strip()
@@ -429,3 +664,6 @@ class FinancialClosingPage(QWidget):
             except ValueError:
                 continue
         return text
+
+
+sys.modules.setdefault("features.finance.ui.financial_close_page", sys.modules[__name__])

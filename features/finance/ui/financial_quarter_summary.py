@@ -1,4 +1,6 @@
-from PySide6.QtCore import Signal
+import sys
+
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 
 from medic.services.financial_closing_service import get_quarter_summary
@@ -16,7 +18,7 @@ class FinancialQuarterSummaryPage(QWidget):
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(10, 10, 10, 10)
         self.layout.setSpacing(10)
-        self.layout.setAlignment(0x20)
+        self.layout.setAlignment(Qt.AlignTop)
 
         header_layout = QHBoxLayout()
         heading = QLabel("Quarter Summary", objectName="SectionTitle")
@@ -99,3 +101,6 @@ class FinancialQuarterSummaryPage(QWidget):
             f"Supplier Due: {_money(summary.get('supplier_due'))}\n"
             f"Inventory Value: {_money(summary.get('inventory_value'))}"
         )
+
+
+sys.modules.setdefault("features.finance.ui.financial_quarter_summary", sys.modules[__name__])

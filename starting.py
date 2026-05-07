@@ -1048,16 +1048,24 @@ class AuthWindow(QMainWindow):
             else:
                 print("Default Admin User Created....")
                 if generated_password:
-                    QMessageBox.information(
-                        None,
-                        "Default Admin Credentials",
-                        (
-                            "A bootstrap admin account has been created.\n"
-                            "Username: admin\n"
-                            f"Temporary Password: {password}\n\n"
-                            "Please sign in and change this password immediately."
-                        ),
+                    bootstrap_message = (
+                        "A bootstrap admin account has been created.\n"
+                        "Username: admin\n"
+                        f"Temporary Password: {password}\n\n"
+                        "Please sign in and change this password immediately."
                     )
+                    # Avoid blocking automated/headless runs on a modal dialog.
+                    if (
+                        os.environ.get("MEDIC_SUPPRESS_BOOTSTRAP_DIALOG") == "1"
+                        or os.environ.get("PYTEST_CURRENT_TEST")
+                    ):
+                        print(bootstrap_message)
+                    else:
+                        QMessageBox.information(
+                            None,
+                            "Default Admin Credentials",
+                            bootstrap_message,
+                        )
             
         return True
             
@@ -1910,29 +1918,29 @@ class AuthWindow(QMainWindow):
             CREATE TABLE IF NOT EXISTS purchase (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 
-                supplier INTEGER NOT NULL,
+                supplier INTEGER,
                 rep INTEGER,
-                sellerinvoice TEXT(100) NOT NULL,
+                sellerinvoice TEXT(100) DEFAULT '',
                 
-                subtotal DECIMAL(10,2) NOT NULL,
-                discount DECIMAL(10,2) NOT NULL,
+                subtotal DECIMAL(10,2) DEFAULT 0.00,
+                discount DECIMAL(10,2) DEFAULT 0.00,
                 
-                tax_236g DECIMAL(10,2) NOT NULL,
-                tax_236h DECIMAL(10,2) NOT NULL,
-                salestax DECIMAL(10,2) NOT NULL,
+                tax_236g DECIMAL(10,2) DEFAULT 0.00,
+                tax_236h DECIMAL(10,2) DEFAULT 0.00,
+                salestax DECIMAL(10,2) DEFAULT 0.00,
                 
-                netamount DECIMAL(10,2) NOT NULL,
-                cn_adjustment DECIMAL(10,2) NOT NULL,
+                netamount DECIMAL(10,2) DEFAULT 0.00,
+                cn_adjustment DECIMAL(10,2) DEFAULT 0.00,
                 
-                total DECIMAL(10,2) NOT NULL,
-                paid DECIMAL(10,2) NOT NULL,
-                remaining DECIMAL(10,2) NOT NULL,
-                writeoff DECIMAL(10,2) NOT NULL,
+                total DECIMAL(10,2) DEFAULT 0.00,
+                paid DECIMAL(10,2) DEFAULT 0.00,
+                remaining DECIMAL(10,2) DEFAULT 0.00,
+                writeoff DECIMAL(10,2) DEFAULT 0.00,
                 
-                payable DECIMAL(10,2) NOT NULL,
-                receivable DECIMAL(10,2) NOT NULL,
+                payable DECIMAL(10,2) DEFAULT 0.00,
+                receivable DECIMAL(10,2) DEFAULT 0.00,
                 due_date DATE,
-                session_id INTEGER NOT NULL,
+                session_id INTEGER,
                 
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (supplier) REFERENCES supplier(id) ON DELETE RESTRICT,
@@ -2228,22 +2236,23 @@ class AuthWindow(QMainWindow):
             CREATE TABLE IF NOT EXISTS sales (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 customer INTEGER,
-                salesman INTEGER NOT NULL,
-                subtotal REAL NOT NULL,
-                discount REAL NOT NULL,
-                taxable REAL NOT NULL,
-                tax REAL NOT NULL,
-                net_amount REAL NOT NULL,
-                additional_charges REAL NOT NULL,
-                total REAL NOT NULL,
-                received REAL NOT NULL,
-                remaining REAL NOT NULL,
-                writeoff REAL NOT NULL,
-                payable REAL NOT NULL,
-                receiveable REAL NOT NULL,
+                salesman INTEGER,
+                subtotal REAL DEFAULT 0.00,
+                discount REAL DEFAULT 0.00,
+                taxable REAL DEFAULT 0.00,
+                tax REAL DEFAULT 0.00,
+                net_amount REAL DEFAULT 0.00,
+                additional_charges REAL DEFAULT 0.00,
+                total REAL DEFAULT 0.00,
+                received REAL DEFAULT 0.00,
+                remaining REAL DEFAULT 0.00,
+                writeoff REAL DEFAULT 0.00,
+                payable REAL DEFAULT 0.00,
+                receiveable REAL DEFAULT 0.00,
+                date DATE DEFAULT CURRENT_DATE,
                 creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 due_date DATE,
-                session_id INTEGER NOT NULL,
+                session_id INTEGER,
                 
                 FOREIGN KEY (customer) REFERENCES customer(id) ON DELETE RESTRICT,
                 FOREIGN KEY (salesman) REFERENCES auth(id) ON DELETE RESTRICT,

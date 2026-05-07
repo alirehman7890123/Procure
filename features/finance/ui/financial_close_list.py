@@ -1,6 +1,8 @@
 import csv
+import sys
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QApplication
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -18,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from medic.services.financial_closing_service import (
+    get_quarter_summary_for_month,
     list_financial_close_audit_events,
     list_recent_period_closures,
     reopen_financial_period,
@@ -296,7 +299,11 @@ class FinancialClosingListPage(QWidget):
         closure = self._selected_closure_payload()
         can_show = isinstance(closure, dict)
         self.details_btn.setEnabled(can_show)
-        self.quarter_summary_btn.setEnabled(can_show and bool(closure.get("quarter_label")))
+        quarter_available = False
+        if can_show:
+            quarter_summary = get_quarter_summary_for_month(str(closure.get("period_label") or ""))
+            quarter_available = bool(quarter_summary and quarter_summary.get("quarter_label"))
+        self.quarter_summary_btn.setEnabled(can_show and quarter_available)
         can_reopen = can_show and self.pro_enabled and Permissions.has_permission("financialclose.reopen")
         self.reopen_btn.setEnabled(can_reopen)
         self.refresh_audit_timeline()
@@ -368,7 +375,8 @@ class FinancialClosingListPage(QWidget):
         closure = self._selected_closure_payload()
         if not isinstance(closure, dict):
             return
-        quarter_label = str(closure.get("quarter_label") or "").strip().upper()
+        quarter_summary = get_quarter_summary_for_month(str(closure.get("period_label") or ""))
+        quarter_label = str((quarter_summary or {}).get("quarter_label") or closure.get("quarter_label") or "").strip().upper()
         if not quarter_label:
             AppMessageBox.warning(self, "Quarter Summary", "Quarter summary is not available for the selected row.")
             return
@@ -399,17 +407,22 @@ class FinancialClosingListPage(QWidget):
             return
 
         try:
-            reopen_financial_period(
+            result = reopen_financial_period(
                 period_type=closure.get("period_type"),
                 period_label=closure.get("period_label"),
-                reason_text=notes,
-                actor_username=QApplication.instance().property("username"),
-                actor_user_id=QApplication.instance().property("user_id"),
+                reopened_by=str(QApplication.instance().property("username") or ""),
+                reason=notes,
             )
         except Exception as exc:
             AppMessageBox.critical(self, "Reopen Failed", str(exc))
+            return
+        if not result.get("ok"):
+            AppMessageBox.critical(self, "Reopen Failed", str(result.get("reason") or "Unknown error"))
             return
 
         AppMessageBox.information(self, "Reopened", "Financial period reopened successfully.")
         self.notes_input.clear()
         self.refresh_all_data()
+
+
+sys.modules.setdefault("features.finance.ui.financial_close_list", sys.modules[__name__])
