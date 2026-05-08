@@ -3,6 +3,8 @@ def _new_query():
 
     return QSqlQuery()
 
+from medic.services.db_transaction_service import run_in_transaction
+
 
 VALID_ADJUSTMENT_TYPES = {"addition", "deduction"}
 
@@ -181,6 +183,18 @@ def apply_stock_adjustments(changed_rows, adjusted_by):
         update_batch_quantity_to(row["batch_id"], row["new_qty"])
 
     return len(changed_rows)
+
+
+def save_stock_adjustments(changed_rows, adjusted_by):
+    normalized_rows = list(changed_rows or [])
+    if not normalized_rows:
+        return 0
+
+    return run_in_transaction(
+        lambda: apply_stock_adjustments(normalized_rows, adjusted_by),
+        start_error_message="Failed to start inventory adjustment transaction.",
+        commit_error_message="Failed to commit inventory adjustment transaction.",
+    )
 
 
 def build_stock_adjustment_log_note(product_name, row_payload):

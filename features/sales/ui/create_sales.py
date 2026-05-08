@@ -6,7 +6,6 @@ import sys
 import platform
 import subprocess
 
-from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtGui import QPalette, QColor, QKeyEvent, QPdfWriter, QKeySequence, QPainter, QPageSize, QFont, QTextOption, QPen, QFontMetrics
 from functools import partial
 import math
@@ -19,15 +18,24 @@ from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.app_theme import get_theme_palette
 from medic.utilities.file_preview import preview_file
+from medic.utilities.payment_handler import PaymentMethodHandler
 from medic.utilities.product_form_options import get_product_form_options
 from medic.utilities.activity_logger import log_activity
 from medic.features.sales.ui.pricing_logic import compute_header_totals, compute_line_pricing
-from medic.services.product_media_service import (
-    clear_product_media_fields,
-    ensure_product_media_schema,
-    fetch_product_media,
-    save_product_media,
-    update_product_media_fields,
+from medic.services.product_media_service import ensure_product_media_schema
+from medic.services.product_catalog_service import (
+    fetch_available_product_quantity,
+    fetch_hold_row_product_data,
+    fetch_sales_product_by_code,
+    fetch_sales_product_detail,
+    find_product_id_by_display_name,
+    search_sales_products,
+)
+from medic.services.product_write_service import (
+    DEFAULT_MARGIN_PERCENT as PRODUCT_DEFAULT_MARGIN_PERCENT,
+    fetch_dormant_product_record,
+    find_existing_product_id_by_display_name,
+    save_product_with_opening_stock,
 )
 from medic.services.accounting_settings_service import load_sales_policy_settings
 from medic.services.sales_defaults_service import resolve_sales_header_pricing
@@ -57,11 +65,11 @@ from medic.services.sales_transaction_service import (
     fetch_prescription_required_products,
     fetch_customer_credit_position,
     persist_sales_receipt_header_and_prescription,
-    replace_hold_sale_items,
     persist_sales_customer_transaction,
     persist_sales_item_with_fifo,
     resolve_salesman_id,
-    upsert_hold_sale_header,
+    run_sales_write_transaction,
+    save_hold_sale,
 )
 
 
@@ -101,7 +109,7 @@ class SelectAllLineEdit(QLineEdit):
 
 
 class SalesQuickProductDialog(QDialog):
-    DEFAULT_MARGIN_PERCENT = 14.5
+    DEFAULT_MARGIN_PERCENT = PRODUCT_DEFAULT_MARGIN_PERCENT
 
     def __init__(self, parent=None, initial_name=""):
         super().__init__(parent)
@@ -525,79 +533,10 @@ class SalesQuickProductDialog(QDialog):
         self.media_clear_btn.setEnabled(has_media or self.media_removed)
 
     def _find_existing_product_id(self, display_name):
-        normalized_name = re.sub(r"\s*\[\d+s\]\s*$", "", str(display_name or "").strip(), flags=re.IGNORECASE)
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT id
-            FROM product
-            WHERE LOWER(TRIM(display_name)) = LOWER(TRIM(?))
-            LIMIT 1
-        """)
-        query.addBindValue(normalized_name)
-        if query.exec() and query.next():
-            return int(query.value(0))
-        return None
+        return find_existing_product_id_by_display_name(display_name)
 
     def _find_dormant_product_record(self, display_name):
-        normalized_name = re.sub(r"\s*\[\d+s\]\s*$", "", str(display_name or "").strip(), flags=re.IGNORECASE)
-        if not normalized_name:
-            return None
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                p.id,
-                p.display_name,
-                COALESCE(p.generic_name, ''),
-                COALESCE(p.brand, ''),
-                COALESCE(p.form, ''),
-                COALESCE(p.strength, ''),
-                COALESCE(p.manufacturer_id, 0),
-                COALESCE((
-                    SELECT pp.pack_size
-                    FROM price_pack pp
-                    WHERE pp.product_id = p.id
-                    ORDER BY pp.is_default DESC, pp.id DESC
-                    LIMIT 1
-                ), 0),
-                COALESCE((
-                    SELECT pp.pack_price
-                    FROM price_pack pp
-                    WHERE pp.product_id = p.id
-                    ORDER BY pp.is_default DESC, pp.id DESC
-                    LIMIT 1
-                ), 0),
-                COALESCE((
-                    SELECT pp.margin_percent
-                    FROM price_pack pp
-                    WHERE pp.product_id = p.id
-                    ORDER BY pp.is_default DESC, pp.id DESC
-                    LIMIT 1
-                ), 14.5)
-                ,
-                COALESCE(p.prescription_required, 0)
-            FROM product p
-            WHERE LOWER(TRIM(p.display_name)) = LOWER(TRIM(?))
-              AND COALESCE(p.status, 'active') <> 'used'
-            LIMIT 1
-        """)
-        query.addBindValue(normalized_name)
-        if not query.exec() or not query.next():
-            return None
-
-        return {
-            "product_id": int(query.value(0)),
-            "display_name": str(query.value(1) or "").strip(),
-            "generic_name": str(query.value(2) or "").strip(),
-            "brand": str(query.value(3) or "").strip(),
-            "form": str(query.value(4) or "").strip(),
-            "strength": str(query.value(5) or "").strip(),
-            "manufacturer_id": int(query.value(6) or 0) or None,
-            "pack_size": float(query.value(7) or 0.0),
-            "pack_price": float(query.value(8) or 0.0),
-            "margin_percent": float(query.value(9) or 14.5),
-            "prescription_required": bool(int(query.value(10) or 0)),
-        }
+        return fetch_dormant_product_record(display_name)
 
     def try_prefill_existing_product(self, initial_name):
         record = self._find_dormant_product_record(initial_name)
@@ -628,7 +567,7 @@ class SalesQuickProductDialog(QDialog):
             self.sale_price_input.setText(f"{record['pack_price']:.2f}")
         self.margin_input.setText(f"{float(record.get('margin_percent', self.DEFAULT_MARGIN_PERCENT) or self.DEFAULT_MARGIN_PERCENT):.2f}")
         self.prescription_required_check.setChecked(bool(record.get("prescription_required")))
-        self.selected_media_info = fetch_product_media(record["product_id"])
+        self.selected_media_info = record.get("media_info")
         self.selected_media_path = ""
         self.media_removed = False
         self.update_media_display()
@@ -707,153 +646,42 @@ class SalesQuickProductDialog(QDialog):
                 return
             expiry_date = parsed_expiry.toString("yyyy-MM-dd")
 
-        db = QSqlDatabase.database()
         ensure_prescription_schema()
         ensure_product_media_schema()
-        if not db.transaction():
-            AppMessageBox.information(self, "Error", "Failed to start transaction.")
-            return
 
         try:
-            prescription_required = 1 if self.prescription_required_check.isChecked() else 0
-            product_id = self.existing_product_id or self._find_existing_product_id(display_name)
-            if product_id is None:
-                insert_query = QSqlQuery(db)
-                insert_query.prepare("""
-                    INSERT INTO product (
-                        display_name, code, reg_no, generic_name, brand, form, strength,
-                        packing, rack, manufacturer_id, prescription_required, status
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """)
-                insert_query.addBindValue(display_name)
-                insert_query.addBindValue(None)
-                insert_query.addBindValue(None)
-                insert_query.addBindValue(formula)
-                insert_query.addBindValue(product_name)
-                insert_query.addBindValue(form or None)
-                insert_query.addBindValue(dose or None)
-                insert_query.addBindValue(None)
-                insert_query.addBindValue("")
-                insert_query.addBindValue(manufacturer_id)
-                insert_query.addBindValue(prescription_required)
-                insert_query.addBindValue("used")
-                if not insert_query.exec():
-                    raise Exception(insert_query.lastError().text())
-                product_id = int(insert_query.lastInsertId())
-            else:
-                update_query = QSqlQuery(db)
-                update_query.prepare("""
-                    UPDATE product
-                    SET display_name = ?,
-                        generic_name = COALESCE(?, generic_name),
-                        brand = COALESCE(?, brand),
-                        form = COALESCE(?, form),
-                        strength = COALESCE(?, strength),
-                        manufacturer_id = COALESCE(?, manufacturer_id),
-                        prescription_required = ?,
-                        status = 'used'
-                    WHERE id = ?
-                """)
-                update_query.addBindValue(display_name)
-                update_query.addBindValue(formula)
-                update_query.addBindValue(product_name)
-                update_query.addBindValue(form or None)
-                update_query.addBindValue(dose or None)
-                update_query.addBindValue(manufacturer_id)
-                update_query.addBindValue(prescription_required)
-                update_query.addBindValue(product_id)
-                if not update_query.exec():
-                    raise Exception(update_query.lastError().text())
+            result = save_product_with_opening_stock(
+                existing_product_id=self.existing_product_id or self._find_existing_product_id(display_name),
+                display_name=display_name,
+                manufacturer_id=manufacturer_id,
+                discount_group_id=None,
+                tax_group_id=None,
+                generic_name=formula,
+                code=None,
+                rack="",
+                qty_text=qty_text,
+                batch_no=batch_no,
+                pack_size=pack_size_text,
+                pack_price_text=sale_price_text,
+                margin_text=margin_text,
+                reorder_level_text="0",
+                expiry_date=expiry_date,
+                form=form or None,
+                strength=dose or None,
+                prescription_required=self.prescription_required_check.isChecked(),
+                media_removed=self.media_removed,
+                selected_media_path=self.selected_media_path,
+            )
 
-            batch_query = QSqlQuery(db)
-            batch_query.prepare("""
-                INSERT INTO batch (
-                    batch_no, expiry_date, product_id, total_received, paid_qty,
-                    quantity_remaining, unit_cost, source
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """)
-            batch_query.addBindValue(batch_no)
-            batch_query.addBindValue(expiry_date)
-            batch_query.addBindValue(product_id)
-            batch_query.addBindValue(opening_qty)
-            batch_query.addBindValue(opening_qty)
-            batch_query.addBindValue(opening_qty)
-            batch_query.addBindValue(round(pack_cost / pack_size, 6) if pack_cost is not None else None)
-            batch_query.addBindValue("OPENING")
-            if not batch_query.exec():
-                raise Exception(batch_query.lastError().text())
-
-            existing_default_id = None
-            existing_default_query = QSqlQuery(db)
-            existing_default_query.prepare("""
-                SELECT id
-                FROM price_pack
-                WHERE product_id = ?
-                ORDER BY is_default DESC, id DESC
-                LIMIT 1
-            """)
-            existing_default_query.addBindValue(product_id)
-            if not existing_default_query.exec():
-                raise Exception(existing_default_query.lastError().text())
-            if existing_default_query.next():
-                existing_default_id = existing_default_query.value(0)
-
-            if existing_default_id is not None:
-                normalize_query = QSqlQuery(db)
-                normalize_query.prepare("""
-                    UPDATE price_pack
-                    SET is_default = 0
-                    WHERE product_id = ?
-                      AND id <> ?
-                """)
-                normalize_query.addBindValue(product_id)
-                normalize_query.addBindValue(existing_default_id)
-                if not normalize_query.exec():
-                    raise Exception(normalize_query.lastError().text())
-
-                price_query = QSqlQuery(db)
-                price_query.prepare("""
-                    UPDATE price_pack
-                    SET pack_size = ?, pack_price = ?, margin_percent = ?, is_default = 1
-                    WHERE id = ?
-                """)
-                price_query.addBindValue(pack_size)
-                price_query.addBindValue(sale_price)
-                price_query.addBindValue(margin_percent)
-                price_query.addBindValue(existing_default_id)
-            else:
-                price_query = QSqlQuery(db)
-                price_query.prepare("""
-                    INSERT INTO price_pack (product_id, pack_size, pack_price, margin_percent, reorder_level, is_default)
-                    VALUES (?, ?, ?, ?, 0, 1)
-                """)
-                price_query.addBindValue(product_id)
-                price_query.addBindValue(pack_size)
-                price_query.addBindValue(sale_price)
-                price_query.addBindValue(margin_percent)
-            if not price_query.exec():
-                raise Exception(price_query.lastError().text())
-
-            if self.media_removed:
-                clear_product_media_fields(product_id=product_id)
-                self.selected_media_info = None
-                self.media_removed = False
-            elif self.selected_media_path:
-                media_info = save_product_media(self.selected_media_path, product_id=product_id)
-                update_product_media_fields(product_id=product_id, media_info=media_info)
-                self.selected_media_info = media_info
-                self.selected_media_path = ""
-
-            if not db.commit():
-                raise Exception(db.lastError().text())
-
-            self.saved_product_id = int(product_id)
+            self.saved_product_id = int(result["product_id"])
             self.saved_visible_name = ProductSearchBox.format_product_label(display_name, pack_size)
+            self.selected_media_info = result.get("media_info") or (
+                None if self.media_removed else self.selected_media_info
+            )
+            self.selected_media_path = ""
+            self.media_removed = False
             self.accept()
         except Exception as exc:
-            db.rollback()
             AppMessageBox.critical(self, "Error", f"Failed to save product.\n\n{exc}")
 
 
@@ -1101,9 +929,7 @@ class CreateSalesWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        from medic.utilities.payment_handler import PaymentMethodHandler
-        
-        
+
         # === Main Vertical Layout ===
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(8, 8, 8, 8)
@@ -3376,24 +3202,15 @@ class CreateSalesWidget(QWidget):
             )
             return
 
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                COALESCE(name, 'Walk-in Customer'),
-                COALESCE(receiveable, 0),
-                COALESCE(credit_limit, 0)
-            FROM customer
-            WHERE id = ?
-        """)
-        query.addBindValue(customer_id)
-
-        if not query.exec() or not query.next():
+        try:
+            credit_position = fetch_customer_credit_position(customer_id)
+        except Exception:
             self.customer_credit_summary.setText("Credit Summary: Unable to load customer credit position")
             return
 
-        customer_name = str(query.value(0) or "")
-        receivable = float(query.value(1) or 0.0)
-        credit_limit = float(query.value(2) or 0.0)
+        customer_name = credit_position["customer_name"]
+        receivable = float(credit_position["current_receivable"] or 0.0)
+        credit_limit = float(credit_position["credit_limit"] or 0.0)
 
         if credit_limit <= 0:
             self.customer_credit_summary.setText(
@@ -4180,68 +3997,39 @@ class CreateSalesWidget(QWidget):
     
     
     def put_sale_on_hold(self):
-        
-        db = QSqlDatabase().database()
-        db.transaction()
-        
         try:
-        
-            # get salesorder data
             customer = self.customer.currentData()
             salesman = self.get_salesman_id()
-            status = 'On Hold'
-            subtotal = self._parse_float_field(self.gross_entry.text(), "Sub Total", 0.0)
-            discount_amount = self._parse_float_field(self.discount_entry.text(), "Discount", 0.0)
-            taxable_amount = self._parse_float_field(self.taxable_entry.text(), "Taxable", 0.0)
-            tax_amount = self._parse_float_field(self.tax_entry.text(), "Sales Tax", 0.0)
-            additional_charges = self._parse_float_field(self.additional_entry.text(), "Additional Charges", 0.0)
-            final_amount = self._parse_float_field(self.final_amount_entry.text(), "Final Amount", 0.0)
-            received_amount = self._parse_float_field(self.received_entry.text(), "Received", 0.0)
-            remaining_amount = self._parse_float_field(self.remainingdata.text(), "Remaining Amount", 0.0)
-            payment_method = self._text_or_none(self.payment_method.currentText()) if hasattr(self, "payment_method") else "Cash"
-            due_date = self.compute_due_date()
-            
-            print("Customer is: ", customer)
-            
             if customer == 0:
                 customer = None
 
-            hold_id = self.current_hold_sale_id
-            hold_id = upsert_hold_sale_header(
-                {
+            print("Customer is: ", customer)
+
+            hold_id = save_hold_sale(
+                header_payload={
                     "customer": customer,
                     "salesman": salesman,
-                    "status": status,
-                    "subtotal": subtotal,
-                    "discount_amount": discount_amount,
-                    "taxable_amount": taxable_amount,
-                    "tax_amount": tax_amount,
-                    "additional_charges": additional_charges,
-                    "final_amount": final_amount,
-                    "received_amount": received_amount,
-                    "remaining_amount": remaining_amount,
-                    "payment_method": payment_method,
-                    "due_date": due_date,
+                    "status": "On Hold",
+                    "subtotal": self._parse_float_field(self.gross_entry.text(), "Sub Total", 0.0),
+                    "discount_amount": self._parse_float_field(self.discount_entry.text(), "Discount", 0.0),
+                    "taxable_amount": self._parse_float_field(self.taxable_entry.text(), "Taxable", 0.0),
+                    "tax_amount": self._parse_float_field(self.tax_entry.text(), "Sales Tax", 0.0),
+                    "additional_charges": self._parse_float_field(self.additional_entry.text(), "Additional Charges", 0.0),
+                    "final_amount": self._parse_float_field(self.final_amount_entry.text(), "Final Amount", 0.0),
+                    "received_amount": self._parse_float_field(self.received_entry.text(), "Received", 0.0),
+                    "remaining_amount": self._parse_float_field(self.remainingdata.text(), "Remaining Amount", 0.0),
+                    "payment_method": self._text_or_none(self.payment_method.currentText()) if hasattr(self, "payment_method") else "Cash",
+                    "due_date": self.compute_due_date(),
                 },
-                hold_id=hold_id,
+                item_rows=self._collect_hold_sale_item_rows(),
+                hold_id=self.current_hold_sale_id,
             )
 
             self.current_hold_sale_id = int(hold_id)
             print("Sales ID is: ", hold_id)
-
-            self.hold_sales_items(hold_id)
-
-        
-        
         except Exception as exc:
-            
-            print("rolling back transactions")
-            db.rollback()
             AppMessageBox.error(self, "Error", f"Database error - rolling back transactions.\n\n{exc}")
-            
         else:
-            
-            db.commit()
             print("Transaction committed successfully")
             self.clear_fields()
             AppMessageBox.success(self, "Success", "Sales Hold saved successfully")
@@ -4250,11 +4038,8 @@ class CreateSalesWidget(QWidget):
         
         
         
-    def hold_sales_items(self, hold_id):
-        
-        items_exits = False
+    def _collect_hold_sale_item_rows(self):
         item_rows = []
-        # Process each row in the sales items table
         for row in range(self.table.rowCount()):
             product_widget = self.table.cellWidget(row, 1)
             if not product_widget or not product_widget.currentData():
@@ -4264,10 +4049,7 @@ class CreateSalesWidget(QWidget):
             product_id = self.extract_product_id(product_widget.currentData())
             if product_id is None:
                 continue
-            items_exits = True
-            
-            hold_id = int(hold_id)
-            
+
             qty = self._parse_int_field(self.table.cellWidget(row, 2).text(), f"Row {row + 1} Qty", 0)
             rate = self._parse_float_field(self.table.cellWidget(row, 3).text(), f"Row {row + 1} Rate", 0.0)
             discount_widget = self.table.cellWidget(row, 4)
@@ -4308,12 +4090,7 @@ class CreateSalesWidget(QWidget):
                     "total": total,
                 }
             )
-                
-        if not items_exits:
-            print("No Records in the Order")
-            raise Exception
-
-        replace_hold_sale_items(hold_id, item_rows)
+        return item_rows
     
     
     
@@ -4338,35 +4115,18 @@ class CreateSalesWidget(QWidget):
         if sales_prescription_payload is False:
             return
 
-        db = QSqlDatabase.database()
-        if not db.transaction():
-            AppMessageBox.error(self, "Database Error", "Could not start sales transaction.")
-            return
-        
         try: 
-        
-            # Insert Sales Receipt
-            sales_id = self.insert_salesreceipt(sales_prescription_payload=sales_prescription_payload)
-            
-            if sales_id is None:
-                raise Exception("Sales receipt header was not saved.")
-            # Insert Sales Items
-            self.insert_salesitems(sales_id)
-            
-        
-        except Exception as exc:
-            
-            print("rolling back transactions")
-            db.rollback()
-            AppMessageBox.error(self, "Error", f"Database error - rolling back transactions.\n\n{exc}")
-            
-        else:
-            
-            if not db.commit():
-                db.rollback()
-                AppMessageBox.error(self, "Error", "Failed to commit sales transaction.")
-                return
+            def _work():
+                sales_id = self.insert_salesreceipt(sales_prescription_payload=sales_prescription_payload)
+                if sales_id is None:
+                    raise Exception("Sales receipt header was not saved.")
+                self.insert_salesitems(sales_id)
+                return sales_id
 
+            sales_id = run_sales_write_transaction(_work)
+        except Exception as exc:
+            AppMessageBox.error(self, "Error", f"Database error - rolling back transactions.\n\n{exc}")
+        else:
             print("Transaction committed successfully")
 
             standard_pdf = self.export_pdf(
@@ -4411,101 +4171,11 @@ class CreateSalesWidget(QWidget):
         
         
     def get_product_via_code(self, code):
-        code_text = str(code or "").strip()
-        if not code_text:
+        try:
+            return fetch_sales_product_by_code(code)
+        except Exception as exc:
+            print(exc)
             return None
-
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                p.id,
-                p.display_name,
-                COALESCE(pp.unit_price, 0),
-                COALESCE(dg.id, 0),
-                COALESCE(dg.discount_percent, 0),
-                COALESCE(dg.name, ''),
-                COALESCE(dg.fixed_amount, 0),
-                COALESCE(dg.apply_on_sale, 1),
-                COALESCE(tg.id, 0),
-                CASE WHEN COALESCE(tg.apply_on_sale, 1) = 1 THEN COALESCE(tg.tax_percent, 0) ELSE 0 END,
-                COALESCE(tg.fixed_amount, 0),
-                COALESCE(tg.apply_on_sale, 1),
-                COALESCE(tg.name, ''),
-                COALESCE(p.prescription_required, 0),
-                COALESCE((
-                    SELECT SUM(quantity_remaining)
-                    FROM batch
-                    WHERE product_id = p.id
-                      AND quantity_remaining > 0
-                      AND (
-                          expiry_date IS NULL
-                          OR (
-                              CASE
-                                  WHEN expiry_date LIKE '____-__-__' THEN date(expiry_date)
-                                  WHEN expiry_date LIKE '__-__-____'
-                                      THEN date(substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2))
-                                  ELSE NULL
-                              END
-                          ) >= date('now', 'localtime')
-                      )
-                ), 0) as available_stock
-            FROM product p
-            LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
-            LEFT JOIN tax_group tg ON tg.id = p.tax_group_id
-            LEFT JOIN price_pack pp ON pp.id = (
-                SELECT id
-                FROM price_pack
-                WHERE product_id = p.id
-                ORDER BY is_default DESC, id ASC
-                LIMIT 1
-            )
-            WHERE TRIM(CAST(p.code AS TEXT)) = ?
-              AND COALESCE(p.status, 'active') = 'used'
-            LIMIT 1
-        """)
-        query.addBindValue(code_text)
-
-        if not query.exec():
-            print("Barcode product query failed:", query.lastError().text())
-            return None
-
-        if not query.next():
-            return None
-
-        product_id = int(query.value(0))
-        display_name = str(query.value(1) or "").strip()
-        unit_price = float(query.value(2) or 0.0)
-        discount_group_id = int(query.value(3) or 0) or None
-        discount_percent = float(query.value(4) or 0.0)
-        discount_group_name = str(query.value(5) or "").strip()
-        discount_fixed_amount = float(query.value(6) or 0.0)
-        discount_apply_on_sale = bool(int(query.value(7) or 0))
-        tax_group_id = int(query.value(8) or 0) or None
-        tax_percent = float(query.value(9) or 0.0)
-        tax_fixed_amount = float(query.value(10) or 0.0)
-        tax_apply_on_sale = bool(int(query.value(11) or 0))
-        tax_group_name = str(query.value(12) or "").strip()
-        prescription_required = bool(int(query.value(13) or 0))
-        available_stock = int(query.value(14) or 0)
-
-        return {
-            "product_id": product_id,
-            "display_name": display_name,
-            "unit_price": unit_price,
-            "discount_group_id": discount_group_id,
-            "discount_percent": discount_percent,
-            "discount_group_name": discount_group_name,
-            "discount_fixed_amount": discount_fixed_amount,
-            "discount_apply_on_sale": discount_apply_on_sale,
-            "tax_group_id": tax_group_id,
-            "tax_percent": tax_percent,
-            "tax_fixed_amount": tax_fixed_amount,
-            "tax_apply_on_sale": tax_apply_on_sale,
-            "tax_group_name": tax_group_name,
-            "prescription_required": prescription_required,
-            "available_stock": available_stock,
-            "code": code_text,
-        }
 
 
     def find_sale_row_by_product(self, product_id):
@@ -4736,188 +4406,16 @@ class CreateSalesWidget(QWidget):
         
     
     def _sales_product_query_fn(self, search_text):
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT p.id, p.display_name, COALESCE(p.generic_name, ''), COALESCE(pp.pack_size, 0), pp.unit_price
-                 , COALESCE((
-                    SELECT b.unit_cost
-                    FROM batch b
-                    WHERE b.product_id = p.id
-                      AND b.unit_cost IS NOT NULL
-                      AND b.unit_cost > 0
-                    ORDER BY b.id DESC
-                    LIMIT 1
-                 ), COALESCE((
-                    SELECT pi.rate
-                    FROM purchaseitem pi
-                    JOIN purchase pu ON pu.id = pi.purchase
-                    WHERE pi.product = p.id
-                    ORDER BY pu.id DESC, pi.id DESC
-                    LIMIT 1
-                 ), 0))
-                 , COALESCE(dg.id, 0)
-                 , COALESCE(dg.discount_percent, 0)
-                 , COALESCE(dg.name, '')
-                 , COALESCE(dg.fixed_amount, 0)
-                 , COALESCE(dg.apply_on_sale, 1)
-                 , COALESCE(tg.id, 0)
-                 , CASE WHEN COALESCE(tg.apply_on_sale, 1) = 1 THEN COALESCE(tg.tax_percent, 0) ELSE 0 END
-                 , COALESCE(tg.fixed_amount, 0)
-                 , COALESCE(tg.apply_on_sale, 1)
-                 , COALESCE(tg.name, '')
-                 , COALESCE(pp.margin_percent, 0)
-                 , COALESCE(p.status, 'active')
-                 , COALESCE(p.prescription_required, 0)
-            FROM product p
-            LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
-            LEFT JOIN tax_group tg ON tg.id = p.tax_group_id
-            LEFT JOIN price_pack pp ON pp.id = (
-                SELECT id
-                FROM price_pack
-                WHERE product_id = p.id
-                ORDER BY is_default DESC, id DESC
-                LIMIT 1
-            )
-            WHERE p.display_name LIKE ?
-            ORDER BY p.display_name ASC
-            LIMIT 50
-        """)
-        query.addBindValue(f"{search_text}%")
-
-        results = []
-        if not query.exec():
-            return results
-
-        while query.next():
-            product_id = query.value(0)
-            name = str(query.value(1)).strip()
-            generic_name = str(query.value(2) or "").strip()
-            visible_name = ProductSearchBox.format_product_label(name, query.value(3))
-            unit_price = query.value(4) or 0.0
-            cost_price = query.value(5) or 0.0
-            discount_group_id = int(query.value(6) or 0) or None
-            discount_percent = query.value(7) or 0.0
-            discount_group_name = str(query.value(8) or "").strip()
-            discount_fixed_amount = query.value(9) or 0.0
-            discount_apply_on_sale = bool(int(query.value(10) or 0))
-            tax_group_id = int(query.value(11) or 0) or None
-            tax_percent = query.value(12) or 0.0
-            tax_fixed_amount = query.value(13) or 0.0
-            tax_apply_on_sale = bool(int(query.value(14) or 0))
-            tax_group_name = str(query.value(15) or "").strip()
-            target_margin_percent = float(query.value(16) or 0.0)
-            status = str(query.value(17) or "active").strip()
-            prescription_required = bool(int(query.value(18) or 0))
-            results.append((visible_name, {
-                "product_id": product_id,
-                "display_name": name,
-                "visible_name": visible_name,
-                "generic_name": generic_name,
-                "unit_price": unit_price,
-                "cost_price": cost_price,
-                "discount_group_id": discount_group_id,
-                "discount_percent": discount_percent,
-                "discount_group_name": discount_group_name,
-                "discount_fixed_amount": discount_fixed_amount,
-                "discount_apply_on_sale": discount_apply_on_sale,
-                "tax_group_id": tax_group_id,
-                "tax_percent": tax_percent,
-                "tax_fixed_amount": tax_fixed_amount,
-                "tax_apply_on_sale": tax_apply_on_sale,
-                "tax_group_name": tax_group_name,
-                "target_margin_percent": target_margin_percent,
-                "status": status,
-                "prescription_required": prescription_required,
-            }))
-        return results
+        try:
+            return search_sales_products(search_text)
+        except Exception:
+            return []
 
     def _fetch_sales_product_data(self, product_id):
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT p.id, p.display_name, COALESCE(p.generic_name, ''), COALESCE(pp.pack_size, 0), pp.unit_price
-                 , COALESCE((
-                    SELECT b.unit_cost
-                    FROM batch b
-                    WHERE b.product_id = p.id
-                      AND b.unit_cost IS NOT NULL
-                      AND b.unit_cost > 0
-                    ORDER BY b.id DESC
-                    LIMIT 1
-                 ), COALESCE((
-                    SELECT pi.rate
-                    FROM purchaseitem pi
-                    JOIN purchase pu ON pu.id = pi.purchase
-                    WHERE pi.product = p.id
-                    ORDER BY pu.id DESC, pi.id DESC
-                    LIMIT 1
-                 ), 0))
-                 , COALESCE(dg.id, 0)
-                 , COALESCE(dg.discount_percent, 0)
-                 , COALESCE(dg.name, '')
-                 , COALESCE(dg.fixed_amount, 0)
-                 , COALESCE(dg.apply_on_sale, 1)
-                 , COALESCE(tg.id, 0)
-                 , CASE WHEN COALESCE(tg.apply_on_sale, 1) = 1 THEN COALESCE(tg.tax_percent, 0) ELSE 0 END
-                 , COALESCE(tg.fixed_amount, 0)
-                 , COALESCE(tg.apply_on_sale, 1)
-                 , COALESCE(tg.name, '')
-                 , COALESCE(pp.margin_percent, 0)
-                 , COALESCE(p.status, 'active')
-                 , COALESCE(p.prescription_required, 0)
-            FROM product p
-            LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
-            LEFT JOIN tax_group tg ON tg.id = p.tax_group_id
-            LEFT JOIN price_pack pp ON pp.id = (
-                SELECT id
-                FROM price_pack
-                WHERE product_id = p.id
-                ORDER BY is_default DESC, id DESC
-                LIMIT 1
-            )
-            WHERE p.id = ?
-            LIMIT 1
-        """)
-        query.addBindValue(int(product_id))
-        if not query.exec() or not query.next():
-            return None
-
-        name = str(query.value(1) or "").strip()
-        visible_name = ProductSearchBox.format_product_label(name, query.value(3))
-        return {
-            "product_id": int(query.value(0)),
-            "display_name": name,
-            "visible_name": visible_name,
-            "generic_name": str(query.value(2) or "").strip(),
-            "unit_price": float(query.value(4) or 0.0),
-            "cost_price": float(query.value(5) or 0.0),
-            "discount_group_id": int(query.value(6) or 0) or None,
-            "discount_percent": float(query.value(7) or 0.0),
-            "discount_group_name": str(query.value(8) or "").strip(),
-            "discount_fixed_amount": float(query.value(9) or 0.0),
-            "discount_apply_on_sale": bool(int(query.value(10) or 0)),
-            "tax_group_id": int(query.value(11) or 0) or None,
-            "tax_percent": float(query.value(12) or 0.0),
-            "tax_fixed_amount": float(query.value(13) or 0.0),
-            "tax_apply_on_sale": bool(int(query.value(14) or 0)),
-            "tax_group_name": str(query.value(15) or "").strip(),
-            "target_margin_percent": float(query.value(16) or 0.0),
-            "status": str(query.value(17) or "active").strip(),
-            "prescription_required": bool(int(query.value(18) or 0)),
-        }
+        return fetch_sales_product_detail(product_id)
 
     def find_sales_product_id_by_name(self, display_name):
-        normalized_name = re.sub(r"\s*\[\d+s\]\s*$", "", str(display_name or "").strip(), flags=re.IGNORECASE)
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT id
-            FROM product
-            WHERE LOWER(TRIM(display_name)) = LOWER(TRIM(?))
-            LIMIT 1
-        """)
-        query.addBindValue(normalized_name)
-        if query.exec() and query.next():
-            return int(query.value(0))
-        return None
+        return find_product_id_by_display_name(display_name)
 
     def select_sales_product_by_id(self, product_id):
         product_data = self._fetch_sales_product_data(product_id)
@@ -5145,57 +4643,7 @@ class CreateSalesWidget(QWidget):
         self.update_total_amount()
         
     def build_hold_row_product_data(self, product_id):
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT
-                p.display_name,
-                COALESCE(pp.unit_price, 0),
-                COALESCE(dg.id, 0),
-                COALESCE(dg.discount_percent, 0),
-                COALESCE(dg.name, ''),
-                COALESCE(dg.fixed_amount, 0),
-                COALESCE(dg.apply_on_sale, 1),
-                COALESCE(tg.id, 0),
-                CASE WHEN COALESCE(tg.apply_on_sale, 1) = 1 THEN COALESCE(tg.tax_percent, 0) ELSE 0 END,
-                COALESCE(tg.fixed_amount, 0),
-                COALESCE(tg.apply_on_sale, 1),
-                COALESCE(tg.name, ''),
-                COALESCE(pp.margin_percent, 0)
-            FROM product p
-            LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
-            LEFT JOIN tax_group tg ON tg.id = p.tax_group_id
-            LEFT JOIN price_pack pp ON pp.id = (
-                SELECT id
-                FROM price_pack
-                WHERE product_id = p.id
-                ORDER BY is_default DESC, id ASC
-                LIMIT 1
-            )
-            WHERE p.id = ?
-            LIMIT 1
-        """)
-        query.addBindValue(int(product_id))
-
-        if not query.exec() or not query.next():
-            return None
-
-        return {
-            "product_id": int(product_id),
-            "display_name": str(query.value(0) or "").strip(),
-            "unit_price": float(query.value(1) or 0.0),
-            "cost_price": 0.0,
-            "discount_group_id": int(query.value(2) or 0) or None,
-            "discount_percent": float(query.value(3) or 0.0),
-            "discount_group_name": str(query.value(4) or "").strip(),
-            "discount_fixed_amount": float(query.value(5) or 0.0),
-            "discount_apply_on_sale": bool(int(query.value(6) or 0)),
-            "tax_group_id": int(query.value(7) or 0) or None,
-            "tax_percent": float(query.value(8) or 0.0),
-            "tax_fixed_amount": float(query.value(9) or 0.0),
-            "tax_apply_on_sale": bool(int(query.value(10) or 0)),
-            "tax_group_name": str(query.value(11) or "").strip(),
-            "target_margin_percent": float(query.value(12) or 0.0),
-        }
+        return fetch_hold_row_product_data(product_id)
 
     def insert_sale_row_widget(
         self,
@@ -6146,27 +5594,7 @@ class QtyValidationFilter(QObject):
             QTimer.singleShot(0, self.qty_edit.setFocus)
 
     def get_available_qty(self, product_id):
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT COALESCE(SUM(quantity_remaining), 0)
-            FROM batch
-            WHERE product_id = ?
-            AND quantity_remaining > 0
-            AND (
-                expiry_date IS NULL
-                OR (
-                    CASE
-                        WHEN expiry_date LIKE '____-__-__' THEN date(expiry_date)
-                        WHEN expiry_date LIKE '__-__-____'
-                            THEN date(substr(expiry_date, 7, 4) || '-' || substr(expiry_date, 4, 2) || '-' || substr(expiry_date, 1, 2))
-                        ELSE NULL
-                    END
-                ) >= date('now', 'localtime')
-            )
-        """)
-        query.addBindValue(product_id)
-
-        if query.exec() and query.next():
-            return int(query.value(0) or 0)
-
-        return 0
+        try:
+            return fetch_available_product_quantity(product_id)
+        except Exception:
+            return 0

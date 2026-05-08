@@ -46,6 +46,40 @@ def fetch_active_supplier_option_rows():
     return rows
 
 
+def fetch_salesrep_option_rows_for_supplier(supplier_id):
+    try:
+        normalized_supplier_id = int(supplier_id or 0)
+    except (TypeError, ValueError):
+        normalized_supplier_id = 0
+
+    if normalized_supplier_id <= 0:
+        return []
+
+    query = _new_query()
+    query.prepare(
+        """
+        SELECT id, COALESCE(name, '')
+        FROM rep
+        WHERE supplier_id = ?
+        ORDER BY name ASC
+        """
+    )
+    query.addBindValue(normalized_supplier_id)
+
+    if not query.exec():
+        raise Exception(f"Error loading reps: {query.lastError().text()}")
+
+    rows = []
+    while query.next():
+        rows.append(
+            {
+                "rep_id": int(query.value(0) or 0),
+                "rep_name": str(query.value(1) or "").strip(),
+            }
+        )
+    return rows
+
+
 def create_salesrep(*, supplier_id, name, contact):
     payload = validate_salesrep_payload(
         supplier_id=supplier_id,

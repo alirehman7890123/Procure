@@ -3,6 +3,8 @@ def _new_query():
 
     return QSqlQuery()
 
+from medic.services.db_transaction_service import run_in_transaction
+
 
 def fetch_manufacturer_lookup():
     lookup = {}
@@ -173,3 +175,45 @@ def insert_price_change_log(product_id, previous_price, new_price, *, source, us
     if not query.exec():
         raise Exception(query.lastError().text())
     return query.lastInsertId()
+
+
+def apply_price_changes(changed_rows, *, source, user_id, username):
+    changed_rows = list(changed_rows or [])
+    if not changed_rows:
+        return 0
+
+    changed_count = 0
+    for row in changed_rows:
+        product_id = int(row["product_id"])
+        previous_price = float(row["previous_price"])
+        new_price = float(row["new_price"])
+
+        update_product_default_pack_price(product_id, new_price)
+        insert_price_change_log(
+            product_id,
+            previous_price,
+            new_price,
+            source=source,
+            user_id=user_id,
+            username=username,
+        )
+        changed_count += 1
+
+    return changed_count
+
+
+def save_price_changes(changed_rows, *, source, user_id, username):
+    normalized_rows = list(changed_rows or [])
+    if not normalized_rows:
+        return 0
+
+    return run_in_transaction(
+        lambda: apply_price_changes(
+            normalized_rows,
+            source=source,
+            user_id=user_id,
+            username=username,
+        ),
+        start_error_message="Could not start price change transaction.",
+        commit_error_message="Could not commit price changes.",
+    )

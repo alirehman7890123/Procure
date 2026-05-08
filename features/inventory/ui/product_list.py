@@ -1,6 +1,5 @@
 from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QHeaderView,QDialog, QLineEdit,QComboBox, QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QTableWidget, QTableWidgetItem, QMessageBox, QSpinBox, QAbstractItemView, QApplication, QCheckBox, QCompleter
 from PySide6.QtCore import QFile, Qt, Signal, QTimer, QStringListModel
-from PySide6.QtSql import QSqlDatabase
 from functools import partial
 from PySide6.QtGui import QColor
 from medic.utilities.product_search_widget import ProductSearchBox
@@ -11,11 +10,11 @@ from medic.utilities.activity_logger import log_activity
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.services.stock_adjustment_service import (
-    apply_stock_adjustments,
     build_stock_adjustment_log_note,
     fetch_adjustable_products,
     fetch_adjustment_batches_for_product,
     normalize_stock_adjustment_row,
+    save_stock_adjustments,
 )
 from medic.services.product_catalog_service import (
     build_product_stock_filter_clause,
@@ -28,11 +27,10 @@ from medic.services.product_catalog_service import (
     search_products,
 )
 from medic.services.product_admin_service import (
-    insert_price_change_log,
     resolve_auth_user_id,
     resolve_price_change_product,
+    save_price_changes,
     search_price_change_products,
-    update_product_default_pack_price,
 )
 
 
@@ -917,21 +915,10 @@ class InventoryAdjustmentDialog(QDialog):
             AppMessageBox.information(self, "No Changes", "No modified rows found.")
             return
 
-        db = QSqlDatabase.database()
-        if not db.transaction():
-            AppMessageBox.critical(self, "Database Error", "Failed to start inventory adjustment transaction.")
-            return
-
         try:
-            apply_stock_adjustments(changed_rows, self.current_user_id)
+            save_stock_adjustments(changed_rows, self.current_user_id)
         except Exception as exc:
-            db.rollback()
             AppMessageBox.critical(self, "Save Failed", str(exc))
-            return
-
-        if not db.commit():
-            db.rollback()
-            AppMessageBox.critical(self, "Save Failed", "Failed to commit inventory adjustment transaction.")
             return
 
         AppMessageBox.information(self, "Saved", f"{len(changed_rows)} batch adjustment(s) saved successfully.")
@@ -1283,16 +1270,11 @@ class PriceChangeDialog(QDialog):
 
     @Permissions.require_permission('product.update')
     def save_changes(self):
-        db = QSqlDatabase.database()
-        if not db.transaction():
-            AppMessageBox.critical(self, "Database Error", "Could not start price change transaction.")
-            return
-
         try:
             app = QApplication.instance()
             current_user_id = app.property("user_id") if app else None
             current_username = (app.property("username") or "") if app else ""
-            changed_count = 0
+            changed_rows = []
 
             for row in range(self.table.rowCount()):
                 id_item = self.table.item(row, self.PRODUCT_ID_COL)
@@ -1322,50 +1304,44 @@ class PriceChangeDialog(QDialog):
                 if abs(new_price - previous_price) <= 0.000001:
                     continue
 
-                try:
-                    update_product_default_pack_price(product_id, new_price)
-                except Exception as exc:
-                    raise Exception(f"Failed to update {product_name}: {exc}")
+                changed_rows.append(
+                    {
+                        "product_id": product_id,
+                        "product_name": product_name,
+                        "previous_price": previous_price,
+                        "new_price": new_price,
+                    }
+                )
 
-                try:
-                    insert_price_change_log(
-                        product_id,
-                        previous_price,
-                        new_price,
-                        source="price_change_dialog",
-                        user_id=current_user_id,
-                        username=current_username,
-                    )
-                except Exception as exc:
-                    raise Exception(f"Failed to log price change for {product_name}: {exc}")
+            if not changed_rows:
+                raise Exception("Enter at least one changed price before saving.")
 
+            changed_count = save_price_changes(
+                changed_rows,
+                source="price_change_dialog",
+                user_id=current_user_id,
+                username=current_username,
+            )
+
+            for row_data in changed_rows:
                 log_activity(
                     category="price",
                     action="price_updated",
                     entity_type="product",
-                    entity_id=product_id,
+                    entity_id=row_data["product_id"],
                     note=(
-                        f"Selling price updated for {product_name} (Product ID {product_id}). "
-                        f"Pack price changed from {previous_price} to {new_price} from the Price Change dialog."
+                        f"Selling price updated for {row_data['product_name']} (Product ID {row_data['product_id']}). "
+                        f"Pack price changed from {row_data['previous_price']} to {row_data['new_price']} from the Price Change dialog."
                     ),
-                    previous_value=str(previous_price),
-                    new_value=str(new_price)
+                    previous_value=str(row_data["previous_price"]),
+                    new_value=str(row_data["new_price"])
                 )
-
-                changed_count += 1
-
-            if changed_count == 0:
-                raise Exception("Enter at least one changed price before saving.")
-
-            if not db.commit():
-                raise Exception("Could not commit price changes.")
 
             AppMessageBox.success(self, "Saved", f"{changed_count} price change(s) saved successfully.")
             self.prices_updated.emit()
             self.accept()
 
         except Exception as e:
-            db.rollback()
             AppMessageBox.critical(self, "Error", str(e))
 
 

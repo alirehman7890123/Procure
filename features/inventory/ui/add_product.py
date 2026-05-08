@@ -1,7 +1,6 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QDialog, QPushButton,QComboBox, QDialogButtonBox, QTableWidgetItem, QCompleter,QTableWidget, QFileDialog, QMessageBox, QGridLayout, QLineEdit, QFrame, QDateEdit, QLabel, QSpacerItem, QSizePolicy, QHBoxLayout, QGraphicsDropShadowEffect, QHeaderView, QApplication, QCheckBox
 from PySide6.QtGui import QColor
 from PySide6.QtCore import QSize, Qt, QFile, QDate, QEvent, QStringListModel, Signal, QTimer
-from PySide6.QtSql import QSqlDatabase
 from datetime import date, datetime
 import re
 import sys
@@ -1107,7 +1106,6 @@ class AddProductWidget(QWidget):
             self.clear_product_fields()
 
         except Exception as e:
-            db.rollback()
             AppMessageBox.information(None, "Failed", str(e))
 
     
@@ -1313,13 +1311,6 @@ class ImportDialog(QDialog):
     
     
     def accept(self):
-        
-        db = QSqlDatabase.database()
-
-        if not db.isValid() or not db.isOpen():
-            AppMessageBox.critical(self, "DB Error", "Database is not open.")
-            return
-
         def get_cell_text(row, col):
             item = self.table.item(row, col)
             return item.text().strip() if item and item.text() else ""

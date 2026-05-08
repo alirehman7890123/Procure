@@ -1,7 +1,6 @@
 
 from PySide6.QtWidgets import QWidget, QCompleter, QDateEdit, QVBoxLayout,  QHBoxLayout, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
 from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, QDateTime, QTimer, Signal
-from PySide6.QtSql import QSqlDatabase
 from PySide6.QtGui import QPalette, QColor, QKeyEvent
 from functools import partial
 import csv    
@@ -19,21 +18,12 @@ from medic.services.inventory_movement_service import fetch_product_batch_number
 from medic.services.sales_return_service import (
     build_sales_return_header_payload,
     build_sales_return_transaction_payload,
-    compute_sales_return_inventory_plan,
     compute_sales_return_settlement,
     normalize_sales_return_item_row,
 )
 from medic.services.sales_return_transaction_service import (
-    fetch_already_returned_qty,
     fetch_customer_balances_for_return,
-    fetch_sales_item_qty_sold,
-    fetch_sold_batch_rows_for_return,
-    increment_sold_batch_returned,
-    insert_customer_return_transaction,
-    insert_sales_return_header,
-    insert_sales_return_item,
-    restore_batch_quantity,
-    update_customer_return_balances,
+    save_sales_return_entry,
 )
 from medic.services.return_read_service import (
     fetch_active_sales_return_salesman_options,
@@ -622,12 +612,6 @@ class AddSalesReturnWidget(QWidget):
         if not require_open_session(self):
             return
 
-        db = QSqlDatabase.database()
-
-        if not db.transaction():
-            AppMessageBox.critical(None, "Database Error", "Could not start transaction.")
-            return
-
         try:
 
             print('Starting to save sales return!')
@@ -678,13 +662,6 @@ class AddSalesReturnWidget(QWidget):
                 session_id=session_id,
                 settlement=settlement,
             )
-            return_id = insert_sales_return_header(header_payload)
-            print("Sales return is Saved with Id", return_id)
-
-            #####################################
-            ####      SALES TRANSACTIONS     ####
-            #####################################
-
             print("Starting Sales Return Transaction")
             print("CUSTOMER ID is", customer_id)
 
@@ -715,7 +692,7 @@ class AddSalesReturnWidget(QWidget):
                 receiveable_before = 0.0
 
             txn_payload = build_sales_return_transaction_payload(
-                return_id=return_id,
+                return_id=None,
                 customer_id=customer_id,
                 salesman_id=salesman,
                 total=total,
@@ -725,39 +702,28 @@ class AddSalesReturnWidget(QWidget):
                 payable_before=payable_before,
                 receiveable_before=receiveable_before,
             )
-            insert_customer_return_transaction(txn_payload)
-
-            if customer_id is not None:
-                update_customer_return_balances(
-                    customer,
-                    payable_after=txn_payload["payable_after"],
-                    receiveable_after=txn_payload["receiveable_after"],
-                )
-
+            item_rows = []
             for row in range(self.table.rowCount()):
-
                 try:
                     normalized_row = self._collect_sales_return_row(row)
                     if normalized_row is None:
                         continue
-
                 except Exception as e:
                     raise Exception(f"Row {row + 1}: {str(e)}")
+                item_rows.append(normalized_row)
 
-                print("Passing salesitem_id to reverse_inventory_for_return:", normalized_row["salesitem_id"])
-                self.reverse_inventory_for_return(normalized_row["salesitem_id"], normalized_row["returned"], db)
-
-                insert_id = self._insert_sales_return_item(return_id, normalized_row)
-                print("Sales Return Item inserted")
-                print("last INSERTED ID IS", insert_id)
+            return_id = save_sales_return_entry(
+                header_payload=header_payload,
+                transaction_payload=txn_payload,
+                customer_id=customer if customer_id is not None else None,
+                item_rows=item_rows,
+            )
 
         except Exception as e:
             print("An error occurred:", str(e))
             AppMessageBox.critical(None, "Error", f"An error occurred while saving the Sales Return: {str(e)}")
-            db.rollback()
 
         else:
-            db.commit()
             customer_label = str(self.customer_id) if self.customer_id not in (None, "") else "Walk-in"
             log_activity(
                 category="sales",
@@ -778,55 +744,6 @@ class AddSalesReturnWidget(QWidget):
 
         finally:
             print("Database connection closed")    
-
-
-
-    
-    def reverse_inventory_for_return(self, sales_item_id: int, return_qty: int, db=None):
-
-        print("Passing salesitem_id to reverse_inventory_for_return:", sales_item_id)
-
-        try:
-            sales_item_id = int(sales_item_id)
-            return_qty = int(return_qty)
-
-            if return_qty <= 0:
-                raise Exception("Return quantity must be greater than zero")
-
-            # --------------------------------------------------
-            # 1️⃣ Validate returnable quantity
-            # --------------------------------------------------
-            print("Sales Item id is", sales_item_id)
-            qty_sold = fetch_sales_item_qty_sold(sales_item_id)
-
-            print("Checking if already returned or not")
-
-            already_returned = fetch_already_returned_qty(sales_item_id)
-
-            if already_returned + return_qty > qty_sold:
-                raise Exception("Return quantity exceeds sold quantity")
-
-            # --------------------------------------------------
-            # 2️⃣ Fetch sold batches in reverse order
-            # --------------------------------------------------
-            batch_rows = fetch_sold_batch_rows_for_return(sales_item_id)
-
-            plan = compute_sales_return_inventory_plan(
-                qty_sold=qty_sold,
-                already_returned=already_returned,
-                return_qty=return_qty,
-                sold_batch_rows=batch_rows,
-            )
-
-            for allocation in plan["allocations"]:
-                sold_batch_id = allocation["sold_batch_id"]
-                batch_id = allocation["batch_id"]
-                qty_to_restore = allocation["qty_to_restore"]
-                restore_batch_quantity(batch_id, qty_to_restore)
-                increment_sold_batch_returned(sold_batch_id, qty_to_restore)
-
-        except Exception as e:
-            raise Exception(f"Sales return inventory reversal failed: {str(e)}")
             
 
 

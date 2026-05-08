@@ -4,7 +4,6 @@ from PySide6.QtWidgets import (
     QSizePolicy, QGridLayout, QCheckBox, QDialog
 )
 from PySide6.QtCore import Qt, Signal, QDate, QRectF
-from PySide6.QtSql import QSqlDatabase
 from PySide6.QtGui import QColor, QKeySequence, QShortcut, QIntValidator, QDoubleValidator, QPdfWriter, QPainter, QPageSize, QFont, QTextOption, QPen
 import os
 import platform
@@ -32,6 +31,7 @@ from medic.services.purchase_order_service import (
     insert_purchase_order_line,
     normalize_po_number,
     normalize_purchase_order_line_row,
+    save_purchase_order,
 )
 
 
@@ -1155,11 +1155,6 @@ class AddPOWidget(QWidget):
             AppMessageBox.warning(self, "Invalid Line Item", str(exc))
             return
 
-        db = QSqlDatabase.database()
-        if not db.transaction():
-            AppMessageBox.error(self, "Error", "Could not start transaction.")
-            return
-
         try:
             session_id = get_active_session_id(strict=True)
             header_payload = build_purchase_order_header_payload(
@@ -1171,11 +1166,7 @@ class AddPOWidget(QWidget):
                 notes=header_values["notes"],
                 session_id=session_id,
             )
-            po_id = insert_purchase_order_header(header_payload)
-            self._persist_po_lines(po_id, row_payloads)
-
-            if not db.commit():
-                raise Exception("Failed to commit PO.")
+            po_id = save_purchase_order(header_payload, row_payloads)
 
             try:
                 log_activity(
@@ -1210,7 +1201,6 @@ class AddPOWidget(QWidget):
             self.po_list_signal.emit()
 
         except Exception as e:
-            db.rollback()
             AppMessageBox.error(self, "Error", f"Failed to save PO: {str(e)}")
 
     # ─────────────────────────────────────────────────────────────

@@ -1,7 +1,6 @@
 
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QFrame , QVBoxLayout, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget
 from PySide6.QtCore import QFile, Qt, QTimer, Signal
-from PySide6.QtSql import QSqlDatabase
 from PySide6.QtGui import  QKeyEvent
 from medic.utilities.product_search_widget import ProductSearchBox
 from functools import partial
@@ -25,13 +24,9 @@ from medic.services.purchase_return_service import (
     normalize_purchase_return_item_row,
 )
 from medic.services.purchase_return_transaction_service import (
-    decrement_batch_quantity_for_purchase_return,
     fetch_batch_remaining_for_return,
     fetch_supplier_balances_for_return,
-    insert_purchase_return_header,
-    insert_purchase_return_item,
-    insert_supplier_return_transaction,
-    update_supplier_return_balances,
+    save_purchase_return_entry,
 )
 from medic.services.return_read_service import (
     fetch_active_purchase_return_supplier_options,
@@ -568,12 +563,6 @@ class AddPurchaseReturnWidget(QWidget):
         if not require_open_session(self):
             return
 
-        db = QSqlDatabase.database()
-
-        if not db.transaction():
-            AppMessageBox.critical(None, "Database Error", "Could not start transaction.")
-            return
-
         try:
             supplier = self.supplier_edit.currentData()
             rep = self.rep_edit.currentData()
@@ -620,21 +609,13 @@ class AddPurchaseReturnWidget(QWidget):
                 session_id=session_id,
                 settlement=settlement,
             )
-
-            return_id = insert_purchase_return_header(header_payload)
-
-            if not return_id:
-                raise Exception("Failed to retrieve inserted return ID.")
-
-            print("About to add purchase transaction")
-
             supplier = int(supplier)
 
             balances = fetch_supplier_balances_for_return(supplier)
             payable_before = balances["payable_before"]
             receivable_before = balances["receiveable_before"]
             txn_payload = build_purchase_return_transaction_payload(
-                return_id=return_id,
+                return_id=None,
                 supplier_id=supplier,
                 rep_id=rep,
                 total=total,
@@ -645,30 +626,24 @@ class AddPurchaseReturnWidget(QWidget):
                 receiveable_before=receivable_before,
                 writeoff=writeoff,
             )
+            item_rows = []
+            for row in range(self.table.rowCount()):
+                normalized_row = self._collect_purchase_return_row(row)
+                if normalized_row is not None:
+                    item_rows.append(normalized_row)
 
-            insert_id = insert_supplier_return_transaction(txn_payload)
-            print("Supplier transaction saved with ID:", insert_id)
-
-            # Update supplier balances
-            new_payable = txn_payload["payable_after"]
-            new_receiveable = txn_payload["receiveable_after"]
-
-            update_supplier_return_balances(
-                supplier,
-                payable_after=new_payable,
-                receiveable_after=new_receiveable,
+            return_id = save_purchase_return_entry(
+                header_payload=header_payload,
+                transaction_payload=txn_payload,
+                supplier_id=supplier,
+                item_rows=item_rows,
             )
-            print("Supplier balances updated successfully")
-
-            self.return_items(return_id)
 
         except Exception as e:
             print("An error occurred:", str(e))
             AppMessageBox.critical(None, "Error", f"An error occurred while saving the purchase return: {str(e)}")
-            db.rollback()
 
         else:
-            db.commit()
             log_activity(
                 category="purchase",
                 action="purchase_return_created",
@@ -687,50 +662,6 @@ class AddPurchaseReturnWidget(QWidget):
 
         finally:
             print("Database connection closed")
-        
-    
-    def return_items(self, return_id):
-
-        db = QSqlDatabase.database()
-
-
-        row_count = self.table.rowCount()
-
-        if row_count == 0:
-            raise ValueError("No items to return.")
-
-
-        print("About to save returned items...")
-
-        processed_rows = 0
-
-        for row in range(row_count):
-            normalized_row = self._collect_purchase_return_row(row)
-            if normalized_row is None:
-                continue
-
-            print("Data to be inserted is: ", return_id, normalized_row["product"], normalized_row["batch"], normalized_row["purchased"], normalized_row["returned"], normalized_row["rate"], normalized_row["total"])
-            self._insert_purchase_return_item(return_id, normalized_row)
-
-            
-            
-            
-            print("Updating Batch Quantity")
-            print("DATA TO BE updated is: ", type(normalized_row["batch"]), normalized_row["batch"], type(normalized_row["product"]), normalized_row["product"])
-            # --- Update Batch ---
-            decrement_batch_quantity_for_purchase_return(
-                normalized_row["batch"],
-                normalized_row["product"],
-                normalized_row["returned"],
-            )
-            
-            print("update query executed successfully for batch update")
-            processed_rows += 1
-
-        if processed_rows <= 0:
-            raise ValueError("No purchase return items were posted.")
-
-        return True
 
         
         

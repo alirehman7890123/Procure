@@ -2,7 +2,6 @@ import re
 
 from PySide6.QtWidgets import QWidget, QApplication, QCompleter,QAbstractItemView, QVBoxLayout, QHBoxLayout, QFrame, QCheckBox, QPushButton,QMessageBox, QTableWidgetItem, QGridLayout, QHeaderView, QLabel, QSpacerItem, QSizePolicy, QLineEdit, QComboBox, QTableWidget, QStyledItemDelegate, QFileDialog
 from PySide6.QtCore import QFile, Qt, QStringListModel, QDate, QTimer, Signal, QEvent
-from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtGui import QPalette, QColor, QKeyEvent
 from functools import partial
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -19,10 +18,10 @@ from medic.utilities.product_form_options import get_product_form_options
 from medic.utilities.product_search_widget import ProductSearchBox
 from medic.services.product_media_service import (
     ensure_product_media_schema,
-    save_product_media,
-    update_product_media_fields,
 )
 from medic.services.sales_transaction_service import ensure_prescription_schema
+from medic.services.supplier_service import create_supplier, fetch_active_supplier_option_rows
+from medic.services.salesrep_service import create_salesrep, fetch_salesrep_option_rows_for_supplier
 from medic.services.purchase_posting_service import (
     build_purchase_header_payload,
     build_supplier_transaction_payload,
@@ -49,9 +48,16 @@ from medic.services.purchase_draft_service import (
     load_latest_purchase_draft,
     save_purchase_draft,
 )
+from medic.services.purchase_workflow_service import save_purchase_invoice
 from medic.services.scheduled_price_service import (
     ensure_scheduled_price_schema,
-    save_scheduled_price_change,
+    save_scheduled_price_changes,
+)
+from medic.services.product_write_service import (
+    create_product_with_default_price,
+    ensure_manufacturer,
+    fetch_manufacturer_options,
+    fetch_previous_pack_price,
 )
 
 
@@ -325,30 +331,15 @@ class AddPurchaseWidget(QWidget):
                 AppMessageBox.warning(dialog, "Validation Error", "Supplier name is required.")
                 return
 
-            query = QSqlQuery()
-            query.prepare("""
-                INSERT INTO supplier (
-                    name,
-                    contact
-                )
-                VALUES (?, ?)
-            """)
-            query.addBindValue(name)
-            query.addBindValue(contact if contact else None)
-
-            if not query.exec():
+            try:
+                supplier_id = create_supplier(name=name, contact=contact)
+            except Exception as exc:
                 AppMessageBox.critical(
                     dialog,
                     "Database Error",
-                    f"Failed to save supplier:\n{query.lastError().text()}"
+                    f"Failed to save supplier:\n{exc}"
                 )
                 return
-
-            supplier_id = query.lastInsertId()
-            try:
-                supplier_id = int(supplier_id)
-            except Exception:
-                supplier_id = None
 
             AppMessageBox.information(dialog, "Success", "Supplier added successfully.")
             dialog.accept()
@@ -383,16 +374,17 @@ class AddPurchaseWidget(QWidget):
         supplier_label = QLabel("Supplier")
         supplier_combo = QComboBox()
 
-        # load suppliers
-        query = QSqlQuery("""
-            SELECT id, name
-            FROM supplier
-            ORDER BY name
-        """)
-        while query.next():
-            supplier_id = query.value(0)
-            supplier_name = query.value(1)
-            supplier_combo.addItem(f"{supplier_id} - {supplier_name}", supplier_id)
+        try:
+            supplier_rows = fetch_active_supplier_option_rows()
+        except Exception as exc:
+            AppMessageBox.warning(dialog, "Load Error", str(exc))
+            supplier_rows = []
+
+        for row in supplier_rows:
+            supplier_combo.addItem(
+                f"{row['supplier_id']} - {row['supplier_name']}",
+                row["supplier_id"],
+            )
 
         current_supplier_id = self.supplier_edit.currentData()
         if current_supplier_id is not None:
@@ -440,32 +432,19 @@ class AddPurchaseWidget(QWidget):
                 AppMessageBox.warning(dialog, "Validation Error", "Rep name is required.")
                 return
 
-            query = QSqlQuery()
-            query.prepare("""
-                INSERT INTO rep (
-                    name,
-                    supplier_id,
-                    contact
+            try:
+                rep_id = create_salesrep(
+                    supplier_id=supplier_id,
+                    name=name,
+                    contact=contact,
                 )
-                VALUES (?, ?, ?)
-            """)
-            query.addBindValue(name)
-            query.addBindValue(supplier_id)
-            query.addBindValue(contact if contact else None)
-
-            if not query.exec():
+            except Exception as exc:
                 AppMessageBox.critical(
                     dialog,
                     "Database Error",
-                    f"Failed to save rep:\n{query.lastError().text()}"
+                    f"Failed to save rep:\n{exc}"
                 )
                 return
-
-            rep_id = query.lastInsertId()
-            try:
-                rep_id = int(rep_id)
-            except Exception:
-                rep_id = None
 
             AppMessageBox.information(dialog, "Success", "Rep added successfully.")
             dialog.accept()
@@ -2011,17 +1990,16 @@ class AddPurchaseWidget(QWidget):
         self.supplier_edit.blockSignals(True)
         self.supplier_edit.clear()
 
-        query = QSqlQuery()
-        if not query.exec("SELECT id, name FROM supplier WHERE status = 'active' ORDER BY name;"):
-            AppMessageBox.information(self, "Error", query.lastError().text())
+        try:
+            rows = fetch_active_supplier_option_rows()
+        except Exception as exc:
+            AppMessageBox.information(self, "Error", str(exc))
             self.supplier_edit.blockSignals(False)
             self.rep_edit.clear()
             return
 
-        while query.next():
-            supplier_id = query.value(0)
-            supplier_name = query.value(1)
-            self.supplier_edit.addItem(supplier_name, supplier_id)
+        for row in rows:
+            self.supplier_edit.addItem(row["supplier_name"], row["supplier_id"])
 
         self.supplier_edit.blockSignals(False)
 
@@ -2052,25 +2030,16 @@ class AddPurchaseWidget(QWidget):
         if supplier_id is None:
             return
 
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT id, name
-            FROM rep
-            WHERE supplier_id = ?
-            ORDER BY name;
-        """)
-        query.addBindValue(int(supplier_id))
-
-        if not query.exec():
-            AppMessageBox.information(self, "Error", query.lastError().text())
+        try:
+            rows = fetch_salesrep_option_rows_for_supplier(supplier_id)
+        except Exception as exc:
+            AppMessageBox.information(self, "Error", str(exc))
             return
 
         found = False
-        while query.next():
+        for row in rows:
             found = True
-            rep_id = query.value(0)
-            rep_name = query.value(1)
-            self.rep_edit.addItem(rep_name, rep_id)
+            self.rep_edit.addItem(row["rep_name"], row["rep_id"])
 
         if not found:
             print(f"No reps found for supplier_id = {supplier_id}")
@@ -2116,70 +2085,22 @@ class AddPurchaseWidget(QWidget):
         if not accepted:
             return
 
-        # ------------------------------------------------------------
-        # 2) Get current database connection and start transaction
-        # ------------------------------------------------------------
-        db = QSqlDatabase.database()
-
-        if not db.transaction():
-            AppMessageBox.error(self, "Database Error", "Could not start database transaction.")
-            return
-
         try:
             # --------------------------------------------------------
             # 3) Collect and validate all purchase data from the form
             # --------------------------------------------------------
             
             purchase_data = self._collect_purchase_data()
+            item_rows = self._collect_purchase_item_rows()
             price_review_rows = self.get_price_review_rows()
-
-            print("Purchase data collected successfully")
-            print("Purchase data:", purchase_data)
-
-            # --------------------------------------------------------
-            # 4) Save purchase header
-            # --------------------------------------------------------
-            #
-            # This helper should insert into the purchase table
-            # and return the new purchase_id.
-            #
-            purchase_id = self._save_purchase_header(purchase_data)
-
-            print(f"Purchase header saved successfully with ID: {purchase_id}")
-
-            # --------------------------------------------------------
-            # 5) Save purchase items and related batch records
-            # --------------------------------------------------------
-            #
-            # This helper should:
-            # - loop through table rows
-            # - validate item rows
-            # - insert purchaseitem rows
-            # - calculate unit cost
-            # - insert batch rows
-            # - raise exception if no valid items found
-            #
-            self._save_purchase_items(purchase_id)
-
-            print("Purchase items saved successfully")
-
-            # --------------------------------------------------------
-            # 6) Save supplier transaction and update supplier balance
-            # --------------------------------------------------------
-            #
-            # This helper should:
-            # - insert into supplier_transaction
-            # - update supplier payable / receivable in supplier table
-            #
-            self._save_purchase_transaction(purchase_id, purchase_data)
-
-            print("Purchase transaction saved successfully")
+            purchase_result = save_purchase_invoice(
+                purchase_data=purchase_data,
+                item_rows=item_rows,
+                payment_data=self._normalize_payment_data(self.payment_handler.payment_data.copy()),
+            )
+            purchase_id = int(purchase_result["purchase_id"])
 
         except Exception as e:
-            # --------------------------------------------------------
-            # 7) Roll back everything if any step fails
-            # --------------------------------------------------------
-            db.rollback()
             print("Transaction rolled back due to error:", str(e))
             error_text = str(e)
             if error_text == "Please enter sales invoice.":
@@ -2190,14 +2111,6 @@ class AddPurchaseWidget(QWidget):
                     "Error",
                     f"An error occurred while saving the purchase:\n{error_text}"
                 )
-            return
-
-        # ------------------------------------------------------------
-        # 8) Commit transaction if all steps succeed
-        # ------------------------------------------------------------
-        if not db.commit():
-            db.rollback()
-            AppMessageBox.error(self, "Database Error", "Could not commit the purchase transaction.")
             return
 
         print("Transaction committed successfully")
@@ -2214,6 +2127,86 @@ class AddPurchaseWidget(QWidget):
         else:
             AppMessageBox.success(self, "Success", "Purchase saved successfully.")
         self.clear_fields()
+
+    def _collect_purchase_item_rows(self):
+
+        row_count = self.table.rowCount()
+        if row_count == 0:
+            raise Exception("Purchase table is empty. Cannot save purchase without items.")
+
+        normalized_rows = []
+        distribution = self._collect_purchase_distribution_context()
+
+        for row in range(row_count):
+            product_combo = self.table.cellWidget(row, 1)
+            batch_edit = self.table.cellWidget(row, 2)
+            expiry_edit = self.table.cellWidget(row, 3)
+            qty_edit = self.table.cellWidget(row, 4)
+            bonus_edit = self.table.cellWidget(row, 5)
+            rate_edit = self.table.cellWidget(row, 6)
+            discount_edit = self.table.cellWidget(row, 7)
+            tax_edit = self.table.cellWidget(row, 8)
+            total_edit = self.table.cellWidget(row, 9)
+
+            if None in (product_combo, batch_edit, expiry_edit, qty_edit, bonus_edit, rate_edit, discount_edit, tax_edit, total_edit):
+                raise Exception(f"Missing row widgets in row {row + 1}.")
+
+            product = product_combo.currentData()
+            batch = batch_edit.text().strip()
+            expiry = expiry_edit.text().strip()
+            if expiry:
+                expiry = parse_expiry_to_db_date(expiry, reject_past=False)
+
+            qty = qty_edit.text().strip()
+            bonus = bonus_edit.text().strip()
+            rate = rate_edit.text().strip()
+            item_discount = discount_edit.text().strip()
+            item_tax = tax_edit.text().strip()
+            item_total = total_edit.text().strip()
+
+            if (
+                product is None
+                and not batch
+                and not expiry
+                and not qty
+                and not bonus
+                and not rate
+                and not item_discount
+                and not item_tax
+                and not item_total
+            ):
+                continue
+
+            if product is None:
+                raise Exception(f"Please select a product in row {row + 1}.")
+            if not qty:
+                raise Exception(f"Please enter quantity in row {row + 1}.")
+            if not rate:
+                raise Exception(f"Please enter rate in row {row + 1}.")
+
+            try:
+                normalized_row = normalize_purchase_item_row(
+                    row_number=row + 1,
+                    product_id=self._int_or_default(product, 0),
+                    batch_text=batch,
+                    expiry_text=expiry,
+                    qty_text=qty,
+                    bonus_text=bonus,
+                    rate_text=rate,
+                    discount_text=item_discount,
+                    tax_text=item_tax,
+                    total_text=item_total,
+                    distribution_factor=distribution["distribution_factor"],
+                )
+            except ValueError as exc:
+                raise Exception(str(exc))
+
+            normalized_rows.append(normalized_row)
+
+        if not normalized_rows:
+            raise Exception("No valid purchase items were found to save.")
+
+        return normalized_rows
         
         
         
@@ -2805,80 +2798,23 @@ class AddPurchaseWidget(QWidget):
             manufacturer = self._int_or_default(manufacturer, 0) if manufacturer not in (None, "") else None
             packsize = self._int_or_default(dialog.packsize_input.text(), 1)
             saleprice = self._float_or_default(dialog.saleprice_input.text(), 0.0)
-            
-            # Insert Data into Database
-            
             brand_name = self._text_or_none(item_name)
-            if brand_name is None:
-                raise Exception("Brand is required for a new product.")
-
             ensure_prescription_schema()
             ensure_product_media_schema()
-            product_query = QSqlQuery()
-            product_query.prepare("""
-                INSERT INTO product (
-                    display_name,
-                    code,
-                    reg_no,
-                    generic_name,
-                    brand,
-                    form,
-                    strength,
-                    packing,
-                    rack,
-                    manufacturer_id,
-                    prescription_required,
-                    status
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """)
-            
-            code = None
-            reg_no = None
-            generic_name = None
-            packing = None
-
-            product_query.addBindValue(display_name)
-            product_query.addBindValue(code)
-            product_query.addBindValue(reg_no)
-            product_query.addBindValue(generic_name)
-            product_query.addBindValue(brand_name)
-            product_query.addBindValue(item_form)
-            product_query.addBindValue(item_packing)
-            product_query.addBindValue(packing)
-            product_query.addBindValue("")
-            product_query.addBindValue(manufacturer)
-            product_query.addBindValue(1 if dialog.prescription_required_check.isChecked() else 0)
-            product_query.addBindValue("used")
-
-            if not product_query.exec():
-                raise Exception(product_query.lastError().text())
-
-            else:
-                
-                AppMessageBox.information(None, "Success", "Product added successfully")
-                product_id = product_query.lastInsertId()
-                print("New Product ID is: ", product_id)
-
-                if getattr(dialog, "selected_media_path", "").strip():
-                    media_info = save_product_media(dialog.selected_media_path, product_id=product_id)
-                    update_product_media_fields(product_id=product_id, media_info=media_info)
-                
-                # Create Empty Stock Record
-                price_query = QSqlQuery()
-                price_query.prepare("""
-                    INSERT INTO price_pack (product_id, pack_size, pack_price)
-                    VALUES (?, ?, ?)
-                """)
-                
-                price_query.addBindValue(product_id)
-                price_query.addBindValue(packsize)  # initial packsize
-                price_query.addBindValue(saleprice)  # initial saleprice
-
-                if not price_query.exec():
-                    print("Error inserting price_pack:", price_query.lastError().text())
-                else:
-                    print("Price pack record created successfully for new product")
+            result = create_product_with_default_price(
+                display_name=display_name,
+                brand_name=brand_name,
+                form=item_form,
+                packing_text=item_packing,
+                manufacturer_id=manufacturer,
+                pack_size=packsize,
+                sale_price=saleprice,
+                prescription_required=dialog.prescription_required_check.isChecked(),
+                selected_media_path=getattr(dialog, "selected_media_path", "").strip(),
+            )
+            AppMessageBox.information(None, "Success", "Product added successfully")
+            product_id = result["product_id"]
+            print("New Product ID is: ", product_id)
                 
 
             # clear combo box
@@ -2900,23 +2836,7 @@ class AddPurchaseWidget(QWidget):
 
 
     def get_previous_price(self, product_id):
-        query = QSqlQuery()
-        query.prepare("""
-            SELECT COALESCE(pack_price, 0)
-            FROM price_pack
-            WHERE product_id = ?
-            ORDER BY is_default DESC, id ASC
-            LIMIT 1
-        """)
-        query.addBindValue(product_id)
-
-        if not query.exec():
-            raise Exception(f"Failed to fetch previous price: {query.lastError().text()}")
-
-        if query.next():
-            return query.value(0) or 0
-
-        return 0
+        return fetch_previous_pack_price(product_id)
 
 
     def get_price_review_rows(self):
@@ -3070,18 +2990,13 @@ class AddPurchaseWidget(QWidget):
 
 
     def save_price_review_changes(self, dialog, table, purchase_id):
-        db = QSqlDatabase.database()
         ensure_scheduled_price_schema()
 
-        if not db.transaction():
-            AppMessageBox.critical(self, "Database Error", "Could not start price update transaction.")
-            return
-
         try:
-            updated_rows = 0
             app = QApplication.instance()
             change_user_id = app.property("user_id") if app else None
             change_username = (app.property("username") or "") if app else ""
+            pending_rows = []
 
             for row in range(table.rowCount()):
                 product_id_item = table.item(row, 0)
@@ -3117,44 +3032,42 @@ class AddPurchaseWidget(QWidget):
                 if effective_date < QDate.currentDate():
                     raise Exception(f"Effective date cannot be in the past in row {row + 1}.")
 
-                save_scheduled_price_change(
-                    product_id=product_id,
-                    purchase_id=purchase_id,
-                    previous_price=previous_price,
-                    new_price=new_price,
-                    effective_date=effective_date.toString("yyyy-MM-dd"),
-                    created_by=change_user_id,
-                    created_by_username=change_username,
-                    notes="Scheduled from purchase price review.",
+                pending_rows.append(
+                    {
+                        "product_id": product_id,
+                        "product_name": product_name,
+                        "previous_price": previous_price,
+                        "new_price": new_price,
+                        "effective_date": effective_date.toString("yyyy-MM-dd"),
+                    }
                 )
 
+            updated_rows = save_scheduled_price_changes(
+                pending_rows,
+                purchase_id=purchase_id,
+                created_by=change_user_id,
+                created_by_username=change_username,
+            )
+
+            for row_data in pending_rows:
                 log_activity(
                     category="price",
                     action="price_change_scheduled",
                     entity_type="product",
-                    entity_id=product_id,
+                    entity_id=row_data["product_id"],
                     note=(
-                        f"Selling price scheduled for {product_name} (Product ID {product_id}). "
-                        f"Pack price will change from {previous_price} to {new_price} on "
-                        f"{effective_date.toString('yyyy-MM-dd')}."
+                        f"Selling price scheduled for {row_data['product_name']} (Product ID {row_data['product_id']}). "
+                        f"Pack price will change from {row_data['previous_price']} to {row_data['new_price']} on "
+                        f"{row_data['effective_date']}."
                     ),
-                    previous_value=str(previous_price),
-                    new_value=str(new_price)
+                    previous_value=str(row_data["previous_price"]),
+                    new_value=str(row_data["new_price"])
                 )
-
-                updated_rows += 1
-
-            if updated_rows == 0:
-                raise Exception("Enter at least one new price before saving changes.")
-
-            if not db.commit():
-                raise Exception("Could not commit price changes.")
 
             dialog.scheduled_count = updated_rows
             dialog.accept()
 
         except Exception as e:
-            db.rollback()
             AppMessageBox.critical(self, "Error", str(e))
              
 
@@ -3568,18 +3481,14 @@ class ImportDialog(QDialog):
     def populate_manufacturer_combobox(self, combo: QComboBox):
         
         combo.clear()
+        try:
+            rows = fetch_manufacturer_options(active_only=True)
+        except Exception as exc:
+            print("Failed to load manufacturers:", exc)
+            rows = []
 
-        query = QSqlQuery("""
-            SELECT id, name
-            FROM manufacturer
-            WHERE status = 'active'
-            ORDER BY name
-        """)
-
-        while query.next():
-            manufacturer_id = query.value(0)
-            manufacturer_name = query.value(1)
-            combo.addItem(manufacturer_name, manufacturer_id)
+        for row in rows:
+            combo.addItem(row["name"], row["id"])
     
         
          
@@ -3615,19 +3524,11 @@ class ImportDialog(QDialog):
                 combo.setCurrentIndex(i)
                 return
 
-        # insert new manufacturer
-        query = QSqlQuery()
-        query.prepare("""
-            INSERT INTO manufacturer (name)
-            VALUES (?)
-        """)
-        query.addBindValue(name)
-
-        if not query.exec():
-            print("Failed to insert manufacturer:", query.lastError().text())
+        try:
+            new_id = ensure_manufacturer(name)
+        except Exception as exc:
+            print("Failed to insert manufacturer:", exc)
             return
-
-        new_id = query.lastInsertId()
 
         # add directly instead of reloading everything
         combo.addItem(name, new_id)

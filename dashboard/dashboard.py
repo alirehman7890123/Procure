@@ -6,24 +6,14 @@ from PySide6.QtSql import QSqlDatabase
 from PySide6.QtCore import QDate
 from functools import partial
 
-try:
-    from medic.utilities.database import SQLiteConnectionManager
-    from medic.utilities.activity_logger import log_activity
-    from medic.utilities.permissions import Permissions
-    from medic.utilities.session_service import SessionErrorCode, check_active_session
-    from medic.services.financial_closing_service import get_month_close_prompt_state
-    from medic.services import daily_session_service
-    from medic.reports.report_service import ReportService
-    from medic.utilities.app_messagebox import AppMessageBox
-except ModuleNotFoundError:
-    from utilities.database import SQLiteConnectionManager
-    from utilities.activity_logger import log_activity
-    from utilities.permissions import Permissions
-    from utilities.session_service import SessionErrorCode, check_active_session
-    from services.financial_closing_service import get_month_close_prompt_state
-    from services import daily_session_service
-    from reports.report_service import ReportService
-    from utilities.app_messagebox import AppMessageBox
+from medic.utilities.database import SQLiteConnectionManager
+from medic.utilities.activity_logger import log_activity
+from medic.utilities.permissions import Permissions
+from medic.utilities.session_service import SessionErrorCode, check_active_session
+from medic.services.financial_closing_service import get_month_close_prompt_state
+from medic.services import daily_session_service
+from medic.reports.report_service import ReportService
+from medic.utilities.app_messagebox import AppMessageBox
 
 import pyqtgraph as pg
 
@@ -63,10 +53,7 @@ sys.modules.setdefault("dashboard.dashboard", sys.modules[__name__])
 
 
 def _get_daily_session_class():
-    try:
-        from medic.features.finance.ui.daily_session import DailySession
-    except ModuleNotFoundError:
-        from features.finance.ui.daily_session import DailySession
+    from medic.features.finance.ui.daily_session import DailySession
     return DailySession
 
 

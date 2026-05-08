@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import importlib
-
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
+from medic.services.accounting_settings_service import load_theme_settings
 
 DEFAULT_THEME = {
     "theme_primary_color": "#163B5C",
@@ -33,12 +32,7 @@ def tint(color_value, factor):
 
 
 def get_theme_settings():
-    try:
-        service_module = importlib.import_module("medic.services.accounting_settings_service")
-    except ModuleNotFoundError:
-        service_module = importlib.import_module("services.accounting_settings_service")
-    load_theme_settings_from_service = service_module.load_theme_settings
-    settings = load_theme_settings_from_service()
+    settings = load_theme_settings()
     return {
         "theme_primary_color": normalize_hex(settings["theme_primary_color"], DEFAULT_THEME["theme_primary_color"]),
         "theme_sidebar_color": normalize_hex(settings["theme_sidebar_color"], DEFAULT_THEME["theme_sidebar_color"]),

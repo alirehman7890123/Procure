@@ -3,7 +3,7 @@ def _new_query():
 
     return QSqlQuery()
 
-
+from medic.services.db_transaction_service import run_in_transaction
 from medic.services.inventory_movement_service import (
     decrement_batch_quantity_by_number as decrement_batch_quantity_by_number_from_inventory,
     fetch_batch_remaining as fetch_batch_remaining_from_inventory,
@@ -133,3 +133,46 @@ def insert_purchase_return_item(return_id, row_payload):
 
 def decrement_batch_quantity_for_purchase_return(batch_no, product_id, qty):
     return decrement_batch_quantity_by_number_from_inventory(batch_no, product_id, qty)
+
+
+def save_purchase_return_entry(*, header_payload, transaction_payload, supplier_id, item_rows):
+    normalized_rows = [row for row in list(item_rows or []) if row is not None]
+    if not normalized_rows:
+        raise ValueError("No purchase return items were posted.")
+
+    def _work():
+        return_id = insert_purchase_return_header(header_payload)
+        if not return_id:
+            raise Exception("Failed to retrieve inserted return ID.")
+
+        normalized_transaction_payload = dict(transaction_payload or {})
+        normalized_transaction_payload["ref"] = int(return_id)
+        normalized_transaction_payload["return_ref"] = int(return_id)
+
+        insert_supplier_return_transaction(normalized_transaction_payload)
+        update_supplier_return_balances(
+            supplier_id,
+            payable_after=normalized_transaction_payload["payable_after"],
+            receiveable_after=normalized_transaction_payload["receiveable_after"],
+        )
+
+        processed_rows = 0
+        for row in normalized_rows:
+            insert_purchase_return_item(return_id, row)
+            decrement_batch_quantity_for_purchase_return(
+                row["batch"],
+                row["product"],
+                row["returned"],
+            )
+            processed_rows += 1
+
+        if processed_rows <= 0:
+            raise ValueError("No purchase return items were posted.")
+
+        return int(return_id)
+
+    return run_in_transaction(
+        _work,
+        start_error_message="Could not start purchase return transaction.",
+        commit_error_message="Could not commit purchase return transaction.",
+    )

@@ -5,7 +5,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtCore import QFile, Qt, QEvent
-from PySide6.QtSql import QSqlDatabase
 from PySide6.QtGui import QFocusEvent
 import traceback
 
@@ -15,7 +14,7 @@ from medic.utilities.permissions import Permissions
 
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
-from medic.services.supplier_service import create_supplier, validate_supplier_payload
+from medic.services.supplier_service import save_supplier_record, validate_supplier_payload
 
 
 
@@ -184,9 +183,6 @@ class AddSupplierWidget(BasePage):
     def save_supplier(self):
 
         print("[ACTION] Save Supplier button clicked.")
-
-        db = QSqlDatabase.database()
-        db.transaction()
         
         try:
             validate_supplier_payload(
@@ -199,7 +195,7 @@ class AddSupplierWidget(BasePage):
                 payable=self.editpayable.text(),
                 receiveable=self.editreceiveable.text(),
             )
-            supplier_id = create_supplier(
+            supplier_id = save_supplier_record(
                 name=self.editname.text(),
                 contact=self.editcontact.text(),
                 email=self.editemail.text(),
@@ -210,13 +206,11 @@ class AddSupplierWidget(BasePage):
                 receiveable=self.editreceiveable.text(),
             )
         except ValueError as e:
-            db.rollback()
             AppMessageBox.warning(self, "Validation Error", str(e))
             return
 
         
         except Exception as e:
-            db.rollback()
             print(f"[ERROR] Exception occurred while saving supplier and related info.\n"
                 f"Exception Type: {type(e).__name__}\n"
                 f"Message: {e}\n"
@@ -226,9 +220,7 @@ class AddSupplierWidget(BasePage):
 
         else:
             if not supplier_id:
-                db.rollback()
                 return
-            db.commit()
             print("[DB] Transaction committed successfully.")
             self.clear_fields()
             AppMessageBox.success(self, "Success", "Supplier saved successfully.")

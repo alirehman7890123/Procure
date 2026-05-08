@@ -1,5 +1,7 @@
 import re
 
+from medic.services.db_transaction_service import run_in_transaction
+
 
 def _new_query():
     from PySide6.QtSql import QSqlQuery
@@ -711,3 +713,21 @@ def insert_purchase_order_line(po_id, row_payload):
         raise Exception(f"Failed to save purchase order line: {query.lastError().text()}")
 
     return query.lastInsertId()
+
+
+def save_purchase_order(header_payload, row_payloads):
+    normalized_rows = list(row_payloads or [])
+    if not normalized_rows:
+        raise ValueError("Please add at least one line item.")
+
+    def _work():
+        po_id = insert_purchase_order_header(header_payload)
+        for row_payload in normalized_rows:
+            insert_purchase_order_line(po_id, row_payload)
+        return po_id
+
+    return run_in_transaction(
+        _work,
+        start_error_message="Could not start purchase order transaction.",
+        commit_error_message="Failed to commit purchase order.",
+    )

@@ -6,7 +6,6 @@ from PySide6.QtWidgets import (
     QGroupBox
 )
 from PySide6.QtCore import Qt, QDate, Signal
-from PySide6.QtSql import QSqlDatabase
 
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.permissions import Permissions
@@ -17,8 +16,7 @@ from medic.utilities.payment_handler import PaymentMethodHandler
 from medic.services.payroll_service import (
     get_all_active_employees, get_pending_advances,
     get_attendance_summary, payroll_exists,
-    insert_payroll, apply_advance_recovery,
-    resolve_payroll_auth_user_id, update_employee_advance_balance
+    resolve_payroll_auth_user_id, save_payroll_entry
 )
 from medic.services.payroll_posting_service import (
     get_working_days, build_payroll_payload
@@ -382,12 +380,8 @@ class AddPayrollWidget(QWidget):
         paid_by    = self._get_user_id()
         paid_on    = QDate.currentDate().toString("yyyy-MM-dd")
 
-        db = QSqlDatabase.database()
-        if not db.transaction():
-            AppMessageBox.critical(self, "Error", "Could not start transaction.")
-            return
         try:
-            ok, result = insert_payroll(
+            save_payroll_entry(
                 employee_id=emp["id"],
                 month=year_month,
                 basic_salary=payload["basic_salary"],
@@ -400,29 +394,8 @@ class AddPayrollWidget(QWidget):
                 paid_on=paid_on,
                 session_id=session_id,
                 paid_by=paid_by,
+                pending_advances=self._pending_advances,
             )
-            if not ok:
-                raise Exception(result)
-
-            # Recover advance against oldest pending advances
-            remaining_recovery = adv_deduct
-            for adv in self._pending_advances:
-                if remaining_recovery <= 0:
-                    break
-                outstanding = adv["amount"] - adv["recovered"]
-                this_recovery = min(remaining_recovery, outstanding)
-                if this_recovery > 0:
-                    if not apply_advance_recovery(adv["id"], this_recovery):
-                        raise Exception("Failed to update advance recovery record.")
-                    remaining_recovery -= this_recovery
-
-            # Deduct from employee advance_balance
-            if adv_deduct > 0:
-                if not update_employee_advance_balance(None, emp["id"], -adv_deduct):
-                    raise Exception("Failed to update employee advance balance.")
-
-            if not db.commit():
-                raise Exception("Commit failed.")
 
             AppMessageBox.information(
                 self, "Success",
@@ -432,7 +405,6 @@ class AddPayrollWidget(QWidget):
             self._load_employees()
 
         except Exception as exc:
-            db.rollback()
             AppMessageBox.critical(self, "Error", str(exc))
 
     # ------------------------------------------------------------------

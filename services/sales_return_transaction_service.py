@@ -3,7 +3,7 @@ def _new_query():
 
     return QSqlQuery()
 
-
+from medic.services.db_transaction_service import run_in_transaction
 from medic.services.inventory_movement_service import (
     fetch_sold_batch_rows_for_return as fetch_sold_batch_rows_for_return_from_inventory,
     increment_sold_batch_returned as increment_sold_batch_returned_in_inventory,
@@ -154,3 +154,69 @@ def restore_batch_quantity(batch_id, qty):
 
 def increment_sold_batch_returned(sold_batch_id, qty):
     return increment_sold_batch_returned_in_inventory(sold_batch_id, qty)
+
+
+def apply_sales_return_inventory_reversal(sales_item_id: int, return_qty: int):
+    try:
+        sales_item_id = int(sales_item_id)
+        return_qty = int(return_qty)
+        if return_qty <= 0:
+            raise Exception("Return quantity must be greater than zero")
+
+        qty_sold = fetch_sales_item_qty_sold(sales_item_id)
+        already_returned = fetch_already_returned_qty(sales_item_id)
+        if already_returned + return_qty > qty_sold:
+            raise Exception("Return quantity exceeds sold quantity")
+
+        batch_rows = fetch_sold_batch_rows_for_return(sales_item_id)
+        plan = compute_sales_return_inventory_plan(
+            qty_sold=qty_sold,
+            already_returned=already_returned,
+            return_qty=return_qty,
+            sold_batch_rows=batch_rows,
+        )
+
+        for allocation in plan["allocations"]:
+            restore_batch_quantity(allocation["batch_id"], allocation["qty_to_restore"])
+            increment_sold_batch_returned(allocation["sold_batch_id"], allocation["qty_to_restore"])
+    except Exception as exc:
+        raise Exception(f"Sales return inventory reversal failed: {exc}")
+
+
+def save_sales_return_entry(*, header_payload, transaction_payload, customer_id, item_rows):
+    normalized_rows = [row for row in list(item_rows or []) if row is not None]
+    if not normalized_rows:
+        raise ValueError("Enter at least one returned item before saving the sales return.")
+
+    def _work():
+        return_id = insert_sales_return_header(header_payload)
+
+        normalized_transaction_payload = dict(transaction_payload or {})
+        normalized_transaction_payload["ref"] = int(return_id)
+        normalized_transaction_payload["return_ref"] = int(return_id)
+        normalized_transaction_payload["note"] = (
+            f"Sales Return ID {return_id} recorded with total "
+            f"{float(header_payload.get('total') or 0.0)}, "
+            f"paid {normalized_transaction_payload.get('paid', 0.0)}, "
+            f"remaining {float(header_payload.get('remaining') or 0.0)}"
+        )
+
+        insert_customer_return_transaction(normalized_transaction_payload)
+        if customer_id is not None:
+            update_customer_return_balances(
+                customer_id,
+                payable_after=normalized_transaction_payload["payable_after"],
+                receiveable_after=normalized_transaction_payload["receiveable_after"],
+            )
+
+        for row in normalized_rows:
+            apply_sales_return_inventory_reversal(row["salesitem_id"], row["returned"])
+            insert_sales_return_item(return_id, row)
+
+        return int(return_id)
+
+    return run_in_transaction(
+        _work,
+        start_error_message="Could not start sales return transaction.",
+        commit_error_message="Could not commit sales return transaction.",
+    )

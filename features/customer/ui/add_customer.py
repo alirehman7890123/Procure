@@ -1,16 +1,15 @@
 from PySide6.QtWidgets import QWidget, QPushButton, QVBoxLayout, QLineEdit, QLabel, QFrame, QSizePolicy, QMessageBox, QHBoxLayout, QComboBox, QDialog
 from PySide6.QtCore import QSize, Qt, QFile, QEvent
-from PySide6.QtSql import QSqlDatabase
 import traceback
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.services.customer_service import (
-    create_customer,
     create_discount_group,
     create_tax_group,
     fetch_discount_group_options,
     fetch_tax_group_options,
+    save_customer_record,
     validate_customer_payload,
 )
 
@@ -288,10 +287,7 @@ class AddCustomerWidget(QWidget):
     def save_customer(self):
         
         print("[ACTION] Save Customer button clicked.")
-        
-        db = QSqlDatabase.database()
-        db.transaction()
-        
+
         try:
             validate_customer_payload(
                 name=self.editname.text(),
@@ -301,7 +297,7 @@ class AddCustomerWidget(QWidget):
                 receiveable=self.editreceiveable.text(),
                 credit_limit=self.editcreditlimit.text(),
             )
-            customer_id = create_customer(
+            customer_id = save_customer_record(
                 name=self.editname.text(),
                 contact=self.editcontact.text(),
                 email=self.editemail.text(),
@@ -312,12 +308,10 @@ class AddCustomerWidget(QWidget):
                 tax_group_id=self.tax_group_combo.currentData(),
             )
         except ValueError as e:
-            db.rollback()
             AppMessageBox.warning(self, "Validation Error", str(e))
             return
         
         except Exception as e:
-            db.rollback()
             print(f"[ERROR] Exception occurred while saving customer and related info.\n"
                 f"Exception Type: {type(e).__name__}\n"
                 f"Message: {e}\n"
@@ -327,9 +321,7 @@ class AddCustomerWidget(QWidget):
 
         else:
             if not customer_id:
-                db.rollback()
                 return
-            db.commit()
             print("[DB] Transaction committed successfully.")
             self.clear_fields()
             AppMessageBox.success(self, "Success", "Customer saved successfully.")

@@ -1,4 +1,5 @@
 from PySide6.QtSql import QSqlQuery
+from medic.services.db_transaction_service import run_in_transaction
 
 
 def _new_query():
@@ -186,6 +187,36 @@ def create_customer(
         raise Exception(query.lastError().text())
 
     return int(query.lastInsertId())
+
+
+def save_customer_record(
+    *,
+    name,
+    contact="",
+    email="",
+    payable=0.0,
+    receiveable=0.0,
+    credit_limit=0.0,
+    discount_group_id=None,
+    tax_group_id=None,
+):
+    def _work():
+        return create_customer(
+            name=name,
+            contact=contact,
+            email=email,
+            payable=payable,
+            receiveable=receiveable,
+            credit_limit=credit_limit,
+            discount_group_id=discount_group_id,
+            tax_group_id=tax_group_id,
+        )
+
+    return run_in_transaction(
+        _work,
+        start_error_message="Could not start customer save transaction.",
+        commit_error_message="Could not commit customer save transaction.",
+    )
 
 
 def update_customer(

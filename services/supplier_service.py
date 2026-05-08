@@ -1,4 +1,5 @@
 from PySide6.QtSql import QSqlQuery
+from medic.services.db_transaction_service import run_in_transaction
 
 
 def _new_query():
@@ -98,6 +99,36 @@ def create_supplier(
         raise Exception(query.lastError().text())
 
     return int(query.lastInsertId())
+
+
+def save_supplier_record(
+    *,
+    name,
+    contact="",
+    email="",
+    website="",
+    address="",
+    registeration="",
+    payable=0.0,
+    receiveable=0.0,
+):
+    def _work():
+        return create_supplier(
+            name=name,
+            contact=contact,
+            email=email,
+            website=website,
+            address=address,
+            registeration=registeration,
+            payable=payable,
+            receiveable=receiveable,
+        )
+
+    return run_in_transaction(
+        _work,
+        start_error_message="Could not start supplier save transaction.",
+        commit_error_message="Could not commit supplier save transaction.",
+    )
 
 
 def update_supplier(
@@ -218,6 +249,31 @@ def fetch_supplier_list_rows():
                 "email": str(query.value(3) or ""),
                 "website": str(query.value(4) or ""),
                 "status": str(query.value(5) or ""),
+            }
+        )
+    return rows
+
+
+def fetch_active_supplier_option_rows():
+    query = _new_query()
+    query.prepare(
+        """
+        SELECT id, COALESCE(name, '')
+        FROM supplier
+        WHERE status = 'active'
+        ORDER BY name ASC
+        """
+    )
+
+    if not query.exec():
+        raise Exception(f"Failed to load active suppliers: {query.lastError().text()}")
+
+    rows = []
+    while query.next():
+        rows.append(
+            {
+                "supplier_id": int(query.value(0) or 0),
+                "supplier_name": str(query.value(1) or "").strip(),
             }
         )
     return rows

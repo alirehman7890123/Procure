@@ -4,7 +4,6 @@ from PySide6.QtWidgets import (
     QHeaderView, QGridLayout, QCheckBox, QSizePolicy, QDialog
 )
 from PySide6.QtCore import Qt, Signal, QDate, QTimer
-from PySide6.QtSql import QSqlDatabase
 import re
 from PySide6.QtWidgets import QApplication
 
@@ -49,6 +48,7 @@ from medic.services.grn_draft_service import (
     load_latest_grn_draft,
     save_grn_draft,
 )
+from medic.services.grn_workflow_service import save_grn_entry
 
 
 class MyTable(QTableWidget):
@@ -1251,7 +1251,7 @@ class CreateGRNWidget(QWidget):
             "total_value": self._read_money(self.total_with_fees_label),
         }
 
-    def _collect_receipt_rows(self, grn_id):
+    def _collect_receipt_rows(self):
         line_count = 0
         receipt_rows = []
 
@@ -1281,7 +1281,6 @@ class CreateGRNWidget(QWidget):
             if line_payload is None:
                 continue
 
-            insert_goods_receipt_line(grn_id, line_payload)
             line_count += 1
             receipt_rows.append(dict(line_payload))
 
@@ -1555,11 +1554,6 @@ class CreateGRNWidget(QWidget):
         if not accepted:
             return
 
-        db = QSqlDatabase.database()
-        if not db.transaction():
-            AppMessageBox.error(self, "Error", "Could not start transaction.")
-            return
-
         try:
             session_id = get_active_session_id(strict=True)
             supplier_id = self.get_po_supplier(int(po_id))
@@ -1581,8 +1575,7 @@ class CreateGRNWidget(QWidget):
                 session_id=session_id,
                 notes=(self.notes_edit.text() or "").strip(),
             )
-            grn_id = insert_goods_receipt_header(grn_payload)
-            line_count, receipt_rows = self._collect_receipt_rows(grn_id)
+            line_count, receipt_rows = self._collect_receipt_rows()
 
             if line_count == 0:
                 raise Exception("At least one line must have received quantity > 0.")
@@ -1598,23 +1591,17 @@ class CreateGRNWidget(QWidget):
                 cn_adjustment=header_values["cn_adjustment"],
                 total=header_values["total_value"],
             )
-            purchase_bill_id = self.create_bill_from_grn(
-                po_id=int(po_id),
-                grn_number=grn_number,
+            workflow_result = save_grn_entry(
+                grn_payload=grn_payload,
                 receipt_rows=receipt_rows,
-                totals=totals_payload,
+                totals_payload=totals_payload,
                 billing_data=billing_data,
                 payment_data=payment_data,
             )
-
-            stock_batch_count = self.create_stock_batches_from_receipts(receipt_rows, grn_number)
-            if stock_batch_count <= 0:
-                raise Exception("Stock posting failed: no batch rows were created.")
-
-            po_status = self.update_po_status_from_receipts(int(po_id))
-
-            if not db.commit():
-                raise Exception("Could not commit GRN transaction.")
+            grn_id = int(workflow_result["grn_id"])
+            purchase_bill_id = int(workflow_result["purchase_bill_id"])
+            stock_batch_count = int(workflow_result["stock_batch_count"])
+            po_status = workflow_result["po_status"]
 
             self._discard_current_grn_draft()
 
@@ -1644,5 +1631,4 @@ class CreateGRNWidget(QWidget):
             self.grn_list_signal.emit()
 
         except Exception as exc:
-            db.rollback()
             AppMessageBox.error(self, "Save Failed", str(exc))

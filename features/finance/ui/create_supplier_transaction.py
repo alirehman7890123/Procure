@@ -1,6 +1,5 @@
 from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QLabel, QLineEdit, QComboBox, QVBoxLayout, QFrame
 from PySide6.QtCore import Qt
-from PySide6.QtSql import QSqlDatabase
 from PySide6.QtGui import QKeySequence, QShortcut
 
 from medic.utilities.stylus import load_stylesheets
@@ -173,17 +172,9 @@ class CreateSupplierTransactionWidget(QWidget):
         if not require_open_session(self):
             return
 
-        db = QSqlDatabase.database()
-        if not db.transaction():
-            AppMessageBox.critical(self, "Error", "Could not start database transaction.")
-            return
-
         try:
             data = self._collect_supplier_payment_data()
             save_supplier_transaction_payload(data)
-
-            if not db.commit():
-                raise Exception("Could not commit supplier transaction.")
 
             AppMessageBox.information(self, "Success", "Transaction Saved Successfully.")
             self.load_data(self.supp_id)
@@ -191,7 +182,6 @@ class CreateSupplierTransactionWidget(QWidget):
             self.received.setText("0")
             self.note.clear()
         except Exception as exc:
-            db.rollback()
             AppMessageBox.critical(self, "Error", str(exc))
 
     def _collect_supplier_payment_data(self):

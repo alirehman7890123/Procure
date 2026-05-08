@@ -1,3 +1,0 @@
-# make hello world application
-
-

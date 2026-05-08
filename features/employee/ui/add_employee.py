@@ -1,7 +1,5 @@
 from PySide6.QtWidgets import QWidget, QPushButton,QMessageBox, QVBoxLayout, QHBoxLayout, QFrame, QLabel,QComboBox, QSpacerItem, QSizePolicy, QLineEdit
 from PySide6.QtCore import QFile, Qt, QEvent
-from PySide6.QtSql import QSqlDatabase
-
 from medic.utilities.permissions import Permissions
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.app_messagebox import AppMessageBox
@@ -171,7 +169,6 @@ class AddEmployeeWidget(QWidget):
         
         
         
-
 
 
 

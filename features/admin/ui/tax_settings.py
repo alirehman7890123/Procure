@@ -1,5 +1,4 @@
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtSql import QSqlQuery
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -22,6 +21,12 @@ from medic.utilities.stylus import load_stylesheets
 from medic.services.accounting_settings_service import (
     load_sales_tax_settings as load_sales_tax_settings_from_service,
     save_sales_tax_settings as save_sales_tax_settings_to_service,
+)
+from medic.services.group_settings_service import (
+    fetch_active_sales_groups,
+    fetch_sales_group_detail,
+    fetch_sales_groups,
+    save_sales_group,
 )
 
 
@@ -243,25 +248,18 @@ class TaxSettingsWidget(QWidget):
         self.global_tax_combo.blockSignals(True)
         self.global_tax_combo.clear()
         self.global_tax_combo.addItem("None", None)
-        query = QSqlQuery()
-        if query.exec(
-            """
-            SELECT id, name, COALESCE(tax_percent, 0), COALESCE(fixed_amount, 0), COALESCE(apply_on_sale, 1)
-            FROM tax_group
-            WHERE COALESCE(status, 'active') = 'active'
-            ORDER BY name ASC
-            """
-        ):
-            while query.next():
-                group_id = query.value(0)
-                name = str(query.value(1) or "").strip()
-                percent = float(query.value(2) or 0.0)
-                fixed_amount = float(query.value(3) or 0.0)
-                apply_on_sale = bool(int(query.value(4) or 0))
-                self.global_tax_combo.addItem(
-                    f"{name} ({percent:.2f}% + {fixed_amount:.2f}, {'Sale On' if apply_on_sale else 'Sale Off'})",
-                    group_id,
-                )
+        try:
+            groups = fetch_active_sales_groups("tax")
+        except Exception as exc:
+            AppMessageBox.error(self, "Load Failed", str(exc))
+            self.global_tax_combo.blockSignals(False)
+            return
+
+        for group in groups:
+            self.global_tax_combo.addItem(
+                f"{group['name']} ({group['percent']:.2f}% + {group['fixed_amount']:.2f}, {'Sale On' if group['apply_on_sale'] else 'Sale Off'})",
+                group["id"],
+            )
         index = self.global_tax_combo.findData(selected_id)
         self.global_tax_combo.setCurrentIndex(index if index >= 0 else 0)
         self.global_tax_combo.blockSignals(False)
@@ -300,40 +298,26 @@ class TaxSettingsWidget(QWidget):
     def load_tax_groups(self):
         self.load_sales_tax_policy()
         self.load_global_sales_tax()
-        query = QSqlQuery()
-        if not query.exec(
-            """
-            SELECT id, name, COALESCE(tax_percent, 0), COALESCE(fixed_amount, 0), COALESCE(apply_on_sale, 1), COALESCE(status, 'active')
-            FROM tax_group
-            ORDER BY
-                CASE WHEN COALESCE(status, 'active') = 'active' THEN 0 ELSE 1 END,
-                name ASC
-            """
-        ):
-            AppMessageBox.error(self, "Load Failed", query.lastError().text())
+        try:
+            groups = fetch_sales_groups("tax")
+        except Exception as exc:
+            AppMessageBox.error(self, "Load Failed", str(exc))
             return
 
         self.table.setRowCount(0)
-        while query.next():
+        for group in groups:
             row = self.table.rowCount()
             self.table.insertRow(row)
 
-            group_id = int(query.value(0))
-            name = str(query.value(1) or "").strip()
-            tax_percent = float(query.value(2) or 0.0)
-            fixed_amount = float(query.value(3) or 0.0)
-            apply_on_sale = int(query.value(4) or 0)
-            status = str(query.value(5) or "active").strip()
-
             items = [
-                QTableWidgetItem(name),
-                QTableWidgetItem(f"{tax_percent:.2f}"),
-                QTableWidgetItem(f"{fixed_amount:.2f}"),
-                QTableWidgetItem("Yes" if apply_on_sale else "No"),
-                QTableWidgetItem(status.title()),
+                QTableWidgetItem(group["name"]),
+                QTableWidgetItem(f"{group['percent']:.2f}"),
+                QTableWidgetItem(f"{group['fixed_amount']:.2f}"),
+                QTableWidgetItem("Yes" if group["apply_on_sale"] else "No"),
+                QTableWidgetItem(group["status"].title()),
             ]
             for col, item in enumerate(items):
-                item.setData(Qt.UserRole, group_id)
+                item.setData(Qt.UserRole, group["id"])
                 if col in (1, 2):
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 elif col in (3, 4):
@@ -353,24 +337,20 @@ class TaxSettingsWidget(QWidget):
             return
 
         group_id = group_id_item.data(Qt.UserRole)
-        query = QSqlQuery()
-        query.prepare(
-            """
-            SELECT name, COALESCE(tax_percent, 0), COALESCE(fixed_amount, 0), COALESCE(apply_on_sale, 1), COALESCE(status, 'active')
-            FROM tax_group
-            WHERE id = ?
-            """
-        )
-        query.addBindValue(group_id)
-        if not query.exec() or not query.next():
+        try:
+            group = fetch_sales_group_detail("tax", group_id)
+        except Exception as exc:
+            AppMessageBox.error(self, "Load Failed", str(exc))
+            return
+        if not group:
             return
 
         self.current_tax_group_id = int(group_id)
-        self.name_edit.setText(str(query.value(0) or "").strip())
-        self.percent_edit.setText(f"{float(query.value(1) or 0.0):.2f}")
-        self.amount_edit.setText(f"{float(query.value(2) or 0.0):.2f}")
-        self.apply_on_sale_check.setChecked(bool(int(query.value(3) or 0)))
-        status_index = self.status_combo.findData(str(query.value(4) or "active").strip())
+        self.name_edit.setText(group["name"])
+        self.percent_edit.setText(f"{group['percent']:.2f}")
+        self.amount_edit.setText(f"{group['fixed_amount']:.2f}")
+        self.apply_on_sale_check.setChecked(group["apply_on_sale"])
+        status_index = self.status_combo.findData(group["status"])
         self.status_combo.setCurrentIndex(status_index if status_index >= 0 else 0)
         self.form_status.setText("Editing selected tax group.")
         self.save_btn.setText("Update Tax Group")
@@ -383,42 +363,22 @@ class TaxSettingsWidget(QWidget):
             self.name_edit.setFocus()
             return
 
+        status = self.status_combo.currentData()
         try:
-            tax_percent = self._read_money(self.percent_edit.text(), "Tax percent")
-            fixed_amount = self._read_money(self.amount_edit.text(), "Fixed amount")
+            save_sales_group(
+                group_kind="tax",
+                name=name,
+                percent_text=self.percent_edit.text(),
+                fixed_amount_text=self.amount_edit.text(),
+                apply_on_sale=self.apply_on_sale_check.isChecked(),
+                status=status,
+                group_id=self.current_tax_group_id,
+            )
         except ValueError as exc:
             AppMessageBox.warning(self, "Validation Error", str(exc))
             return
-
-        status = self.status_combo.currentData()
-        apply_on_sale = 1 if self.apply_on_sale_check.isChecked() else 0
-        query = QSqlQuery()
-        if self.current_tax_group_id is None:
-            query.prepare(
-                """
-                INSERT INTO tax_group (name, tax_percent, fixed_amount, apply_on_sale, status)
-                VALUES (?, ?, ?, ?, ?)
-                """
-            )
-        else:
-            query.prepare(
-                """
-                UPDATE tax_group
-                SET name = ?, tax_percent = ?, fixed_amount = ?, apply_on_sale = ?, status = ?
-                WHERE id = ?
-                """
-            )
-
-        query.addBindValue(name)
-        query.addBindValue(tax_percent)
-        query.addBindValue(fixed_amount)
-        query.addBindValue(apply_on_sale)
-        query.addBindValue(status)
-        if self.current_tax_group_id is not None:
-            query.addBindValue(self.current_tax_group_id)
-
-        if not query.exec():
-            AppMessageBox.error(self, "Save Failed", query.lastError().text())
+        except Exception as exc:
+            AppMessageBox.error(self, "Save Failed", str(exc))
             return
 
         if not self.save_sales_tax_settings(show_feedback=False):

@@ -1,5 +1,6 @@
-from PySide6.QtSql import QSqlDatabase, QSqlQuery
+from PySide6.QtSql import QSqlQuery
 
+from medic.services.db_transaction_service import run_in_transaction
 from medic.utilities.session_service import get_active_session_id
 
 
@@ -579,89 +580,105 @@ def prepare_supplier_transaction_payload(
 
 
 def save_customer_transaction_payload(data):
-    query = _new_query()
-    query.prepare(
-        """
-        INSERT INTO customer_transaction
-        (
-            customer, transaction_type, ref, return_ref,
-            payable_before, due_amount, paid, remaining_due, payable_after,
-            receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
-            payment_method, bank_name, account_no, transaction_mode,
-            wallet_provider, wallet_no, payment_reference,
-            salesman, note, session_id
+    def _work():
+        query = _new_query()
+        query.prepare(
+            """
+            INSERT INTO customer_transaction
+            (
+                customer, transaction_type, ref, return_ref,
+                payable_before, due_amount, paid, remaining_due, payable_after,
+                receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
+                payment_method, bank_name, account_no, transaction_mode,
+                wallet_provider, wallet_no, payment_reference,
+                salesman, note, session_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-    )
-    for key in [
-        "customer", "transaction_type", "ref", "return_ref",
-        "payable_before", "due_amount", "paid", "remaining_due", "payable_after",
-        "receiveable_before", "receiveable_now", "received", "remaining_now", "receiveable_after",
-        "payment_method", "bank_name", "account_no", "transaction_mode",
-        "wallet_provider", "wallet_no", "payment_reference",
-        "salesman", "note", "session_id",
-    ]:
-        query.addBindValue(data[key])
-    if not query.exec():
-        raise Exception(query.lastError().text())
+        for key in [
+            "customer", "transaction_type", "ref", "return_ref",
+            "payable_before", "due_amount", "paid", "remaining_due", "payable_after",
+            "receiveable_before", "receiveable_now", "received", "remaining_now", "receiveable_after",
+            "payment_method", "bank_name", "account_no", "transaction_mode",
+            "wallet_provider", "wallet_no", "payment_reference",
+            "salesman", "note", "session_id",
+        ]:
+            query.addBindValue(data[key])
+        if not query.exec():
+            raise Exception(query.lastError().text())
 
-    update_query = _new_query()
-    update_query.prepare(
-        """
-        UPDATE customer
-        SET payable = ?, receiveable = ?
-        WHERE id = ?
-        """
+        update_query = _new_query()
+        update_query.prepare(
+            """
+            UPDATE customer
+            SET payable = ?, receiveable = ?
+            WHERE id = ?
+            """
+        )
+        update_query.addBindValue(data["payable_after"])
+        update_query.addBindValue(data["receiveable_after"])
+        update_query.addBindValue(data["customer"])
+        if not update_query.exec():
+            raise Exception(update_query.lastError().text())
+        return True
+
+    return run_in_transaction(
+        _work,
+        start_error_message="Could not start customer transaction save.",
+        commit_error_message="Could not commit customer transaction.",
     )
-    update_query.addBindValue(data["payable_after"])
-    update_query.addBindValue(data["receiveable_after"])
-    update_query.addBindValue(data["customer"])
-    if not update_query.exec():
-        raise Exception(update_query.lastError().text())
 
 
 def save_supplier_transaction_payload(data):
-    query = _new_query()
-    query.prepare(
-        """
-        INSERT INTO supplier_transaction
-        (
-            supplier, transaction_type, ref, return_ref,
-            payable_before, due_amount, paid, remaining_due, payable_after,
-            receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
-            rep, note, session_id,
-            payment_method, bank_name, account_no, transaction_mode,
-            wallet_provider, wallet_no, payment_reference
+    def _work():
+        query = _new_query()
+        query.prepare(
+            """
+            INSERT INTO supplier_transaction
+            (
+                supplier, transaction_type, ref, return_ref,
+                payable_before, due_amount, paid, remaining_due, payable_after,
+                receiveable_before, receiveable_now, received, remaining_now, receiveable_after,
+                rep, note, session_id,
+                payment_method, bank_name, account_no, transaction_mode,
+                wallet_provider, wallet_no, payment_reference
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-    )
-    for key in [
-        "supplier", "transaction_type", "ref", "return_ref",
-        "payable_before", "due_amount", "paid", "remaining_due", "payable_after",
-        "receiveable_before", "receiveable_now", "received", "remaining_now", "receiveable_after",
-        "rep", "note", "session_id",
-        "payment_method", "bank_name", "account_no", "transaction_mode",
-        "wallet_provider", "wallet_no", "payment_reference",
-    ]:
-        query.addBindValue(data[key])
-    if not query.exec():
-        raise Exception(query.lastError().text())
+        for key in [
+            "supplier", "transaction_type", "ref", "return_ref",
+            "payable_before", "due_amount", "paid", "remaining_due", "payable_after",
+            "receiveable_before", "receiveable_now", "received", "remaining_now", "receiveable_after",
+            "rep", "note", "session_id",
+            "payment_method", "bank_name", "account_no", "transaction_mode",
+            "wallet_provider", "wallet_no", "payment_reference",
+        ]:
+            query.addBindValue(data[key])
+        if not query.exec():
+            raise Exception(query.lastError().text())
 
-    update_query = _new_query()
-    update_query.prepare(
-        """
-        UPDATE supplier
-        SET payable = ?, receiveable = ?
-        WHERE id = ?
-        """
+        update_query = _new_query()
+        update_query.prepare(
+            """
+            UPDATE supplier
+            SET payable = ?, receiveable = ?
+            WHERE id = ?
+            """
+        )
+        update_query.addBindValue(data["payable_after"])
+        update_query.addBindValue(data["receiveable_after"])
+        update_query.addBindValue(data["supplier"])
+        if not update_query.exec():
+            raise Exception(update_query.lastError().text())
+        return True
+
+    return run_in_transaction(
+        _work,
+        start_error_message="Could not start supplier transaction save.",
+        commit_error_message="Could not commit supplier transaction.",
     )
-    update_query.addBindValue(data["payable_after"])
-    update_query.addBindValue(data["receiveable_after"])
-    update_query.addBindValue(data["supplier"])
-    if not update_query.exec():
-        raise Exception(update_query.lastError().text())
 
 
 def _fetch_party_balance_summary(party_kind):

@@ -1,6 +1,5 @@
 from PySide6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QFrame, QLabel, QLineEdit, QComboBox, QVBoxLayout
 from PySide6.QtCore import Qt
-from PySide6.QtSql import QSqlDatabase
 from PySide6.QtGui import QKeySequence, QShortcut
 
 from medic.utilities.stylus import load_stylesheets
@@ -174,17 +173,9 @@ class CreateCustomerTransactionWidget(QWidget):
         if not require_open_session(self):
             return
 
-        db = QSqlDatabase.database()
-        if not db.transaction():
-            AppMessageBox.critical(self, "Error", "Could not start database transaction.")
-            return
-
         try:
             data = self._collect_customer_payment_data()
             save_customer_transaction_payload(data)
-
-            if not db.commit():
-                raise Exception("Could not commit customer transaction.")
 
             AppMessageBox.information(self, "Success", "Customer Transaction Saved Successfully.")
             self.load_data(self.cust_id)
@@ -192,7 +183,6 @@ class CreateCustomerTransactionWidget(QWidget):
             self.received.setText("0")
             self.note.clear()
         except Exception as exc:
-            db.rollback()
             AppMessageBox.critical(self, "Error", str(exc))
 
     def _collect_customer_payment_data(self):

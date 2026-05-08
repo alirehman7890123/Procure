@@ -1,5 +1,5 @@
-from PySide6.QtWidgets import QWidget, QSizePolicy, QPushButton, QLabel,QMessageBox, QComboBox, QLineEdit, QVBoxLayout, QGridLayout, QTableWidget, QTableWidgetItem
-from PySide6.QtCore import QFile, Qt, QDate
+from PySide6.QtWidgets import QWidget, QSizePolicy, QPushButton, QLabel, QComboBox, QLineEdit, QVBoxLayout, QGridLayout, QTableWidget, QTableWidgetItem
+from PySide6.QtCore import Qt
 from medic.services.return_read_service import (
     fetch_sales_return_detail,
     fetch_sales_return_item_rows,
@@ -170,77 +170,6 @@ class SalesReturnDetailWidget(QWidget):
         layout.addStretch()
         
         self.setStyleSheet(load_stylesheets())
-
-
-
-
-    # def load_sales_data(self, id):
-        
-    #     print("Loading Sales ID:", id)
-    #     query = QSqlQuery()
-    #     query.prepare("SELECT salesorder, customer, creation_date, subtotal, roundoff, total, paid, remaining, writeoff  FROM salesreturn WHERE id = ?")
-    #     query.addBindValue(id)
-        
-    #     if query.exec() and query.next():
-            
-    #         orderid = query.value(0)
-    #         customer_id = query.value(1)
-            
-    #         if customer_id == '':
-    #             customer_id = None
-            
-    #         invoicedate = query.value(2)
-            
-    #         subtotal = query.value(3)
-    #         roundoff = query.value(4)
-    #         total = query.value(5)
-    #         paid = query.value(6)
-    #         remaining = query.value(7)
-    #         writeoff = query.value(8)
-            
-
-            
-    #         if isinstance(invoicedate, QDate):  # or QDateTime
-    #             invoicedate = invoicedate.toString("dd-MM-yyyy")  # or "yyyy-MM-dd"
-    #         else:
-    #             invoicedate = str(invoicedate)
-            
-    #         self.orderid.setText(str(id))
-    #         self.salesorder.setText(str(orderid))
-    #         self.dateandtime.setText(str(invoicedate))
-            
-    #         self.subtotal.setText(str(subtotal))
-    #         self.roundoff.setText(str(roundoff))
-    #         self.finalamount.setText(str(total))
-    #         self.paid.setText(str(paid))
-    #         self.remaining.setText(str(remaining))
-    #         self.writeoff.setText(str(writeoff))
-        
-        
-    #         if customer_id is not None:
-            
-    #             query2 = QSqlQuery()
-    #             query2.prepare("SELECT name FROM customer WHERE id = ?")
-    #             query2.addBindValue(int(customer_id))
-                
-    #             if query2.exec() and query2.next():
-                    
-    #                 customer = query2.value(0)
-    #                 self.customer.setText(customer)
-                    
-    #         else: 
-    #             customer = 'Walk-In Customer'
-    #             self.customer.setText(customer)
-
-                
-            
-    #         self.load_items_into_table(orderid)
-            
-            
-    #     else:
-    #         AppMessageBox.information(self, "Error", query.lastError().text() )
-
-
     def load_sales_data(self, salesreturn_id: int) -> None:
         
         print(f"Loading Sales Return ID: {salesreturn_id}")
@@ -314,7 +243,6 @@ class MyTable(QTableWidget):
         
         
         
-
 
 
 

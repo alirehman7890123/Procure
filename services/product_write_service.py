@@ -1,6 +1,7 @@
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from datetime import datetime
 import bcrypt
+import re
 
 from medic.services.product_media_service import (
     clear_product_media_fields,
@@ -161,6 +162,91 @@ def fetch_product_autofill(product_id):
     }
 
 
+def find_existing_product_id_by_display_name(display_name):
+    normalized_name = re.sub(r"\s*\[\d+s\]\s*$", "", str(display_name or "").strip(), flags=re.IGNORECASE)
+    if not normalized_name:
+        return None
+
+    query = _new_query()
+    query.prepare(
+        """
+        SELECT id
+        FROM product
+        WHERE LOWER(TRIM(display_name)) = LOWER(TRIM(?))
+        LIMIT 1
+        """
+    )
+    query.addBindValue(normalized_name)
+    if query.exec() and query.next():
+        return int(query.value(0) or 0)
+    return None
+
+
+def fetch_dormant_product_record(display_name):
+    normalized_name = re.sub(r"\s*\[\d+s\]\s*$", "", str(display_name or "").strip(), flags=re.IGNORECASE)
+    if not normalized_name:
+        return None
+
+    query = _new_query()
+    query.prepare(
+        """
+        SELECT
+            p.id,
+            p.display_name,
+            COALESCE(p.generic_name, ''),
+            COALESCE(p.brand, ''),
+            COALESCE(p.form, ''),
+            COALESCE(p.strength, ''),
+            COALESCE(p.manufacturer_id, 0),
+            COALESCE((
+                SELECT pp.pack_size
+                FROM price_pack pp
+                WHERE pp.product_id = p.id
+                ORDER BY pp.is_default DESC, pp.id DESC
+                LIMIT 1
+            ), 0),
+            COALESCE((
+                SELECT pp.pack_price
+                FROM price_pack pp
+                WHERE pp.product_id = p.id
+                ORDER BY pp.is_default DESC, pp.id DESC
+                LIMIT 1
+            ), 0),
+            COALESCE((
+                SELECT pp.margin_percent
+                FROM price_pack pp
+                WHERE pp.product_id = p.id
+                ORDER BY pp.is_default DESC, pp.id DESC
+                LIMIT 1
+            ), 14.5),
+            COALESCE(p.prescription_required, 0)
+        FROM product p
+        WHERE LOWER(TRIM(p.display_name)) = LOWER(TRIM(?))
+          AND COALESCE(p.status, 'active') <> 'used'
+        LIMIT 1
+        """
+    )
+    query.addBindValue(normalized_name)
+    if not query.exec() or not query.next():
+        return None
+
+    product_id = int(query.value(0) or 0)
+    return {
+        "product_id": product_id,
+        "display_name": str(query.value(1) or "").strip(),
+        "generic_name": str(query.value(2) or "").strip(),
+        "brand": str(query.value(3) or "").strip(),
+        "form": str(query.value(4) or "").strip(),
+        "strength": str(query.value(5) or "").strip(),
+        "manufacturer_id": int(query.value(6) or 0) or None,
+        "pack_size": float(query.value(7) or 0.0),
+        "pack_price": float(query.value(8) or 0.0),
+        "margin_percent": float(query.value(9) or DEFAULT_MARGIN_PERCENT),
+        "prescription_required": bool(int(query.value(10) or 0)),
+        "media_info": fetch_product_media(product_id),
+    }
+
+
 def fetch_manufacturer_name(manufacturer_id):
     if manufacturer_id in (None, ""):
         return ""
@@ -173,6 +259,27 @@ def fetch_manufacturer_name(manufacturer_id):
     if query.next():
         return str(query.value(0) or "").strip()
     return ""
+
+
+def fetch_previous_pack_price(product_id):
+    query = _new_query()
+    query.prepare(
+        """
+        SELECT COALESCE(pack_price, 0)
+        FROM price_pack
+        WHERE product_id = ?
+        ORDER BY is_default DESC, id ASC
+        LIMIT 1
+        """
+    )
+    query.addBindValue(int(product_id))
+
+    if not query.exec():
+        raise Exception(f"Failed to fetch previous price: {query.lastError().text()}")
+
+    if query.next():
+        return float(query.value(0) or 0.0)
+    return 0.0
 
 
 def fetch_recent_product_batch_rows(*, limit=5):
@@ -772,6 +879,110 @@ def save_product_with_opening_stock(
             "product_id": product_id,
             "batch_id": batch_id,
             "created_new_product": created_new_product,
+            "media_info": saved_media_info,
+        }
+    except Exception:
+        db.rollback()
+        raise
+
+
+def create_product_with_default_price(
+    *,
+    display_name,
+    brand_name,
+    form,
+    packing_text,
+    manufacturer_id,
+    pack_size,
+    sale_price,
+    prescription_required,
+    selected_media_path="",
+):
+    normalized_display_name = str(display_name or "").strip()
+    normalized_brand_name = str(brand_name or "").strip()
+
+    if not normalized_display_name:
+        raise ValueError("Product name is required.")
+    if not normalized_brand_name:
+        raise ValueError("Brand is required for a new product.")
+
+    try:
+        normalized_pack_size = max(1, int(float(pack_size or 1)))
+    except (TypeError, ValueError):
+        raise ValueError("Pack size must be a valid number.")
+
+    try:
+        normalized_sale_price = float(sale_price or 0.0)
+    except (TypeError, ValueError):
+        raise ValueError("Sale price must be a valid number.")
+
+    db = QSqlDatabase.database()
+    if not db.transaction():
+        raise Exception("Failed to start transaction.")
+
+    try:
+        product_query = _new_query(db)
+        product_query.prepare(
+            """
+            INSERT INTO product (
+                display_name,
+                code,
+                reg_no,
+                generic_name,
+                brand,
+                form,
+                strength,
+                packing,
+                rack,
+                manufacturer_id,
+                prescription_required,
+                status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+        )
+        product_query.addBindValue(normalized_display_name)
+        product_query.addBindValue(None)
+        product_query.addBindValue(None)
+        product_query.addBindValue(None)
+        product_query.addBindValue(normalized_brand_name)
+        product_query.addBindValue(str(form or "").strip() or None)
+        product_query.addBindValue(str(packing_text or "").strip() or None)
+        product_query.addBindValue(None)
+        product_query.addBindValue("")
+        product_query.addBindValue(manufacturer_id)
+        product_query.addBindValue(1 if prescription_required else 0)
+        product_query.addBindValue("used")
+
+        if not product_query.exec():
+            raise Exception(product_query.lastError().text())
+
+        product_id = int(product_query.lastInsertId())
+
+        price_query = _new_query(db)
+        price_query.prepare(
+            """
+            INSERT INTO price_pack (product_id, pack_size, pack_price)
+            VALUES (?, ?, ?)
+            """
+        )
+        price_query.addBindValue(product_id)
+        price_query.addBindValue(normalized_pack_size)
+        price_query.addBindValue(normalized_sale_price)
+
+        if not price_query.exec():
+            raise Exception(price_query.lastError().text())
+
+        saved_media_info = None
+        if str(selected_media_path or "").strip():
+            saved_media_info = save_product_media(selected_media_path, product_id=product_id)
+            update_product_media_fields(product_id=product_id, media_info=saved_media_info)
+
+        if not db.commit():
+            raise Exception("Transaction commit failed.")
+
+        return {
+            "product_id": product_id,
             "media_info": saved_media_info,
         }
     except Exception:

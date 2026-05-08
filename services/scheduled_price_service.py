@@ -1,21 +1,13 @@
 from datetime import date, datetime
 
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
-
-try:
-    from medic.utilities.activity_logger import log_activity
-    from medic.services.product_admin_service import (
-        insert_price_change_log,
-        resolve_auth_user_id,
-        update_product_default_pack_price,
-    )
-except ModuleNotFoundError:
-    from utilities.activity_logger import log_activity
-    from services.product_admin_service import (
-        insert_price_change_log,
-        resolve_auth_user_id,
-        update_product_default_pack_price,
-    )
+from medic.services.db_transaction_service import run_in_transaction
+from medic.utilities.activity_logger import log_activity
+from medic.services.product_admin_service import (
+    insert_price_change_log,
+    resolve_auth_user_id,
+    update_product_default_pack_price,
+)
 
 
 def _new_query():
@@ -162,6 +154,34 @@ def save_scheduled_price_change(
     if not insert_query.exec():
         raise Exception(f"Failed to insert scheduled price change: {insert_query.lastError().text()}")
     return int(insert_query.lastInsertId() or 0)
+
+
+def save_scheduled_price_changes(rows, *, purchase_id, created_by=None, created_by_username=""):
+    normalized_rows = list(rows or [])
+    if not normalized_rows:
+        raise Exception("Enter at least one new price before saving changes.")
+
+    def _work():
+        updated_rows = 0
+        for row in normalized_rows:
+            save_scheduled_price_change(
+                product_id=row["product_id"],
+                purchase_id=purchase_id,
+                previous_price=row["previous_price"],
+                new_price=row["new_price"],
+                effective_date=row["effective_date"],
+                created_by=created_by,
+                created_by_username=created_by_username,
+                notes="Scheduled from purchase price review.",
+            )
+            updated_rows += 1
+        return updated_rows
+
+    return run_in_transaction(
+        _work,
+        start_error_message="Could not start price update transaction.",
+        commit_error_message="Could not commit price changes.",
+    )
 
 
 def apply_due_scheduled_price_changes(*, today=None, applied_by="system"):

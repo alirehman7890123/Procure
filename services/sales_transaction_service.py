@@ -4,6 +4,12 @@ def _new_query():
     return QSqlQuery()
 
 
+def _database():
+    from PySide6.QtSql import QSqlDatabase
+
+    return QSqlDatabase.database()
+
+
 import mimetypes
 import os
 import shutil
@@ -820,3 +826,43 @@ def delete_hold_sale(hold_id):
     hold_delete.addBindValue(hold_id)
     if not hold_delete.exec():
         raise Exception(hold_delete.lastError().text())
+
+
+def run_sales_write_transaction(
+    work_fn,
+    *,
+    start_error_message="Could not start sales transaction.",
+    commit_error_message="Failed to commit sales transaction.",
+):
+    db = _database()
+    if not db.transaction():
+        raise RuntimeError(start_error_message)
+
+    try:
+        result = work_fn()
+    except Exception:
+        db.rollback()
+        raise
+
+    if not db.commit():
+        db.rollback()
+        raise RuntimeError(commit_error_message)
+
+    return result
+
+
+def save_hold_sale(*, header_payload, item_rows, hold_id=None):
+    normalized_rows = list(item_rows or [])
+    if not normalized_rows:
+        raise Exception("No Records in the Order")
+
+    def _work():
+        persisted_hold_id = upsert_hold_sale_header(header_payload, hold_id=hold_id)
+        replace_hold_sale_items(persisted_hold_id, normalized_rows)
+        return int(persisted_hold_id)
+
+    return run_sales_write_transaction(
+        _work,
+        start_error_message="Could not start hold-sale transaction.",
+        commit_error_message="Failed to commit hold-sale transaction.",
+    )

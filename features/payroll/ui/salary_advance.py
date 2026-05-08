@@ -3,7 +3,6 @@ from PySide6.QtWidgets import (
     QFrame, QComboBox, QLineEdit, QSizePolicy
 )
 from PySide6.QtCore import Qt, QDate, Signal
-from PySide6.QtSql import QSqlDatabase
 
 from medic.utilities.stylus import load_stylesheets
 from medic.utilities.permissions import Permissions
@@ -11,8 +10,9 @@ from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.session_gate import require_open_session
 from medic.utilities.session_service import get_active_session_id
 from medic.services.payroll_service import (
-    get_all_active_employees, insert_salary_advance,
-    resolve_payroll_auth_user_id, update_employee_advance_balance
+    get_all_active_employees,
+    resolve_payroll_auth_user_id,
+    save_salary_advance_entry,
 )
 
 
@@ -152,12 +152,8 @@ class SalaryAdvanceWidget(QWidget):
         session_id  = get_active_session_id()
         recorded_by = self._get_user_id()
 
-        db = QSqlDatabase.database()
-        if not db.transaction():
-            AppMessageBox.critical(self, "Error", "Could not start transaction.")
-            return
         try:
-            ok, result = insert_salary_advance(
+            save_salary_advance_entry(
                 employee_id=emp["id"],
                 amount=amount,
                 reason=self.reason_edit.text().strip() or None,
@@ -165,21 +161,12 @@ class SalaryAdvanceWidget(QWidget):
                 session_id=session_id,
                 recorded_by=recorded_by,
             )
-            if not ok:
-                raise Exception(result)
-
-            if not update_employee_advance_balance(None, emp["id"], amount):
-                raise Exception("Failed to update employee advance balance.")
-
-            if not db.commit():
-                raise Exception("Commit failed.")
 
             AppMessageBox.information(self, "Success", f"Advance of Rs. {amount:,.2f} disbursed.")
             self._clear_fields()
             self._load_employees()
 
         except Exception as exc:
-            db.rollback()
             AppMessageBox.critical(self, "Error", str(exc))
 
     # ------------------------------------------------------------------

@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QWidget, QSizePolicy, QPushButton, QLabel, QComboBox, QLineEdit, QVBoxLayout, QGridLayout, QTableWidget, QTableWidgetItem
-from PySide6.QtCore import QFile, Qt, QDate
+from PySide6.QtCore import Qt
 from medic.services.return_read_service import (
     fetch_purchase_return_detail,
     fetch_purchase_return_item_rows,
@@ -163,68 +163,6 @@ class PurchaseReturnDetailWidget(QWidget):
         self.setLayout(layout)
 
         self.setStyleSheet(load_stylesheets())
-
-
-
-
-    # def load_purchase_data(self, id):
-        
-    #     print("Loading purchase ID:", id)
-    #     query = QSqlQuery()
-    #     query.prepare("SELECT * FROM purchase_return WHERE id = ?")
-    #     query.addBindValue(id)
-        
-    #     if query.exec() and query.next():
-            
-    #         orderid = query.value(0)
-    #         supplierid = query.value(1)
-    #         invoicedate = query.value(3)
-            
-    #         subtotal = query.value(4)
-    #         roundoff = query.value(7)
-    #         total = query.value(8)
-            
-            
-    #         # get supplier name
-    #         supplier_query = QSqlQuery()
-    #         supplier_query.prepare("SELECT name FROM supplier WHERE id = ?")
-    #         supplier_query.addBindValue(supplierid)
-            
-    #         if query.exec() and supplier_query.next():
-    #             supplier_name = supplier_query.value(0)
-    #             self.supplier.setText(supplier_name)
-                
-                
-    #         if isinstance(invoicedate, QDate):  # or QDateTime
-    #             invoicedate = invoicedate.toString("dd-MM-yyyy")  # or "yyyy-MM-dd"
-    #         else:
-    #             invoicedate = str(invoicedate)
-            
-    #         self.orderid.setText(str(orderid))
-    #         self.dateandtime.setText(str(invoicedate))
-            
-    #         self.subtotal.setText(str(subtotal))
-    #         self.roundoff.setText(str(roundoff))
-    #         self.finalamount.setText(str(total))
-        
-            
-    #         query2 = QSqlQuery()
-    #         query2.prepare("SELECT name FROM supplier WHERE id = ?")
-    #         query2.addBindValue(supplierid)
-            
-    #         if query2.exec() and query2.next():
-                
-    #             supplier = query2.value(0)
-    #             self.supplier.setText(supplier)
-                
-            
-    #         self.load_items_into_table(orderid)
-            
-            
-    #     else:
-    #         self.supplier.setText("Purchase not found.")
-
-
     def load_purchase_data(self, purchase_return_id: int) -> None:
         """
         Load purchase return header data and populate UI fields.
@@ -304,7 +242,6 @@ class MyTable(QTableWidget):
         
         
         
-
 
 
 

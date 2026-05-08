@@ -5,6 +5,7 @@ No UI imports. All functions operate via QSqlQuery.
 
 from PySide6.QtSql import QSqlQuery
 
+from medic.services.db_transaction_service import run_in_transaction
 
 # ---------------------------------------------------------------------------
 # Employee helpers
@@ -298,6 +299,29 @@ def update_employee_advance_balance(conn_or_query, employee_id, delta):
     return query.exec()
 
 
+def save_salary_advance_entry(*, employee_id, amount, reason, date, session_id, recorded_by):
+    def _work():
+        ok, result = insert_salary_advance(
+            employee_id=employee_id,
+            amount=amount,
+            reason=reason,
+            date=date,
+            session_id=session_id,
+            recorded_by=recorded_by,
+        )
+        if not ok:
+            raise Exception(result)
+        if not update_employee_advance_balance(None, employee_id, amount):
+            raise Exception("Failed to update employee advance balance.")
+        return result
+
+    return run_in_transaction(
+        _work,
+        start_error_message="Could not start salary advance transaction.",
+        commit_error_message="Could not commit salary advance transaction.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Payroll
 # ---------------------------------------------------------------------------
@@ -466,3 +490,61 @@ def apply_advance_recovery(advance_id, recovery_amount):
     query.addBindValue(recovery_amount)
     query.addBindValue(advance_id)
     return query.exec()
+
+
+def save_payroll_entry(
+    *,
+    employee_id,
+    month,
+    basic_salary,
+    allowances,
+    deductions,
+    advance_deduct,
+    net_salary,
+    payment_data,
+    notes,
+    paid_on,
+    session_id,
+    paid_by,
+    pending_advances,
+):
+    def _work():
+        ok, result = insert_payroll(
+            employee_id,
+            month,
+            basic_salary,
+            allowances,
+            deductions,
+            advance_deduct,
+            net_salary,
+            payment_data,
+            notes,
+            paid_on,
+            session_id,
+            paid_by,
+        )
+        if not ok:
+            raise Exception(result)
+
+        remaining_recovery = float(advance_deduct or 0.0)
+        for advance in list(pending_advances or []):
+            if remaining_recovery <= 0:
+                break
+            outstanding = float(advance["amount"] or 0.0) - float(advance["recovered"] or 0.0)
+            this_recovery = min(remaining_recovery, outstanding)
+            if this_recovery > 0:
+                if not apply_advance_recovery(advance["id"], this_recovery):
+                    raise Exception("Failed to update advance recovery record.")
+                remaining_recovery -= this_recovery
+
+        if float(advance_deduct or 0.0) > 0:
+            if not update_employee_advance_balance(None, employee_id, -float(advance_deduct or 0.0)):
+                raise Exception("Failed to update employee advance balance.")
+
+        return result
+
+    return run_in_transaction(
+        _work,
+        start_error_message="Could not start payroll transaction.",
+        commit_error_message="Could not commit payroll transaction.",
+    )
