@@ -5,6 +5,7 @@ import sys
 import sqlite3
 import secrets
 import time
+import types
 
 # Allow running this file directly (e.g., `python medic/starting.py`) while
 # preserving package-style imports like `from medic.utilities ...`.
@@ -14,6 +15,15 @@ if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
+
+# In source mode `PROJECT_ROOT` is enough for `import medic`.
+# In some frozen launches, `starting.py` can still run outside normal package
+# context, so we provide the minimal canonical package object if it is missing.
+if "medic" not in sys.modules:
+    medic_pkg = types.ModuleType("medic")
+    medic_pkg.__file__ = os.path.join(CURRENT_DIR, "__init__.py")
+    medic_pkg.__path__ = [CURRENT_DIR]
+    sys.modules["medic"] = medic_pkg
 
 def resource_path(relative_path: str) -> str:
     base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))

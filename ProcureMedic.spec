@@ -15,7 +15,7 @@ if str(workspace_root) not in sys.path:
 if str(project_dir) not in sys.path:
     sys.path.insert(0, str(project_dir))
 
-hiddenimports = []
+hiddenimports = ["medic"]
 datas = []
 
 
