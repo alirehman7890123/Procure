@@ -22,6 +22,7 @@ from medic.services.sales_return_service import (
     normalize_sales_return_item_row,
 )
 from medic.services.sales_return_transaction_service import (
+    apply_sales_return_inventory_reversal,
     fetch_customer_balances_for_return,
     save_sales_return_entry,
 )
@@ -356,6 +357,10 @@ class AddSalesReturnWidget(QWidget):
 
     def _insert_sales_return_item(self, return_id, normalized_row):
         return insert_sales_return_item(return_id, normalized_row)
+
+    def reverse_inventory_for_return(self, sales_item_id, returned, db=None):
+        del db
+        return apply_sales_return_inventory_reversal(sales_item_id, returned)
 
 
 

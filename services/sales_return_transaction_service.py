@@ -4,6 +4,7 @@ def _new_query():
     return QSqlQuery()
 
 from medic.services.db_transaction_service import run_in_transaction
+from medic.services.sales_return_service import compute_sales_return_inventory_plan
 from medic.services.inventory_movement_service import (
     fetch_sold_batch_rows_for_return as fetch_sold_batch_rows_for_return_from_inventory,
     increment_sold_batch_returned as increment_sold_batch_returned_in_inventory,

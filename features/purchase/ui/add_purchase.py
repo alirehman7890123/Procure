@@ -14,6 +14,7 @@ from medic.utilities.activity_logger import log_activity
 from medic.utilities.permissions import Permissions
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.file_preview import preview_file
+from medic.utilities.payment_handler import PaymentMethodHandler
 from medic.utilities.product_form_options import get_product_form_options
 from medic.utilities.product_search_widget import ProductSearchBox
 from medic.services.product_media_service import (
@@ -114,10 +115,7 @@ class AddPurchaseWidget(QWidget):
     def __init__(self, parent=None):
 
         super().__init__(parent)
-        from medic.utilities.payment_handler import PaymentMethodHandler
-        
-        
-        
+
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(6, 6, 6, 6)
         self.layout.setSpacing(10)

@@ -171,10 +171,9 @@ def fetch_last_purchase_order_cost(product_id):
     )
     query.addBindValue(product_id)
     if query.exec() and query.next():
-        try:
-            return float(query.value(0) or 0.0), "invoice"
-        except (TypeError, ValueError):
-            pass
+        last_cost = _coerce_optional_float(query.value(0))
+        if last_cost is not None:
+            return last_cost, "invoice"
 
     query.prepare(
         """
@@ -187,12 +186,18 @@ def fetch_last_purchase_order_cost(product_id):
     )
     query.addBindValue(product_id)
     if query.exec() and query.next():
-        try:
-            return float(query.value(0) or 0.0), "po"
-        except (TypeError, ValueError):
-            pass
+        last_cost = _coerce_optional_float(query.value(0))
+        if last_cost is not None:
+            return last_cost, "po"
 
     return None, None
+
+
+def _coerce_optional_float(value):
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return None
 
 
 def fetch_product_reorder_level(product_id):
