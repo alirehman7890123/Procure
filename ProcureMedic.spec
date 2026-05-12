@@ -5,13 +5,11 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 
 project_dir = Path(SPECPATH).resolve()
-workspace_root = project_dir.parent
+package_dir = project_dir / "medic"
 
-# Make the parent of the `medic` package importable before PyInstaller's
-# collection helpers run; otherwise collect_submodules("medic") can resolve
-# to an empty set in CI when the checkout root is the package directory.
-if str(workspace_root) not in sys.path:
-    sys.path.insert(0, str(workspace_root))
+# Make the project root importable before PyInstaller's collection helpers
+# run so the sibling `medic` package resolves consistently in CI and local
+# packaging runs.
 if str(project_dir) not in sys.path:
     sys.path.insert(0, str(project_dir))
 
@@ -31,22 +29,22 @@ _extend_package_collection("medic")
 hiddenimports = list(dict.fromkeys(hiddenimports))
 datas = list(dict.fromkeys(datas))
 
-# Non-package runtime assets that live at the repo root must be added
-# explicitly; these used to come from the old CLI `--add-data` workflow.
+# Runtime assets now live inside the `medic` package directory and must be
+# added explicitly because they are not Python packages.
 extra_datas = [
-    (str(project_dir / "licensing" / "public_key.json"), "licensing"),
-    (str(project_dir / "manufacturers.csv"), "."),
-    (str(project_dir / "master_products.csv"), "."),
-    (str(project_dir / "purchase" / "med-template.ods"), "purchase"),
+    (str(package_dir / "licensing" / "public_key.json"), "licensing"),
+    (str(package_dir / "manufacturers.csv"), "."),
+    (str(package_dir / "master_products.csv"), "."),
+    (str(package_dir / "purchase" / "med-template.ods"), "purchase"),
 ]
 
 for pattern in ("*.css",):
-    for path in (project_dir / "styles").glob(pattern):
+    for path in (package_dir / "styles").glob(pattern):
         extra_datas.append((str(path), "styles"))
 
-for path in (project_dir / "res").rglob("*"):
+for path in (package_dir / "res").rglob("*"):
     if path.is_file():
-        extra_datas.append((str(path), str(Path("res") / path.relative_to(project_dir / "res").parent)))
+        extra_datas.append((str(path), str(Path("res") / path.relative_to(package_dir / "res").parent)))
 
 datas.extend(extra_datas)
 datas = list(dict.fromkeys(datas))
@@ -54,7 +52,7 @@ datas = list(dict.fromkeys(datas))
 
 a = Analysis(
     ["starting.py"],
-    pathex=[str(workspace_root), str(project_dir)],
+    pathex=[str(project_dir), str(package_dir)],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
