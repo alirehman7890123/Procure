@@ -3237,15 +3237,6 @@ class CreateSalesWidget(QWidget):
         self.sales_discount_policy = resolved["policies"]["discount_policy"]
         self.sales_tax_policy = resolved["policies"]["tax_policy"]
 
-        print(
-            "[SALES][PRICING] Re-evaluating pricing defaults:",
-            {
-                "customer_id": customer_id,
-                "sales_discount_policy": self.sales_discount_policy,
-                "sales_tax_policy": self.sales_tax_policy,
-            }
-        )
-
         discount_defaults = resolved["discount"]
         tax_defaults = resolved["tax"]
         global_discount_meta = resolved["global_discount_meta"]
@@ -3265,40 +3256,6 @@ class CreateSalesWidget(QWidget):
         self.active_tax_apply_on_sale = tax_defaults["apply_on_sale"]
         self.active_tax_source = tax_defaults["source"]
 
-        if global_discount_meta["state"] == "ok":
-            print("[SALES][GLOBAL] Loaded global promo discount:", global_discount_meta["data"])
-        elif global_discount_meta["state"] == "disabled":
-            print(
-                "[SALES][GLOBAL] Global promo discount is disabled in accounting_settings.",
-                {"selected_group_id": global_discount_meta.get("selected_group_id")}
-            )
-        elif global_discount_meta["state"] == "enabled_without_selection":
-            print("[SALES][GLOBAL] Global promo discount is enabled, but no discount group is selected.")
-        elif global_discount_meta["state"] == "group_unresolved":
-            print(
-                "[SALES][GLOBAL] Global promo discount is enabled, but the selected discount group could not be resolved.",
-                {"selected_group_id": global_discount_meta.get("selected_group_id")}
-            )
-        else:
-            print("[SALES][GLOBAL] No accounting_settings row found for discount settings.")
-
-        if global_tax_meta["state"] == "ok":
-            print("[SALES][GLOBAL] Loaded global sales tax:", global_tax_meta["data"])
-        elif global_tax_meta["state"] == "disabled":
-            print(
-                "[SALES][GLOBAL] Global sales tax is disabled in accounting_settings.",
-                {"selected_group_id": global_tax_meta.get("selected_group_id")}
-            )
-        elif global_tax_meta["state"] == "enabled_without_selection":
-            print("[SALES][GLOBAL] Global sales tax is enabled, but no tax group is selected.")
-        elif global_tax_meta["state"] == "group_unresolved":
-            print(
-                "[SALES][GLOBAL] Global sales tax is enabled, but the selected tax group could not be resolved.",
-                {"selected_group_id": global_tax_meta.get("selected_group_id")}
-            )
-        else:
-            print("[SALES][GLOBAL] No accounting_settings row found for tax settings.")
-
         if customer_id is None:
             if has_pricing_fields:
                 self.discount_entry.blockSignals(True)
@@ -3310,30 +3267,6 @@ class CreateSalesWidget(QWidget):
             if has_pricing_fields:
                 self.update_total_amount()
             return
-
-        if self.active_discount_source == "customer_default":
-            print(
-                "[SALES][PRICING] Using customer discount defaults:",
-                {
-                    "group_id": self.active_discount_group_id,
-                    "name": self.active_discount_group_name,
-                    "percent": self.active_discount_percent,
-                    "fixed_amount": self.active_discount_fixed_amount,
-                    "apply_on_sale": self.active_discount_apply_on_sale,
-                }
-            )
-
-        if self.active_tax_source == "customer_default":
-            print(
-                "[SALES][PRICING] Using customer tax defaults:",
-                {
-                    "group_id": self.active_tax_group_id,
-                    "name": self.active_tax_group_name,
-                    "percent": self.active_tax_percent,
-                    "fixed_amount": self.active_tax_fixed_amount,
-                    "apply_on_sale": self.active_tax_apply_on_sale,
-                }
-            )
 
         if has_pricing_fields and (self.active_discount_group_id is None or not self._header_discount_enabled_by_policy()):
             self.discount_entry.blockSignals(True)
@@ -3348,23 +3281,6 @@ class CreateSalesWidget(QWidget):
         self.refresh_customer_pricing_summary()
         if has_pricing_fields:
             self.update_total_amount()
-        print(
-            "[SALES][PRICING] Active header defaults after evaluation:",
-            {
-                "discount_source": self.active_discount_source,
-                "discount_group_id": self.active_discount_group_id,
-                "discount_group_name": self.active_discount_group_name,
-                "discount_percent": self.active_discount_percent,
-                "discount_fixed_amount": self.active_discount_fixed_amount,
-                "discount_apply_on_sale": self.active_discount_apply_on_sale,
-                "tax_source": self.active_tax_source,
-                "tax_group_id": self.active_tax_group_id,
-                "tax_group_name": self.active_tax_group_name,
-                "tax_percent": self.active_tax_percent,
-                "tax_fixed_amount": self.active_tax_fixed_amount,
-                "tax_apply_on_sale": self.active_tax_apply_on_sale,
-            }
-        )
 
     def refresh_customer_pricing_summary(self):
         if not hasattr(self, "customer_pricing_summary"):

@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from PySide6.QtSql import QSqlDatabase, QSqlQuery
+from PySide6.QtSql import QSqlDatabase, QSqlDriver, QSqlQuery
 from medic.services.db_transaction_service import run_in_transaction
 from medic.utilities.activity_logger import log_activity
 from medic.services.product_admin_service import (
@@ -229,7 +229,7 @@ def apply_due_scheduled_price_changes(*, today=None, applied_by="system"):
 
     db = QSqlDatabase.database()
     started_tx = False
-    if db.isValid() and not db.driver().hasFeature(db.driver().Transactions):
+    if db.isValid() and not db.driver().hasFeature(QSqlDriver.DriverFeature.Transactions):
         started_tx = False
     else:
         started_tx = db.transaction()

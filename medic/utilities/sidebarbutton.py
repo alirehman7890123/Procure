@@ -13,9 +13,9 @@ class SideBarButton(QPushButton):
         self.hover_color = hover_color
         self.text_normal = text_normal
         self.text_hover = text_hover
-        self.active_color = "#F8F6F1"
-        self.active_text = "#17152A"
-        self.active_indicator = "#F8F6F1"
+        self.active_color = "#0D8C86"
+        self.active_text = "#F5FEFD"
+        self.active_indicator = "#0D8C86"
 
         self._is_hovered = False
         self._is_active = False
@@ -111,6 +111,7 @@ class SideBarButton(QPushButton):
                 font-family: montserrat;
                 font-size: 12px;
                 font-weight: {'700' if self._is_active else '600'};
+                letter-spacing: 0.2px;
                 min-width: {min_width};
             }}
         """)

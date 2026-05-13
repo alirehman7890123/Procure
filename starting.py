@@ -5,6 +5,7 @@ import sys
 import sqlite3
 import secrets
 import time
+from pathlib import Path
 
 # Allow running this file directly (e.g., `python medic/starting.py`) while
 # preserving package-style imports like `from medic.utilities ...`.
@@ -16,8 +17,18 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 def resource_path(relative_path: str) -> str:
-    base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
-    return os.path.join(base_path, relative_path)
+    relative = Path(relative_path)
+    base_path = Path(getattr(sys, "_MEIPASS", os.path.abspath(".")))
+    candidates = [
+        base_path / relative,
+        base_path / "medic" / relative,
+        Path(__file__).resolve().parent / relative,
+        Path(__file__).resolve().parent / "medic" / relative,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return str(candidates[0])
 
 
 master_products_file = resource_path("master_products.csv")
@@ -37,7 +48,7 @@ if not os.environ.get("QT_QPA_PLATFORMTHEME"):
     os.environ["QT_QPA_PLATFORMTHEME"] = "qt6ct"
 
 
-from PySide6.QtWidgets import QApplication, QWidget, QMainWindow, QPushButton, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QFileDialog, QFrame, QSizePolicy
+from PySide6.QtWidgets import QApplication, QWidget, QMainWindow, QPushButton, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QFileDialog, QFrame, QSizePolicy, QGridLayout
 from PySide6.QtGui import QPixmap
 from medic.utilities.database import SQLiteConnectionManager, QSqlDatabase
 from medic.utilities.app_messagebox import AppMessageBox, install_messagebox_theme
@@ -109,64 +120,90 @@ class AuthWindow(QMainWindow):
         
         
         companyinfo = QWidget()
-        companyinfo_layout = QVBoxLayout()
-        companyinfo.setLayout(companyinfo_layout)
-        companyinfo_layout.setContentsMargins(44, 42, 44, 42)
-        companyinfo_layout.setSpacing(18)
-        companyinfo.setMinimumWidth(480)
-        companyinfo.setStyleSheet("""
-            background-color: #163B5C;
-            color: #EAF3FB;
-        """)
+        companyinfo.setObjectName("LoginShowcasePanel")
+        companyinfo_root_layout = QGridLayout()
+        companyinfo_root_layout.setContentsMargins(0, 0, 0, 0)
+        companyinfo_root_layout.setSpacing(0)
+        companyinfo_root_layout.setRowStretch(0, 1)
+        companyinfo_root_layout.setColumnStretch(0, 1)
+        companyinfo.setLayout(companyinfo_root_layout)
+        companyinfo.setMinimumWidth(560)
 
-        companyinfo_layout.addStretch(1)
-        
-        
-        
+        login_hero_path = Path(resource_path("res/login_hero.png"))
+        if login_hero_path.exists():
+            companyinfo.setStyleSheet("""
+                QWidget#LoginShowcasePanel {
+                    background-color: #062B35;
+                }
+            """)
+            self.login_showcase_pixmap = QPixmap(str(login_hero_path))
+            self.login_showcase_bg = QLabel(companyinfo)
+            self.login_showcase_bg.setMinimumSize(0, 0)
+            self.login_showcase_bg.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+            self.login_showcase_bg.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.login_showcase_bg.setStyleSheet("background-color: #062B35; padding-left: 0;")
+            companyinfo_root_layout.addWidget(self.login_showcase_bg, 0, 0)
+        else:
+            self.login_showcase_pixmap = QPixmap()
+            self.login_showcase_bg = None
+            companyinfo.setStyleSheet("""
+                QWidget#LoginShowcasePanel {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                        stop:0 #062B35,
+                        stop:0.45 #08343C,
+                        stop:1 #0A4347);
+                }
+            """)
+
         authinfo = QWidget()
         auth_layout = QVBoxLayout()
         self.auth_layout = auth_layout
         authinfo.setLayout(auth_layout)
-        auth_layout.setContentsMargins(56, max(32, int(height * 0.10)), 56, 44)
+        auth_layout.setContentsMargins(72, max(32, int(height * 0.10)), 72, 44)
         auth_layout.setSpacing(0)
         authinfo.setMinimumWidth(480)
-        authinfo.setStyleSheet("background-color: #F5F8FB;")
+        authinfo.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                stop:0 #F8FBFD,
+                stop:0.55 #F4F8FB,
+                stop:1 #EFF5F8);
+        """)
 
         login_card = QFrame()
         login_card.setStyleSheet("""
             QFrame {
                 background-color: #FFFFFF;
-                border: none;
-                border-radius: 8px;
+                border: 1px solid #E2ECF0;
+                border-radius: 16px;
             }
         """)
-        login_card.setMinimumWidth(440)
+        login_card.setMinimumWidth(470)
         login_card.setMaximumWidth(620)
 
         login_card_layout = QVBoxLayout(login_card)
-        login_card_layout.setContentsMargins(38, 34, 38, 30)
-        login_card_layout.setSpacing(14)
+        login_card_layout.setContentsMargins(42, 36, 42, 34)
+        login_card_layout.setSpacing(16)
 
         login_eyebrow = QLabel("Welcome back")
-        login_eyebrow.setStyleSheet("font-size: 12px; font-weight: 700; color: #5D7D95; font-family: 'montserrat'; padding-left: 0;")
+        login_eyebrow.setStyleSheet("font-size: 12px; font-weight: 700; color: #6E93A3; font-family: 'montserrat'; padding-left: 0;")
 
         loginheading = QLabel('Login to Continue')
-        loginheading.setStyleSheet("font-size: 26px; font-weight: 700; color: #18374D; padding-left: 0; font-family: 'montserrat';")
+        loginheading.setStyleSheet("font-size: 28px; font-weight: 800; color: #0F3743; padding-left: 0; font-family: 'montserrat';")
 
         field_style = """
             QLineEdit {
-                padding: 8px 12px;
-                border: 1px solid #ccc;
-                border-radius: 5px;
-                background-color: #fbfcfd;
-                color: #333;
+                padding: 11px 14px;
+                border: 1px solid #D4DEE4;
+                border-radius: 7px;
+                background-color: #FCFDFE;
+                color: #203541;
                 font-size: 14px;
                 font-weight: 700;
                 font-family: 'montserrat';
             }
             QLineEdit:focus {
-                border-bottom: 1px solid #2F5D7C;
-                background-color: #EEF5FA;
+                border: 1px solid #1A9C94;
+                background-color: #F2FBFA;
             }
         """
 
@@ -183,22 +220,22 @@ class AuthWindow(QMainWindow):
         login_button.setCursor(Qt.PointingHandCursor)
         login_button.setStyleSheet("""
             QPushButton {
-                background-color: #2F5D7C;
+                background-color: #0D3F49;
                 color: #ffffff;
-                border: 1px solid #2a506b;
-                border-radius: 4px;
-                font-size: 12px;
+                border: 1px solid #0A5562;
+                border-radius: 6px;
+                font-size: 13px;
                 font-weight: 700;
-                padding: 7px 14px;
+                padding: 10px 14px;
                 font-family: 'montserrat';
             }
             QPushButton:hover {
-                background-color: #244A62;
-                border: 1px solid #2a506b;
+                background-color: #0B5057;
+                border: 1px solid #0A5562;
             }
             QPushButton:pressed {
-                background-color: #163B5C;
-                border: 1px solid #23465d;
+                background-color: #083139;
+                border: 1px solid #084A54;
             }
         """)
         login_button.clicked.connect(lambda: self.log_in(self.username, self.password))
@@ -206,16 +243,16 @@ class AuthWindow(QMainWindow):
         helper_text = QLabel("Use your assigned Procure credentials to continue.")
         helper_text.setWordWrap(True)
         helper_text.setStyleSheet(
-            "font-size: 12px; color: #6B7F8F; font-weight: 600; font-family: 'montserrat'; padding-left: 0;"
+            "font-size: 12px; color: #708B99; font-weight: 600; font-family: 'montserrat'; padding-left: 0;"
         )
 
         trust_block = QFrame()
         trust_block.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         trust_block.setStyleSheet("""
             QFrame {
-                background-color: #F7FAFC;
-                border: 1px solid #D9E4EC;
-                border-radius: 6px;
+                background-color: #F6FAFC;
+                border: 1px solid #DCE8EE;
+                border-radius: 10px;
             }
             QLabel {
                 background: transparent;
@@ -227,39 +264,55 @@ class AuthWindow(QMainWindow):
         trust_layout.setContentsMargins(18, 16, 18, 16)
         trust_layout.setSpacing(10)
 
+        trust_header = QHBoxLayout()
+        trust_header.setSpacing(10)
+        trust_badge = QLabel("S")
+        trust_badge.setFixedSize(24, 24)
+        trust_badge.setAlignment(Qt.AlignCenter)
+        trust_badge.setStyleSheet("""
+            background-color: #E4F4F2;
+            color: #0D8C86;
+            border-radius: 12px;
+            font-size: 13px;
+            padding-left: 0;
+        """)
+        trust_header.addWidget(trust_badge, 0, Qt.AlignTop)
+
         trust_title = QLabel("Secure Operational Access")
         trust_title.setWordWrap(True)
         trust_title.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         trust_title.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         trust_title.setStyleSheet(
-            "font-size: 13px; font-weight: 700; color: #18374D; font-family: 'montserrat'; padding-left: 0; margin: 0;"
+            "font-size: 13px; font-weight: 700; color: #173A47; font-family: 'montserrat'; padding-left: 0; margin: 0;"
         )
+        trust_header.addWidget(trust_title, 1)
         trust_copy = QLabel(
-            "You are signing in to a live business workspace where inventory, purchasing, sales, and financial records are managed with accountability."
+            "You are signing in to a live business workspace where inventory, purchasing, sales, and financial records are managed securely."
         )
         trust_copy.setWordWrap(True)
         trust_copy.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         trust_copy.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         trust_copy.setStyleSheet(
-            "background: transparent; border: none; color: #5E7384; font-size: 12px; font-weight: 500; font-family: 'montserrat'; padding: 0; margin: 0;"
+            "background: transparent; border: none; color: #6A8090; font-size: 12px; font-weight: 500; font-family: 'montserrat'; padding: 0; margin: 0;"
         )
         self.trust_copy_text = trust_copy
 
-        trust_layout.addWidget(trust_title)
+        trust_layout.addLayout(trust_header)
         trust_layout.addWidget(trust_copy)
 
         login_card_layout.addWidget(login_eyebrow)
         login_card_layout.addWidget(loginheading)
-        login_card_layout.addSpacing(4)
+        login_card_layout.addSpacing(6)
         login_card_layout.addWidget(self.username)
         login_card_layout.addWidget(self.password)
-        login_card_layout.addSpacing(12)
+        login_card_layout.addSpacing(8)
         login_card_layout.addWidget(login_button)
         login_card_layout.addWidget(helper_text)
-        login_card_layout.addSpacing(0)
+        login_card_layout.addSpacing(6)
         login_card_layout.addWidget(trust_block)
 
-        auth_layout.addWidget(login_card, 0, Qt.AlignHCenter | Qt.AlignTop)
+        auth_layout.addStretch(1)
+        auth_layout.addWidget(login_card, 0, Qt.AlignHCenter | Qt.AlignVCenter)
         auth_layout.addStretch(1)
         
         central_layout.addWidget(companyinfo, 1)
@@ -280,11 +333,82 @@ class AuthWindow(QMainWindow):
         self.create_auth_table()
 
         self.setCentralWidget(central_widget)
+        self._refresh_login_hero_art()
+
+    def _build_marketing_item(self, badge_text, title_text, body_text):
+        row = QFrame()
+        row.setStyleSheet("background: transparent; border: none;")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(14)
+
+        badge = QLabel(str(badge_text or "")[:1].upper())
+        badge.setFixedSize(44, 44)
+        badge.setAlignment(Qt.AlignCenter)
+        badge.setStyleSheet("""
+            background-color: rgba(31, 119, 122, 0.34);
+            color: #8DE4DA;
+            border: 1px solid rgba(122, 222, 212, 0.14);
+            border-radius: 22px;
+            font-family: 'montserrat';
+            font-size: 15px;
+            font-weight: 800;
+            padding-left: 0;
+        """)
+        row_layout.addWidget(badge, 0, Qt.AlignTop)
+
+        text_wrap = QWidget()
+        text_layout = QVBoxLayout(text_wrap)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(3)
+
+        title = QLabel(title_text)
+        title.setStyleSheet("""
+            color: #F1FBF9;
+            font-family: 'montserrat';
+            font-size: 12px;
+            font-weight: 700;
+            padding-left: 0;
+        """)
+        body = QLabel(body_text)
+        body.setWordWrap(True)
+        body.setStyleSheet("""
+            color: rgba(224, 244, 242, 0.88);
+            font-family: 'montserrat';
+            font-size: 11px;
+            font-weight: 500;
+            line-height: 1.45;
+            padding-left: 0;
+        """)
+
+        text_layout.addWidget(title)
+        text_layout.addWidget(body)
+        row_layout.addWidget(text_wrap, 1)
+        return row
+
+    def _refresh_login_hero_art(self):
+        background_label = getattr(self, "login_showcase_bg", None)
+        source_pixmap = getattr(self, "login_showcase_pixmap", QPixmap())
+        if background_label is None or source_pixmap.isNull():
+            return
+
+        target_size = background_label.size()
+        if target_size.width() <= 0 or target_size.height() <= 0:
+            return
+
+        scaled = source_pixmap.scaled(
+            max(target_size.width(), 1),
+            max(target_size.height(), 1),
+            Qt.KeepAspectRatioByExpanding,
+            Qt.SmoothTransformation,
+        )
+        background_label.setPixmap(scaled)
 
     def resizeEvent(self, event):
         top_margin = max(32, int(self.height() * 0.10))
         left_margin, _, right_margin, bottom_margin = self.auth_layout.getContentsMargins()
         self.auth_layout.setContentsMargins(left_margin, top_margin, right_margin, bottom_margin)
+        self._refresh_login_hero_art()
         super().resizeEvent(event)
 
     def load_username(self):

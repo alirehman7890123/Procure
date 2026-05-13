@@ -5,6 +5,10 @@ from PySide6.QtWidgets import QApplication
 from medic.services.accounting_settings_service import load_theme_settings
 
 DEFAULT_THEME = {
+    "theme_primary_color": "#0E8B86",
+    "theme_sidebar_color": "#062B35",
+}
+LEGACY_THEME = {
     "theme_primary_color": "#163B5C",
     "theme_sidebar_color": "#163B5C",
 }
@@ -33,9 +37,20 @@ def tint(color_value, factor):
 
 def get_theme_settings():
     settings = load_theme_settings()
+    raw_primary = normalize_hex(settings["theme_primary_color"], DEFAULT_THEME["theme_primary_color"])
+    raw_sidebar = normalize_hex(settings["theme_sidebar_color"], DEFAULT_THEME["theme_sidebar_color"])
+
+    # Preserve explicitly customized themes, but treat the legacy built-in
+    # blue defaults as "unset" so the app can move forward to the newer teal
+    # shell without requiring a manual DB theme reset.
+    if raw_primary == LEGACY_THEME["theme_primary_color"]:
+        raw_primary = DEFAULT_THEME["theme_primary_color"]
+    if raw_sidebar == LEGACY_THEME["theme_sidebar_color"]:
+        raw_sidebar = DEFAULT_THEME["theme_sidebar_color"]
+
     return {
-        "theme_primary_color": normalize_hex(settings["theme_primary_color"], DEFAULT_THEME["theme_primary_color"]),
-        "theme_sidebar_color": normalize_hex(settings["theme_sidebar_color"], DEFAULT_THEME["theme_sidebar_color"]),
+        "theme_primary_color": raw_primary,
+        "theme_sidebar_color": raw_sidebar,
     }
 
 
@@ -45,19 +60,19 @@ def get_theme_palette():
     sidebar = settings["theme_sidebar_color"]
     return {
         "primary_main": primary,
-        "primary_hover": tint(primary, -0.18),
-        "primary_pressed": tint(primary, -0.35),
-        "primary_border": tint(primary, -0.15),
+        "primary_hover": tint(primary, -0.12),
+        "primary_pressed": tint(primary, -0.24),
+        "primary_border": tint(primary, -0.18),
         "focus_border": tint(primary, 0.28),
         "focus_fill": tint(primary, 0.88),
         "table_soft": tint(primary, 0.92),
         "table_border": tint(primary, 0.72),
         "sidebar_bg": sidebar,
-        "sidebar_border": tint(sidebar, 0.18),
-        "sidebar_hover": tint(sidebar, 0.22),
-        "sidebar_active": tint(primary, 0.92),
-        "sidebar_active_text": tint(primary, -0.65),
-        "sidebar_text": "#DDD9EB",
+        "sidebar_border": tint(sidebar, 0.12),
+        "sidebar_hover": tint(sidebar, 0.20),
+        "sidebar_active": "#0D8C86",
+        "sidebar_active_text": "#F5FEFD",
+        "sidebar_text": "#E6F5F2",
     }
 
 

@@ -19,7 +19,7 @@ from .permissions import Permissions
 from .license_core import get_current_license_payload, get_license_days_remaining, is_demo_license, is_pro_license
 from importlib import import_module
 from .stylus import load_stylesheets
-from .app_theme import get_theme_palette
+from .app_theme import get_theme_palette, tint
 from medic.services.business_service import fetch_business_name
 from medic.services.scheduled_price_service import (
     apply_due_scheduled_price_changes,
@@ -138,14 +138,14 @@ class MainWindow(QMainWindow):
         self.sidebar_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         
         self.sidebar_scroll.setStyleSheet(""" 
-                                    background-color: #163B5C;
+                                    background-color: #062B35;
 
                                     QScrollArea {
-                                        background-color: #163B5C;
+                                        background-color: #062B35;
                                         border: none;
                                     }
                                     QScrollArea > QWidget > QWidget {
-                                        background-color: #163B5C;
+                                        background-color: #062B35;
                                     }
                                     QScrollBar:vertical,
                                     QScrollBar:horizontal {
@@ -172,10 +172,10 @@ class MainWindow(QMainWindow):
         self.sidebar_rail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.sidebar_rail_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.sidebar_rail_scroll.setStyleSheet("""
-                                    background-color: #163B5C;
+                                    background-color: #062B35;
 
                                     QScrollArea {
-                                        background-color: #163B5C;
+                                        background-color: #062B35;
                                         border: none;
                                     }
                                     QScrollBar:vertical,
@@ -207,8 +207,8 @@ class MainWindow(QMainWindow):
         self.sidebar_panel.setObjectName("SidebarPanel")
         self.sidebar_panel.setStyleSheet("""
             QWidget#SidebarPanel {
-                background-color: #163B5C;
-                border: 1px solid #244A62;
+                background-color: #062B35;
+                border: 1px solid #154653;
                 border-radius: 0px;
             }
         """)
@@ -267,9 +267,9 @@ class MainWindow(QMainWindow):
 
         self.header_widget.setLayout(header_layout)
         self.header_widget.setStyleSheet("""
-            background-color: #163B5C;
+            background-color: #062B35;
             color: #F4F8FB;
-            border-bottom: 1px solid #244A62;
+            border-bottom: 1px solid #154653;
         """)
         
         
@@ -282,17 +282,17 @@ class MainWindow(QMainWindow):
         self.ham_button.setStyleSheet("""
             QPushButton {
                 color: #FFFFFF;
-                background-color: #2B5B7E;
-                border: 1px solid #3B7198;
+                background-color: #103C48;
+                border: 1px solid #1C5A69;
                 border-radius: 5px;
             }
             QPushButton:hover {
-                background-color: #35698F;
-                border: 1px solid #4A81AA;
+                background-color: #14515F;
+                border: 1px solid #227081;
             }
             QPushButton:pressed {
-                background-color: #234A68;
-                border: 1px solid #35637F;
+                background-color: #0A2C35;
+                border: 1px solid #154653;
             }
         """)
 
@@ -850,19 +850,37 @@ class MainWindow(QMainWindow):
         primary = palette["primary_main"]
         primary_hover = palette["primary_hover"]
         active_text = palette["sidebar_active_text"]
-        sidebar_bg = primary
-        sidebar_border = primary_hover
+        sidebar_bg = palette["sidebar_bg"]
+        sidebar_border = palette["sidebar_border"]
         self._current_sidebar_bg = sidebar_bg
         self._current_sidebar_border = sidebar_border
 
         self.setStyleSheet(load_stylesheets())
         self.header_widget.setStyleSheet(f"""
-            background-color: {primary};
+            background-color: {sidebar_bg};
             color: #F4F8FB;
             border-bottom: 1px solid {sidebar_border};
         """)
 
         self.sidebar_scroll.setStyleSheet(f""" 
+                                    background-color: {sidebar_bg};
+
+                                    QScrollArea {{
+                                        background-color: {sidebar_bg};
+                                        border: none;
+                                    }}
+                                    QScrollArea > QWidget > QWidget {{
+                                        background-color: {sidebar_bg};
+                                    }}
+                                    QScrollBar:vertical,
+                                    QScrollBar:horizontal {{
+                                        width: 0px;
+                                        height: 0px;
+                                        background: transparent;
+                                        border: none;
+                                    }}
+                                """)
+        self.sidebar_rail_scroll.setStyleSheet(f"""
                                     background-color: {sidebar_bg};
 
                                     QScrollArea {{
@@ -887,10 +905,28 @@ class MainWindow(QMainWindow):
                 border-radius: 0px;
             }}
         """)
+        for shell_button in (getattr(self, "ham_button", None), getattr(self, "sidebar_toggle_button", None)):
+            if shell_button is not None:
+                shell_button.setStyleSheet(f"""
+                    QPushButton {{
+                        color: #FFFFFF;
+                        background-color: {tint(sidebar_bg, 0.16)};
+                        border: 1px solid {sidebar_border};
+                        border-radius: 5px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {tint(sidebar_bg, 0.28)};
+                        border: 1px solid {tint(sidebar_bg, 0.34)};
+                    }}
+                    QPushButton:pressed {{
+                        background-color: {tint(sidebar_bg, -0.08)};
+                        border: 1px solid {sidebar_border};
+                    }}
+                """)
         self._apply_sidebar_brand_logo()
         self.sidebar_search_wrap.setStyleSheet(f"""
             QWidget#SidebarSearchWrap {{
-                background-color: {primary_hover};
+                background-color: {palette["sidebar_hover"]};
                 border: 1px solid {sidebar_border};
                 border-radius: 12px;
             }}
@@ -919,9 +955,56 @@ class MainWindow(QMainWindow):
                 font-weight: 700;
             }}
             QPushButton:hover {{
-                background-color: {primary_hover};
+                background-color: {palette["sidebar_hover"]};
             }}
         """)
+
+        if hasattr(self, "top_nav_widget"):
+            self.top_nav_widget.setStyleSheet(f"""
+                QWidget#TopNavigationStrip {{
+                    background-color: {sidebar_bg};
+                    border-bottom: 1px solid {sidebar_border};
+                }}
+            """)
+        if hasattr(self, "top_nav_search"):
+            self.top_nav_search.setStyleSheet(f"""
+                QLineEdit {{
+                    background-color: {palette["sidebar_hover"]};
+                    color: #F4F8FB;
+                    border: 1px solid {sidebar_border};
+                    border-radius: 7px;
+                    padding: 0 10px;
+                    font-family: arial;
+                    font-size: 13px;
+                }}
+                QLineEdit:focus {{
+                    border: 1px solid {palette["focus_border"]};
+                    background-color: {tint(sidebar_bg, 0.28)};
+                }}
+            """)
+        for nav_button in (getattr(self, "top_nav_back_btn", None), getattr(self, "top_nav_forward_btn", None)):
+            if nav_button is not None:
+                nav_button.setStyleSheet(f"""
+                    QPushButton {{
+                        color: #FFFFFF;
+                        background-color: {tint(sidebar_bg, 0.16)};
+                        border: 1px solid {sidebar_border};
+                        border-radius: 5px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {tint(sidebar_bg, 0.28)};
+                        border: 1px solid {tint(sidebar_bg, 0.34)};
+                    }}
+                    QPushButton:pressed {{
+                        background-color: {tint(sidebar_bg, -0.08)};
+                        border: 1px solid {sidebar_border};
+                    }}
+                    QPushButton:disabled {{
+                        color: #9FC6C3;
+                        background-color: {tint(sidebar_bg, 0.08)};
+                        border: 1px solid {sidebar_border};
+                    }}
+                """)
 
         for btn in getattr(self, "main_sidebar_buttons", []):
             refresh = getattr(btn, "refresh_theme", None)
@@ -1729,8 +1812,8 @@ class MainWindow(QMainWindow):
                     border-radius: 16px;
                 }
             """ % (
-                getattr(self, "_current_sidebar_bg", "#7B5AA6"),
-                getattr(self, "_current_sidebar_border", "#684A8C"),
+                getattr(self, "_current_sidebar_bg", "#062B35"),
+                getattr(self, "_current_sidebar_border", "#154653"),
             ))
 
         if hasattr(self, "sidebar_avatar"):
@@ -1751,7 +1834,7 @@ class MainWindow(QMainWindow):
             self.sidebar_brand_mark.setPixmap(QPixmap())
             self.sidebar_brand_mark.setText("P")
             self.sidebar_brand_mark.setStyleSheet("""
-                background-color: #163B5C;
+                background-color: #062B35;
                 color: #FFFFFF;
                 border-radius: 14px;
                 font-family: montserrat;
@@ -1774,8 +1857,8 @@ class MainWindow(QMainWindow):
         self.top_nav_widget.setFixedHeight(44)
         self.top_nav_widget.setStyleSheet("""
             QWidget#TopNavigationStrip {
-                background-color: #163B5C;
-                border-bottom: 1px solid #244A62;
+                background-color: #062B35;
+                border-bottom: 1px solid #154653;
             }
         """)
 
@@ -1814,17 +1897,17 @@ class MainWindow(QMainWindow):
         self.top_nav_search.setMaximumWidth(340)
         self.top_nav_search.setStyleSheet("""
             QLineEdit {
-                background-color: #1E4A6B;
+                background-color: #103C48;
                 color: #F4F8FB;
-                border: 1px solid #315C7A;
+                border: 1px solid #1C5A69;
                 border-radius: 7px;
                 padding: 0 10px;
                 font-family: arial;
                 font-size: 13px;
             }
             QLineEdit:focus {
-                border: 1px solid #5E8EB2;
-                background-color: #235376;
+                border: 1px solid #2A8A97;
+                background-color: #14515F;
             }
         """)
         self.top_nav_search_model = QStringListModel(self)
@@ -1866,22 +1949,22 @@ class MainWindow(QMainWindow):
         self.top_nav_back_btn.setStyleSheet("""
             QPushButton {
                 color: #FFFFFF;
-                background-color: #2B5B7E;
-                border: 1px solid #3B7198;
+                background-color: #103C48;
+                border: 1px solid #1C5A69;
                 border-radius: 5px;
             }
             QPushButton:hover {
-                background-color: #35698F;
-                border: 1px solid #4A81AA;
+                background-color: #14515F;
+                border: 1px solid #227081;
             }
             QPushButton:pressed {
-                background-color: #234A68;
-                border: 1px solid #35637F;
+                background-color: #0A2C35;
+                border: 1px solid #154653;
             }
             QPushButton:disabled {
-                color: #B8D0E1;
-                background-color: #244B68;
-                border: 1px solid #315B79;
+                color: #9FC6C3;
+                background-color: #0E3440;
+                border: 1px solid #154653;
             }
         """)
         if not self._icon_can_render(self.back_nav_icon, QSize(14, 14)):
@@ -1899,22 +1982,22 @@ class MainWindow(QMainWindow):
         self.top_nav_forward_btn.setStyleSheet("""
             QPushButton {
                 color: #FFFFFF;
-                background-color: #2B5B7E;
-                border: 1px solid #3B7198;
+                background-color: #103C48;
+                border: 1px solid #1C5A69;
                 border-radius: 5px;
             }
             QPushButton:hover {
-                background-color: #35698F;
-                border: 1px solid #4A81AA;
+                background-color: #14515F;
+                border: 1px solid #227081;
             }
             QPushButton:pressed {
-                background-color: #234A68;
-                border: 1px solid #35637F;
+                background-color: #0A2C35;
+                border: 1px solid #154653;
             }
             QPushButton:disabled {
-                color: #B8D0E1;
-                background-color: #244B68;
-                border: 1px solid #315B79;
+                color: #9FC6C3;
+                background-color: #0E3440;
+                border: 1px solid #154653;
             }
         """)
         if not self._icon_can_render(self.forward_nav_icon, QSize(14, 14)):
