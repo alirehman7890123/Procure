@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QApplication
 from medic.services.accounting_settings_service import load_theme_settings
 
@@ -83,6 +83,7 @@ def apply_app_theme():
 
     from .stylus import load_stylesheets
 
+    app.setFont(QFont("Inter", 12))
     stylesheet = load_stylesheets()
     app.setStyleSheet(stylesheet)
 

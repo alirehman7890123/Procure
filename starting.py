@@ -49,7 +49,7 @@ if not os.environ.get("QT_QPA_PLATFORMTHEME"):
 
 
 from PySide6.QtWidgets import QApplication, QWidget, QMainWindow, QPushButton, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QFileDialog, QFrame, QSizePolicy, QGridLayout
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QFont
 from medic.utilities.database import SQLiteConnectionManager, QSqlDatabase
 from medic.utilities.app_messagebox import AppMessageBox, install_messagebox_theme
 from medic.utilities.dialog_scrolling import install_dialog_scrolling
@@ -136,14 +136,16 @@ class AuthWindow(QMainWindow):
                     background-color: #062B35;
                 }
             """)
+            self.login_showcase_panel = companyinfo
             self.login_showcase_pixmap = QPixmap(str(login_hero_path))
             self.login_showcase_bg = QLabel(companyinfo)
             self.login_showcase_bg.setMinimumSize(0, 0)
             self.login_showcase_bg.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-            self.login_showcase_bg.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.login_showcase_bg.setAlignment(Qt.AlignCenter)
             self.login_showcase_bg.setStyleSheet("background-color: #062B35; padding-left: 0;")
             companyinfo_root_layout.addWidget(self.login_showcase_bg, 0, 0)
         else:
+            self.login_showcase_panel = None
             self.login_showcase_pixmap = QPixmap()
             self.login_showcase_bg = None
             companyinfo.setStyleSheet("""
@@ -389,8 +391,12 @@ class AuthWindow(QMainWindow):
     def _refresh_login_hero_art(self):
         background_label = getattr(self, "login_showcase_bg", None)
         source_pixmap = getattr(self, "login_showcase_pixmap", QPixmap())
+        panel = getattr(self, "login_showcase_panel", None)
         if background_label is None or source_pixmap.isNull():
             return
+
+        if panel is not None:
+            background_label.setGeometry(panel.rect())
 
         target_size = background_label.size()
         if target_size.width() <= 0 or target_size.height() <= 0:
@@ -402,7 +408,15 @@ class AuthWindow(QMainWindow):
             Qt.KeepAspectRatioByExpanding,
             Qt.SmoothTransformation,
         )
-        background_label.setPixmap(scaled)
+        x_offset = max((scaled.width() - target_size.width()) // 2, 0)
+        y_offset = max((scaled.height() - target_size.height()) // 2, 0)
+        cropped = scaled.copy(
+            x_offset,
+            y_offset,
+            min(target_size.width(), scaled.width()),
+            min(target_size.height(), scaled.height()),
+        )
+        background_label.setPixmap(cropped)
 
     def resizeEvent(self, event):
         top_margin = max(32, int(self.height() * 0.10))
@@ -2912,6 +2926,7 @@ class AuthWindow(QMainWindow):
 if __name__ == '__main__':
 
     app = QApplication([])
+    app.setFont(QFont("Inter", 12))
 
     if not ensure_valid_license():
         sys.exit(0)

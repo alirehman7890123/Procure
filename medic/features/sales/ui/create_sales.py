@@ -1050,8 +1050,8 @@ class CreateSalesWidget(QWidget):
         self.customer_frame = customer_frame
 
         customer_layout = QVBoxLayout(customer_frame)
-        customer_layout.setContentsMargins(12, 8, 12, 8)
-        customer_layout.setSpacing(4)
+        customer_layout.setContentsMargins(12, 8, 12, 4)
+        customer_layout.setSpacing(2)
 
         # Top Row Layout
         top_row = QHBoxLayout()
@@ -1061,7 +1061,7 @@ class CreateSalesWidget(QWidget):
         customerlabel = QLabel("CUSTOMER")
         
         self.customer = QComboBox()
-        self.customer.setMinimumWidth(200)
+        self.customer.setMinimumWidth(170)
                
         self.customer.setEditable(True)
         self.customer.setLineEdit(SelectAllLineEdit())
@@ -1141,19 +1141,13 @@ class CreateSalesWidget(QWidget):
         
         customer_layout.addLayout(top_row)
 
-        promo_status_row = QHBoxLayout()
-        promo_status_row.setContentsMargins(0, 0, 0, 0)
-        promo_status_row.setSpacing(10)
-
         self.global_pricing_status = QLabel()
         self.global_pricing_status.setWordWrap(False)
         self.global_pricing_status.setStyleSheet(
             "color: #3F5F75; font-size: 10px; font-weight: 700; padding-left: 0; margin: 0;"
         )
         self.global_pricing_status.setContentsMargins(0, 0, 0, 0)
-        promo_status_row.addWidget(self.global_pricing_status)
-        promo_status_row.addStretch()
-        customer_layout.addLayout(promo_status_row)
+        self.global_pricing_status.hide()
 
         self.update_customer_credit_summary()
         self.apply_customer_pricing_groups()
@@ -1253,12 +1247,12 @@ class CreateSalesWidget(QWidget):
 
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setMinimumWidth(900)
+        self.table.setMinimumWidth(780)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
         
-        visible_rows = 11
+        visible_rows = 6
         header_height = self.table.horizontalHeader().height()
 
         table_height = header_height + (self.row_height * visible_rows) + 2
@@ -1354,7 +1348,7 @@ class CreateSalesWidget(QWidget):
         grid = QGridLayout()
         grid.setHorizontalSpacing(6)
         grid.setVerticalSpacing(2)
-        grid.setContentsMargins(6, 4, 6, 2)
+        grid.setContentsMargins(0, 8, 0, 8)
         self.entry_grid = grid
 
         palette = get_theme_palette()
@@ -1463,6 +1457,8 @@ class CreateSalesWidget(QWidget):
 
         
         product_box_layout = QHBoxLayout()
+        product_box_layout.setContentsMargins(0, 0, 6, 0)
+        product_box_layout.setSpacing(6)
         
         product_label = QLabel("PRODUCT")
         product_label.setStyleSheet(field_style)
@@ -1485,6 +1481,16 @@ class CreateSalesWidget(QWidget):
         )
         self.item.setStyleSheet(field_style)
         self.quick_add_product_btn = QPushButton("+", objectName="EntryButton")
+        self.quick_add_product_btn.setMinimumSize(38, 34)
+        self.quick_add_product_btn.setStyleSheet(
+            """
+            QPushButton#EntryButton {
+                font-size: 18px;
+                font-weight: 900;
+                padding: 0 8px 2px 8px;
+            }
+            """
+        )
         self.quick_add_product_btn.setToolTip("Quick add product with opening stock")
         self.quick_add_product_btn.clicked.connect(
             lambda: self.open_sales_product_quick_add_dialog(self.item.lineEdit().text())
@@ -1612,7 +1618,7 @@ class CreateSalesWidget(QWidget):
         self.reset_line_defaults_btn.clicked.connect(self.reset_current_line_defaults)
 
         action_box_layout = QHBoxLayout()
-        action_box_layout.setContentsMargins(6, 6, 6, 6)
+        action_box_layout.setContentsMargins(8, 6, 6, 6)
         action_box_layout.setSpacing(6)
         action_box_layout.addWidget(add_button)
         action_box_layout.addWidget(self.reset_line_defaults_btn)
@@ -1704,11 +1710,11 @@ class CreateSalesWidget(QWidget):
         self.totals_frame = totals_frame
 
         totals_layout = QVBoxLayout(totals_frame)
-        totals_layout.setContentsMargins(8, 8, 8, 8)
+        totals_layout.setContentsMargins(6, 8, 6, 8)
         totals_layout.setSpacing(6)
 
         main_grid = QGridLayout()
-        main_grid.setHorizontalSpacing(18)
+        main_grid.setHorizontalSpacing(12)
         main_grid.setVerticalSpacing(8)
 
         label_style = """
@@ -1778,7 +1784,7 @@ class CreateSalesWidget(QWidget):
             due_date_label,
             payment_method_label,
         ):
-            lbl.setMinimumWidth(80)
+            lbl.setMinimumWidth(72)
 
         # -----------------------------
         # Create fields
@@ -1830,12 +1836,14 @@ class CreateSalesWidget(QWidget):
 
         self.received_entry = QLineEdit("0.00")
         self.received_entry.setObjectName("ReceivedAmount")
+        self.received_entry.setMinimumWidth(92)
         
         self.change_entry = QLineEdit("0.00")
         self.change_entry.setReadOnly(True)
 
         self.remainingdata = QLineEdit("0.00")
         self.remainingdata.setReadOnly(True)
+        self.remainingdata.setMinimumWidth(92)
 
         self.writeoff_check = QCheckBox("Write-off Remaining")
         self.writeoff_check.setStyleSheet("QCheckBox { color: #333; font-size: 11px; }")
@@ -1875,6 +1883,8 @@ class CreateSalesWidget(QWidget):
         self.additional_entry.textChanged.connect(self.update_total_amount)
         self.discount_entry.textEdited.connect(self.on_discount_entry_edited)
         self.tax_entry.textEdited.connect(self.on_tax_entry_edited)
+        self.discount_entry.editingFinished.connect(self.on_discount_entry_finished)
+        self.tax_entry.editingFinished.connect(self.on_tax_entry_finished)
         self.additional_entry.editingFinished.connect(self.on_additional_entry_finished)
         self.received_entry.textChanged.connect(self.calculate_payment)
         self.received_entry.textChanged.connect(self.update_due_date_availability)
@@ -1904,14 +1914,14 @@ class CreateSalesWidget(QWidget):
         left_grid.addWidget(self.due_date_combo, 2, 5)
         left_grid.addWidget(payment_method_label, 2, 6)
         left_grid.addWidget(self.payment_method, 2, 7)
-        left_grid.setColumnMinimumWidth(0, 80)
-        left_grid.setColumnMinimumWidth(1, 60)
-        left_grid.setColumnMinimumWidth(2, 80)
-        left_grid.setColumnMinimumWidth(3, 60)
-        left_grid.setColumnMinimumWidth(4, 80)
-        left_grid.setColumnMinimumWidth(5, 60)
-        left_grid.setColumnMinimumWidth(6, 80)
-        left_grid.setColumnMinimumWidth(7, 60)
+        left_grid.setColumnMinimumWidth(0, 72)
+        left_grid.setColumnMinimumWidth(1, 56)
+        left_grid.setColumnMinimumWidth(2, 72)
+        left_grid.setColumnMinimumWidth(3, 56)
+        left_grid.setColumnMinimumWidth(4, 72)
+        left_grid.setColumnMinimumWidth(5, 56)
+        left_grid.setColumnMinimumWidth(6, 72)
+        left_grid.setColumnMinimumWidth(7, 56)
         left_grid.setColumnStretch(1, 1)
         left_grid.setColumnStretch(3, 1)
         left_grid.setColumnStretch(5, 1)
@@ -1934,14 +1944,15 @@ class CreateSalesWidget(QWidget):
         checkbox_layout.addWidget(self.auto_print_check)
         checkbox_layout.addWidget(self.writeoff_check)
         right_grid.addLayout(checkbox_layout, 2, 0, 1, 4)
-        right_grid.setColumnMinimumWidth(0, 92)
-        right_grid.setColumnMinimumWidth(2, 118)
+        right_grid.setColumnMinimumWidth(0, 84)
+        right_grid.setColumnMinimumWidth(2, 104)
+        right_grid.setColumnMinimumWidth(3, 92)
         right_grid.setColumnStretch(1, 1)
         right_grid.setColumnStretch(3, 1)
 
         left_section = QFrame()
         left_section.setObjectName("TotalsLeftSection")
-        left_section.setMinimumWidth(700)
+        left_section.setMinimumWidth(0)
         left_section.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         left_section_layout = QVBoxLayout(left_section)
         left_section_layout.setContentsMargins(0, 0, 0, 0)
@@ -1949,19 +1960,19 @@ class CreateSalesWidget(QWidget):
         left_section_layout.addLayout(left_grid)
         right_section = QFrame()
         right_section.setObjectName("TotalsRightSection")
-        right_section.setMinimumWidth(300)
+        right_section.setMinimumWidth(260)
         right_section.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         right_section_layout = QVBoxLayout(right_section)
-        right_section_layout.setContentsMargins(10, 10, 10, 10)
+        right_section_layout.setContentsMargins(8, 10, 8, 10)
         right_section_layout.setSpacing(0)
         right_section_layout.addLayout(right_grid)
 
         main_grid.addWidget(left_section, 0, 0)
-        section_gap = QSpacerItem(8, 10, QSizePolicy.Fixed, QSizePolicy.Minimum)
+        section_gap = QSpacerItem(4, 10, QSizePolicy.Fixed, QSizePolicy.Minimum)
         main_grid.addItem(section_gap, 0, 1)
         main_grid.addWidget(right_section, 0, 2)
-        main_grid.setColumnStretch(0, 7)
-        main_grid.setColumnStretch(2, 3)
+        main_grid.setColumnStretch(0, 6)
+        main_grid.setColumnStretch(2, 4)
 
         totals_layout.addLayout(main_grid)
 
@@ -3130,6 +3141,20 @@ class CreateSalesWidget(QWidget):
         self.tax_group_manual_override = True
         self.refresh_customer_pricing_summary()
 
+    def on_discount_entry_finished(self):
+        discount_amount = self._float_or_default(self.discount_entry.text(), 0.0)
+        self.discount_entry.blockSignals(True)
+        self.discount_entry.setText(f"{discount_amount:.2f}")
+        self.discount_entry.blockSignals(False)
+        self.update_total_amount()
+
+    def on_tax_entry_finished(self):
+        tax_amount = self._float_or_default(self.tax_entry.text(), 0.0)
+        self.tax_entry.blockSignals(True)
+        self.tax_entry.setText(f"{tax_amount:.2f}")
+        self.tax_entry.blockSignals(False)
+        self.update_total_amount()
+
     def update_header_adjustment_visuals(self):
         discount_auto = (
             self.active_discount_group_id is not None
@@ -4206,6 +4231,12 @@ class CreateSalesWidget(QWidget):
             self.item.lineEdit().setFocus()
             return
 
+        if str(product.get("status") or "active").strip().lower() != "used":
+            self.item.lineEdit().clear()
+            self.open_sales_product_quick_add_dialog(product.get("display_name") or code_text)
+            self.item.lineEdit().setFocus()
+            return
+
         if int(product.get("available_stock") or 0) <= 0:
             AppMessageBox.information(
                 self,
@@ -4387,6 +4418,18 @@ class CreateSalesWidget(QWidget):
             self.open_sales_product_quick_add_dialog(data.get("display_name") or text)
             return None
 
+        if data.get("search_payload_only"):
+            full_product_data = self._fetch_sales_product_data(data.get("product_id"))
+            if not isinstance(full_product_data, dict):
+                combo.blockSignals(True)
+                combo.setCurrentIndex(-1)
+                if combo.lineEdit() is not None:
+                    combo.lineEdit().clear()
+                combo.blockSignals(False)
+                combo.hidePopup()
+                return None
+            data = full_product_data
+
         if not self.ensure_prescription_for_product(data):
             combo.blockSignals(True)
             combo.setCurrentIndex(-1)
@@ -4515,14 +4558,20 @@ class CreateSalesWidget(QWidget):
         line_discount_total = self.get_current_line_discount_total()
         line_tax_total = self.get_current_line_tax_total()
 
-        if self.discount_entry.text().strip() != f"{discount:.2f}":
+        if (
+            not self.discount_entry.hasFocus()
+            and self.discount_entry.text().strip() != f"{discount:.2f}"
+        ):
             self.discount_entry.blockSignals(True)
             self.discount_entry.setText(f"{discount:.2f}")
             self.discount_entry.blockSignals(False)
 
         self.taxable_entry.setText(f"{taxable:.2f}")
 
-        if self.tax_entry.text().strip() != f"{tax:.2f}":
+        if (
+            not self.tax_entry.hasFocus()
+            and self.tax_entry.text().strip() != f"{tax:.2f}"
+        ):
             self.tax_entry.blockSignals(True)
             self.tax_entry.setText(f"{tax:.2f}")
             self.tax_entry.blockSignals(False)

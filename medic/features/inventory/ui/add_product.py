@@ -33,6 +33,7 @@ from medic.services.product_write_service import (
     save_product_with_opening_stock,
     verify_active_admin_password,
 )
+from medic.services.product_catalog_service import search_purchase_products
 
 
 
@@ -517,7 +518,10 @@ class AddProductWidget(QWidget):
         from medic.utilities.product_search_widget import ProductSearchBox
 
         forms = get_product_form_options()
-        self.name_input = ProductSearchBox(self)
+        self.name_input = ProductSearchBox(
+            self,
+            query_fn=lambda text: search_purchase_products(text, limit=20),
+        )
         self.name_input.lineEdit().textEdited.connect(self.force_uppercase)
         self.name_input.setStyleSheet("""
             QComboBox QAbstractItemView {
@@ -535,8 +539,8 @@ class AddProductWidget(QWidget):
                 image: none;
             }
             """)
-        self.name_input.product_selected.connect(
-            lambda pid, name: self.on_item_selected(name)
+        self.name_input.product_selected_with_data.connect(
+            lambda pid, name, data: self.on_item_selected(name, data)
         )
         self.name_input.activated[int].connect(self.on_name_index_activated)
         self.name_input.lineEdit().returnPressed.connect(self.on_name_enter_pressed)
@@ -885,7 +889,7 @@ class AddProductWidget(QWidget):
         self.reorder_level.returnPressed.connect(self.save_button.click)
     
 
-    def on_item_selected(self, text):
+    def on_item_selected(self, text, selected_data=None):
         text = text.strip()
 
         index = self.name_input.findText(text, Qt.MatchFixedString)
@@ -895,13 +899,13 @@ class AddProductWidget(QWidget):
         self.name_input.setCurrentIndex(index)
         self.name_input.lineEdit().setText(text)
 
-        data = self.name_input.itemData(index)
+        data = selected_data if selected_data is not None else self.name_input.itemData(index)
         print("Selected text is:", text, data)
 
         # Existing product selected: autofill known details and continue at batch entry.
         if data is not None:
             try:
-                product_id = int(data)
+                product_id = int(data.get("product_id") if isinstance(data, dict) else data)
             except (TypeError, ValueError):
                 product_id = None
 
@@ -915,7 +919,7 @@ class AddProductWidget(QWidget):
             return
         text = self.name_input.itemText(index).strip()
         if text:
-            self.on_item_selected(text)
+            self.on_item_selected(text, self.name_input.itemData(index))
 
     def on_name_enter_pressed(self):
         text = self.name_input.lineEdit().text().strip()
@@ -925,7 +929,7 @@ class AddProductWidget(QWidget):
 
         index = self.name_input.findText(text, Qt.MatchFixedString)
         if index >= 0 and self.name_input.itemData(index) is not None:
-            self.on_item_selected(text)
+            self.on_item_selected(text, self.name_input.itemData(index))
         else:
             # Product not found: keep existing new-product flow.
             self.focus_next_field(self.dosage)
@@ -1036,7 +1040,12 @@ class AddProductWidget(QWidget):
         print("Going to save the product")
 
         # ---------- Read input ----------
-        existing_product_id = self.name_input.currentData()
+        selected_product_data = self.name_input.currentData()
+        existing_product_id = (
+            selected_product_data.get("product_id")
+            if isinstance(selected_product_data, dict)
+            else selected_product_data
+        )
         display_name = self.name_input.currentText().strip()
         
         print(display_name, existing_product_id)

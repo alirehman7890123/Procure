@@ -24,6 +24,7 @@ from medic.services.inventory_movement_service import (
     insert_sold_batch_record as insert_sold_batch_record_from_inventory,
 )
 from medic.services.sales_items_service import compute_fifo_allocation_plan
+from medic.services.product_sales_rank_service import record_product_sale
 from medic.services.sales_posting_service import (
     build_customer_transaction_note,
     compute_customer_transaction_balances,
@@ -710,6 +711,8 @@ def persist_sales_item_with_fifo(*, sales_id, row_payload, row_number):
     for allocation in allocation_result.get("allocations", []):
         decrement_batch_quantity(allocation["batch_id"], allocation["take_qty"])
         insert_sold_batch_record(sale_item_id, allocation)
+
+    record_product_sale(product_id, qty_needed, db=_database())
 
     return {
         "sale_item_id": sale_item_id,

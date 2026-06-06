@@ -9,6 +9,7 @@ import pyqtgraph as pg
 import sys
 import html
 from medic.utilities.stylus import load_stylesheets
+from medic.utilities.app_theme import get_theme_palette, tint
 from medic.reports import report_service
 from medic.utilities.app_messagebox import AppMessageBox
 from medic.utilities.license_core import get_current_license_payload, is_demo_license
@@ -114,20 +115,20 @@ class MainReportsPage(QWidget):
 
         header_widget = QFrame()
         header_widget.setCursor(Qt.PointingHandCursor)
-        header_widget.setStyleSheet("QFrame:hover { background-color: #F2F6FA; border-radius: 4px; }")
+        header_widget.setStyleSheet(self.report_header_style(compact=True))
 
         header_row = QHBoxLayout(header_widget)
         header_row.setContentsMargins(0, 0, 0, 0)
         header_row.setSpacing(8)
 
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #223746; padding-left: 0;")
+        title_label.setStyleSheet("font-size: 14px; font-weight: 700; color: #FFFFFF; padding-left: 0;")
         title_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         header_row.addWidget(title_label)
 
         if subtitle:
             subtitle_label = QLabel(subtitle)
-            subtitle_label.setStyleSheet("font-size: 11px; font-weight: 500; color: #5A7183; padding-left: 0;")
+            subtitle_label.setStyleSheet("font-size: 11px; font-weight: 500; color: #E6F5F2; padding-left: 0;")
             subtitle_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             header_row.addWidget(subtitle_label)
 
@@ -139,7 +140,7 @@ class MainReportsPage(QWidget):
         toggle_btn.setChecked(expanded)
         toggle_btn.setAutoRaise(True)
         toggle_btn.setFixedSize(24, 24)
-        toggle_btn.setStyleSheet("color: #2F5D7C; border: none;")
+        toggle_btn.setStyleSheet("QToolButton { color: #FFFFFF; border: none; background: transparent; }")
 
         def set_section_state(is_expanded):
             content_widget.setVisible(is_expanded)
@@ -250,7 +251,7 @@ class MainReportsPage(QWidget):
         layout.setSpacing(6)
 
         header = QFrame()
-        header.setStyleSheet("QFrame { background-color: #325D7B; border: 1px solid #284B63; border-radius: 6px; }")
+        header.setStyleSheet(self.report_header_style())
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(10, 6, 10, 6)
         header_layout.setSpacing(8)
@@ -324,19 +325,6 @@ class MainReportsPage(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
-
-        title_row = QHBoxLayout()
-        title_row.setContentsMargins(0, 0, 0, 0)
-        title_row.setSpacing(8)
-
-        title = QLabel("Trend & Forecast")
-        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #223746; padding-left: 0;")
-        subtitle = QLabel("Phase 2: daily trend, forecast horizon, projection band, confidence, reorder hint")
-        subtitle.setStyleSheet("font-size: 11px; font-weight: 500; color: #5A7183; padding-left: 0;")
-        title_row.addWidget(title)
-        title_row.addWidget(subtitle)
-        title_row.addStretch()
-        layout.addLayout(title_row)
 
         filter_row = QHBoxLayout()
         filter_row.setContentsMargins(0, 0, 0, 0)
@@ -493,7 +481,12 @@ class MainReportsPage(QWidget):
         self.trend_product_combo.currentIndexChanged.connect(self.load_phase_one_trend_panel)
         self.on_trend_controls_changed()
 
-        return card
+        return self.create_reports_section(
+            "Trend & Forecast",
+            card,
+            subtitle="Phase 2: daily trend, forecast horizon, projection band, confidence, reorder hint",
+            expanded=False,
+        )
 
     def create_trend_stat_card(self, title_text, title_attr_name, value_attr_name):
         card = QFrame()
@@ -777,7 +770,7 @@ class MainReportsPage(QWidget):
 
         header = QFrame()
         header.setCursor(Qt.PointingHandCursor)
-        header.setStyleSheet("QFrame { background-color: #325D7B; border: 1px solid #284B63; border-radius: 6px; }")
+        header.setStyleSheet(self.report_header_style())
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(10, 6, 10, 6)
         header_layout.setSpacing(6)
@@ -2909,7 +2902,7 @@ class MainReportsPage(QWidget):
 
         header = QFrame()
         header.setCursor(Qt.PointingHandCursor)
-        header.setStyleSheet("QFrame { background-color: #325D7B; border: 1px solid #284B63; border-radius: 6px; }")
+        header.setStyleSheet(self.report_header_style())
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(10, 6, 10, 6)
         header_layout.setSpacing(6)
@@ -2975,7 +2968,7 @@ class MainReportsPage(QWidget):
 
         header = QFrame()
         header.setCursor(Qt.PointingHandCursor)
-        header.setStyleSheet("QFrame { background-color: #325D7B; border: 1px solid #284B63; border-radius: 6px; }")
+        header.setStyleSheet(self.report_header_style())
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(10, 6, 10, 6)
         header_layout.setSpacing(6)
@@ -3042,7 +3035,7 @@ class MainReportsPage(QWidget):
 
         header = QFrame()
         header.setCursor(Qt.PointingHandCursor)
-        header.setStyleSheet("QFrame { background-color: #325D7B; border: 1px solid #284B63; border-radius: 6px; }")
+        header.setStyleSheet(self.report_header_style())
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(10, 6, 10, 6)
         header_layout.setSpacing(6)
@@ -3107,7 +3100,7 @@ class MainReportsPage(QWidget):
 
         header = QFrame()
         header.setCursor(Qt.PointingHandCursor)
-        header.setStyleSheet("QFrame { background-color: #325D7B; border: 1px solid #284B63; border-radius: 6px; }")
+        header.setStyleSheet(self.report_header_style())
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(10, 6, 10, 6)
         header_layout.setSpacing(6)
@@ -5902,6 +5895,17 @@ class MainReportsPage(QWidget):
                 padding-left: 0;
             }
         """
+
+    def report_header_style(self, compact=False):
+        palette = get_theme_palette()
+        sidebar_bg = palette.get("sidebar_bg", "#062B35")
+        border_color = tint(sidebar_bg, -0.12)
+        hover_color = tint(sidebar_bg, 0.08)
+        radius = 4 if compact else 6
+        return (
+            f"QFrame {{ background-color: {sidebar_bg}; border: 1px solid {border_color}; border-radius: {radius}px; }}"
+            f"QFrame:hover {{ background-color: {hover_color}; border-radius: {radius}px; }}"
+        )
 
     def report_action_btn_style(self):
         return (

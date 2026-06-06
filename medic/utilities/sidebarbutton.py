@@ -90,28 +90,28 @@ class SideBarButton(QPushButton):
         radius = "5px"
 
         text_align = "center" if self._is_collapsed else "left"
-        left_pad = "0px" if self._is_collapsed else "18px"
+        left_pad = "0px" if self._is_collapsed else "10px"
         right_pad = "0px" if self._is_collapsed else "14px"
         min_width = "40px" if self._is_collapsed else "0px"
-        margin = "4px" if self._is_collapsed else "2px 0px"
+        margin = "4px" if self._is_collapsed else "0px"
         padding = "4px 0px" if self._is_collapsed else "0px"
-        radius = "10px" if self._is_collapsed else "5px"
+        radius = "10px" if self._is_collapsed else "8px"
 
         self.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {bg};
-                color: {fg};
-                border: 1px solid {border};
-                border-radius: {radius};
-                padding: {padding};
-                padding-left: {left_pad};
-                padding-right: {right_pad};
-                margin: {margin};
-                text-align: {text_align};
-                font-family: montserrat;
-                font-size: 12px;
-                font-weight: {'700' if self._is_active else '600'};
-                letter-spacing: 0.2px;
-                min-width: {min_width};
-            }}
+            background-color: {bg};
+            color: {fg};
+            border: 1px solid {border};
+            border-radius: {radius};
+            padding: {padding};
+            padding-left: {left_pad};
+            padding-right: {right_pad};
+            margin: {margin};
+            text-align: {text_align};
+            font-family: 'Inter';
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.2px;
+            min-width: {min_width};
+            min-height: 40px;
+            max-height: 40px;
         """)

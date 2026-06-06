@@ -261,6 +261,98 @@ def fetch_manufacturer_name(manufacturer_id):
     return ""
 
 
+def ensure_shop_product(product_id):
+    normalized_product_id = int(product_id or 0)
+    if normalized_product_id <= 0:
+        raise ValueError("A valid product is required.")
+
+    db = QSqlDatabase.database()
+    if not db.transaction():
+        raise Exception("Failed to start transaction.")
+
+    try:
+        status_query = _new_query(db)
+        status_query.prepare(
+            """
+            SELECT COALESCE(status, 'active')
+            FROM product
+            WHERE id = ?
+            LIMIT 1
+            """
+        )
+        status_query.addBindValue(normalized_product_id)
+        if not status_query.exec():
+            raise Exception(status_query.lastError().text())
+        if not status_query.next():
+            raise Exception("Selected product was not found.")
+
+        current_status = str(status_query.value(0) or "active").strip().lower()
+        if current_status != "used":
+            promote_query = _new_query(db)
+            promote_query.prepare(
+                """
+                UPDATE product
+                SET status = 'used'
+                WHERE id = ?
+                """
+            )
+            promote_query.addBindValue(normalized_product_id)
+            if not promote_query.exec():
+                raise Exception(promote_query.lastError().text())
+
+        price_query = _new_query(db)
+        price_query.prepare(
+            """
+            SELECT id
+            FROM price_pack
+            WHERE product_id = ?
+            ORDER BY is_default DESC, id DESC
+            LIMIT 1
+            """
+        )
+        price_query.addBindValue(normalized_product_id)
+        if not price_query.exec():
+            raise Exception(price_query.lastError().text())
+
+        default_price_pack_id = None
+        if price_query.next():
+            default_price_pack_id = price_query.value(0)
+
+        if default_price_pack_id is None:
+            insert_price_query = _new_query(db)
+            insert_price_query.prepare(
+                """
+                INSERT INTO price_pack (product_id, pack_size, pack_price, margin_percent, reorder_level, is_default)
+                VALUES (?, 1, 0, ?, 0, 1)
+                """
+            )
+            insert_price_query.addBindValue(normalized_product_id)
+            insert_price_query.addBindValue(DEFAULT_MARGIN_PERCENT)
+            if not insert_price_query.exec():
+                raise Exception(insert_price_query.lastError().text())
+        else:
+            normalize_default_query = _new_query(db)
+            normalize_default_query.prepare(
+                """
+                UPDATE price_pack
+                SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END
+                WHERE product_id = ?
+                """
+            )
+            normalize_default_query.addBindValue(default_price_pack_id)
+            normalize_default_query.addBindValue(normalized_product_id)
+            if not normalize_default_query.exec():
+                raise Exception(normalize_default_query.lastError().text())
+
+        if not db.commit():
+            raise Exception("Transaction commit failed.")
+
+        return normalized_product_id
+    except Exception:
+        db.rollback()
+        raise
+
+
 def fetch_previous_pack_price(product_id):
     query = _new_query()
     query.prepare(

@@ -42,9 +42,10 @@ _POPUP_STYLE = """
         background-color: white;
         border: 1px solid gray;
         color: #333;
+        font-size: 12px;
     }
     QListView::item {
-        padding: 6px 10px;
+        padding: 6px 5px;
     }
     QListView::item:selected {
         background-color: #5A9EC9;
@@ -102,12 +103,14 @@ class ProductSearchBox(QComboBox):
         if current_line_edit is not None:
             current_line_edit.setCompleter(self._completer)
         self._wire_line_edit(current_line_edit)
+        self._apply_line_edit_style(current_line_edit)
 
     def setLineEdit(self, line_edit):
         super().setLineEdit(line_edit)
         if line_edit is not None:
             line_edit.setCompleter(self._completer)
         self._wire_line_edit(line_edit)
+        self._apply_line_edit_style(line_edit)
 
     def _wire_line_edit(self, line_edit):
         if line_edit is None or line_edit is self._wired_line_edit:
@@ -119,6 +122,23 @@ class ProductSearchBox(QComboBox):
                 pass
         line_edit.textEdited.connect(self._on_text_edited)
         self._wired_line_edit = line_edit
+
+    def _apply_line_edit_style(self, line_edit):
+        if line_edit is None:
+            return
+        base_style = str(line_edit.styleSheet() or "").strip()
+        managed_rules = (
+            "font-weight: 700;",
+            "padding: 0 2px 0 0;",
+            "margin: 0;",
+            "border: 0;",
+            "background: transparent;",
+        )
+        for rule in managed_rules:
+            if rule not in base_style:
+                base_style = f"{base_style}\n{rule}".strip()
+        line_edit.setStyleSheet(base_style)
+        line_edit.setTextMargins(0, 0, 0, 0)
 
     # ------------------------------------------------------------------
     # Public helpers

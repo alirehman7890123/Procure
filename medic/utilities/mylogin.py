@@ -1,7 +1,7 @@
 
 from PySide6.QtWidgets import QApplication, QLineEdit, QWidget,QTableWidget, QMainWindow,QMessageBox, QPushButton, QHBoxLayout, QVBoxLayout, QStackedLayout, QLabel, QSizePolicy, QGraphicsOpacityEffect, QToolButton, QCompleter, QMenu
 from PySide6.QtCore import QSize, Qt, QEvent, Signal, QObject, QTimer, QStringListModel, QPropertyAnimation, QEasingCurve
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QKeySequence, QShortcut, QFont
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSql import QSqlDatabase, QSqlQuery
 from PySide6.QtWidgets import QScrollArea
@@ -2637,6 +2637,7 @@ class SelectAllLineEditFilter(QObject):
 if __name__ == '__main__':
 
     app = QApplication(sys.argv)
+    app.setFont(QFont("Inter", 12))
 
     select_all_filter = SelectAllLineEditFilter()
     app.installEventFilter(select_all_filter)

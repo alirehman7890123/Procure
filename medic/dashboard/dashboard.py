@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QHeaderView,QDialog, QLineEdit,QSpacerItem, QSizePolicy, QVBoxLayout, QHBoxLayout, QFrame, QTableWidget, QTableWidgetItem, QComboBox, QMessageBox, QFileDialog, QInputDialog, QApplication, QGridLayout, QToolTip
 from PySide6.QtCore import Qt, QFile, QDate, QDateTime, Signal, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtSql import QSqlDatabase
 from PySide6.QtCore import QDate
 from functools import partial
@@ -297,12 +297,8 @@ class DashboardWidget(QWidget):
         header = QHBoxLayout()
         title = QLabel("Quick Links")
         title.setObjectName("SectionTitle")
-        title_hint = QLabel("Jump into common sales and purchase actions")
-        title_hint.setStyleSheet("color:#57707A; padding-left: 0;")
 
         header.addWidget(title)
-        header.addSpacing(8)
-        header.addWidget(title_hint)
         header.addStretch()
         layout.addLayout(header)
 
@@ -313,7 +309,7 @@ class DashboardWidget(QWidget):
             "Use these shortcuts to start a new sales or purchase invoice, or review only today's sales for the active session."
         )
         helper_text.setWordWrap(True)
-        helper_text.setStyleSheet("color:#48646E; padding-left: 0;")
+        helper_text.setStyleSheet("color:#48646E; font-size: 12px; font-weight: 400; padding-left: 0;")
         action_row.addWidget(helper_text, 1)
 
         self.quick_create_sale_btn = QPushButton("Create Sale")
@@ -361,6 +357,8 @@ class DashboardWidget(QWidget):
             }
             QLabel#SectionTitle {
                 color: #0F2E39;
+                font-size: 14px;
+                font-weight: 600;
             }
             """
         )
@@ -368,18 +366,18 @@ class DashboardWidget(QWidget):
     def _apply_dashboard_button_style(self, button, *, tone="primary"):
         palette = {
             "primary": {
-                "bg": "#0D8C86",
-                "hover": "#0A7A74",
-                "pressed": "#08635F",
-                "border": "#0A6C68",
+                "bg": "#062B35",
+                "hover": "#18A9A2",
+                "pressed": "#0A7A74",
+                "border": "#0B3943",
                 "text": "#F7FEFD",
             },
             "secondary": {
-                "bg": "#0F3340",
-                "hover": "#15414F",
-                "pressed": "#0A2832",
-                "border": "#184A58",
-                "text": "#F4FBFC",
+                "bg": "#062B35",
+                "hover": "#18A9A2",
+                "pressed": "#0A7A74",
+                "border": "#0B3943",
+                "text": "#F7FEFD",
             },
         }[tone]
         button.setStyleSheet(
@@ -388,11 +386,11 @@ class DashboardWidget(QWidget):
                 color: {palette['text']};
                 background-color: {palette['bg']};
                 border: 1px solid {palette['border']};
-                border-radius: 7px;
-                font-weight: 700;
-                font-family: 'montserrat';
-                font-size: 11px;
-                padding: 4px 10px;
+                border-radius: 6px;
+                font-weight: 600;
+                font-family: 'Inter';
+                font-size: 12px;
+                padding: 3px 14px;
                 min-height: 24px;
             }}
             QPushButton:hover {{
@@ -939,7 +937,7 @@ class DashboardWidget(QWidget):
 
         meta_row = QHBoxLayout()
         self.session_meta = QLabel("Session status not loaded yet")
-        self.session_meta.setStyleSheet("color:#777; padding-left: 0;")
+        self.session_meta.setStyleSheet("color:#777; font-size: 12px; font-weight: 400; padding-left: 0;")
         meta_row.addWidget(self.session_meta)
         meta_row.addStretch()
 
@@ -1020,7 +1018,7 @@ class DashboardWidget(QWidget):
 
         info_row = QHBoxLayout()
         self.backup_meta = QLabel("Backup status not loaded yet")
-        self.backup_meta.setStyleSheet("color:#777; padding-left: 0;")
+        self.backup_meta.setStyleSheet("color:#777; font-size: 12px; font-weight: 400; padding-left: 0;")
         info_row.addWidget(self.backup_meta)
         info_row.addStretch()
 
@@ -1062,7 +1060,7 @@ class DashboardWidget(QWidget):
         self.sales_snapshot_range_combo.currentIndexChanged.connect(self.load_sales_snapshot_data)
         self.sales_trend_meta = QLabel("Last 7 days")
         self.sales_trend_meta.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.sales_trend_meta.setStyleSheet("color:#5B777F; padding-left: 0;")
+        self.sales_trend_meta.setStyleSheet("color:#5B777F; font-size: 12px; font-weight: 400; padding-left: 0;")
         header.addWidget(title)
         header.addStretch()
         header.addWidget(self.sales_snapshot_range_combo)
@@ -1090,10 +1088,16 @@ class DashboardWidget(QWidget):
         self.sales_trend_plot.setMouseEnabled(x=False, y=False)
         self.sales_trend_plot.hideButtons()
         self.sales_trend_plot.getPlotItem().setContentsMargins(6, 6, 12, 6)
-        self.sales_trend_plot.getAxis("left").setTextPen(pg.mkPen("#66808A"))
-        self.sales_trend_plot.getAxis("bottom").setTextPen(pg.mkPen("#66808A"))
-        self.sales_trend_plot.getAxis("left").setPen(pg.mkPen("#D8EAE8"))
-        self.sales_trend_plot.getAxis("bottom").setPen(pg.mkPen("#D8EAE8"))
+        axis_tick_font = QFont()
+        axis_tick_font.setPointSize(10)
+        left_axis = self.sales_trend_plot.getAxis("left")
+        bottom_axis = self.sales_trend_plot.getAxis("bottom")
+        left_axis.setTextPen(pg.mkPen("#66808A"))
+        bottom_axis.setTextPen(pg.mkPen("#66808A"))
+        left_axis.setPen(pg.mkPen("#D8EAE8"))
+        bottom_axis.setPen(pg.mkPen("#D8EAE8"))
+        left_axis.setStyle(tickFont=axis_tick_font)
+        bottom_axis.setStyle(tickFont=axis_tick_font)
         self.sales_trend_plot.getPlotItem().hideAxis("top")
         self.sales_trend_plot.getPlotItem().hideAxis("right")
         self.sales_trend_points = []
@@ -1115,7 +1119,7 @@ class DashboardWidget(QWidget):
         title.setObjectName("SectionTitle")
         self.top_selling_meta = QLabel("Last 30 days")
         self.top_selling_meta.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.top_selling_meta.setStyleSheet("color:#5B777F; padding-left: 0;")
+        self.top_selling_meta.setStyleSheet("color:#5B777F; font-size: 12px; font-weight: 400; padding-left: 0;")
         header.addWidget(title)
         header.addStretch()
         header.addWidget(self.top_selling_meta)
@@ -1183,7 +1187,7 @@ class DashboardWidget(QWidget):
 
         info_row = QHBoxLayout()
         self.reminder_meta = QLabel("Payments + stock reminders")
-        self.reminder_meta.setStyleSheet("color:#777; padding-left: 0;")
+        self.reminder_meta.setStyleSheet("color:#777; font-size: 12px; font-weight: 400; padding-left: 0;")
         info_row.addWidget(self.reminder_meta)
         info_row.addStretch()
 
@@ -1225,7 +1229,7 @@ class DashboardWidget(QWidget):
 
         info_row = QHBoxLayout()
         self.low_stock_meta = QLabel("No low-stock alerts")
-        self.low_stock_meta.setStyleSheet("color:#777; padding-left: 0;")
+        self.low_stock_meta.setStyleSheet("color:#777; font-size: 12px; font-weight: 400; padding-left: 0;")
         info_row.addWidget(self.low_stock_meta)
         info_row.addStretch()
 
@@ -1268,7 +1272,7 @@ class DashboardWidget(QWidget):
 
         info_row = QHBoxLayout()
         self.expiry_meta = QLabel("No expiry alerts")
-        self.expiry_meta.setStyleSheet("color:#777; padding-left: 0;")
+        self.expiry_meta.setStyleSheet("color:#777; font-size: 12px; font-weight: 400; padding-left: 0;")
         info_row.addWidget(self.expiry_meta)
         info_row.addStretch()
 

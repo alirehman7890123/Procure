@@ -3,6 +3,8 @@ import re
 import sys
 from pathlib import Path
 
+from medic.services.product_sales_rank_service import ensure_product_sales_rank_schema
+
 
 def _new_query():
     from PySide6.QtSql import QSqlQuery
@@ -12,6 +14,8 @@ def _new_query():
 
 VALID_STOCK_FILTERS = {"All", "Available", "In Stock", "Out of Stock"}
 VALID_SEARCH_CATEGORIES = {"Product", "Brand", "All"}
+CATALOG_SUFFIX = " [Catalog]"
+_SEARCH_INDEXES_READY = False
 
 
 def _format_product_label(display_name, pack_size):
@@ -24,6 +28,189 @@ def _format_product_label(display_name, pack_size):
     if pack_size_num > 0:
         return f"{name} [{pack_size_num}s]"
     return name
+
+
+def _strip_catalog_suffix(text):
+    normalized = str(text or "").strip()
+    if normalized.endswith(CATALOG_SUFFIX):
+        return normalized[: -len(CATALOG_SUFFIX)].rstrip()
+    return normalized
+
+
+def _status_to_source(status_text):
+    return "shop" if str(status_text or "").strip().lower() == "used" else "catalog"
+
+
+def _format_search_result_label(display_name, pack_size, source):
+    base_label = _format_product_label(display_name, pack_size)
+    if source == "catalog":
+        return f"{base_label}{CATALOG_SUFFIX}"
+    return base_label
+
+
+def _build_product_search_payload(query, *, source):
+    product_id = int(query.value(0) or 0)
+    display_name = str(query.value(1) or "").strip()
+    pack_size = query.value(3)
+    visible_name = _format_product_label(display_name, pack_size)
+    search_label = _format_search_result_label(display_name, pack_size, source)
+    return {
+        "product_id": product_id,
+        "display_name": display_name,
+        "visible_name": visible_name,
+        "search_label": search_label,
+        "generic_name": str(query.value(2) or "").strip(),
+        "unit_price": float(query.value(4) or 0.0),
+        "cost_price": float(query.value(5) or 0.0),
+        "discount_group_id": int(query.value(6) or 0) or None,
+        "discount_percent": float(query.value(7) or 0.0),
+        "discount_group_name": str(query.value(8) or "").strip(),
+        "discount_fixed_amount": float(query.value(9) or 0.0),
+        "discount_apply_on_sale": bool(int(query.value(10) or 0)),
+        "tax_group_id": int(query.value(11) or 0) or None,
+        "tax_percent": float(query.value(12) or 0.0),
+        "tax_fixed_amount": float(query.value(13) or 0.0),
+        "tax_apply_on_sale": bool(int(query.value(14) or 0)),
+        "tax_group_name": str(query.value(15) or "").strip(),
+        "target_margin_percent": float(query.value(16) or 0.0),
+        "status": str(query.value(17) or "active").strip(),
+        "prescription_required": bool(int(query.value(18) or 0)),
+        "product_source": source,
+    }
+
+
+def _build_product_suggestion_payload(query, *, source):
+    product_id = int(query.value(0) or 0)
+    display_name = str(query.value(1) or "").strip()
+    pack_size = query.value(2)
+    visible_name = _format_product_label(display_name, pack_size)
+    search_label = _format_search_result_label(display_name, pack_size, source)
+    return {
+        "product_id": product_id,
+        "display_name": display_name,
+        "visible_name": visible_name,
+        "search_label": search_label,
+        "pack_size": pack_size,
+        "status": str(query.value(3) or "active").strip(),
+        "prescription_required": bool(int(query.value(4) or 0)),
+        "product_source": source,
+        "search_payload_only": True,
+    }
+
+
+def ensure_product_search_indexes():
+    global _SEARCH_INDEXES_READY
+    if _SEARCH_INDEXES_READY:
+        return True
+
+    statements = (
+        """
+        CREATE INDEX IF NOT EXISTS idx_product_status_display_name
+        ON product(status, display_name)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_price_pack_product_default
+        ON price_pack(product_id, is_default, id DESC)
+        """,
+    )
+    query = _new_query()
+    for statement in statements:
+        if not query.exec(statement):
+            raise Exception(f"Product search index creation failed: {query.lastError().text()}")
+
+    _SEARCH_INDEXES_READY = True
+    return True
+
+
+def _query_product_candidates(search_text, *, statuses, limit):
+    normalized_text = str(search_text or "").strip()
+    if not normalized_text or limit <= 0:
+        return []
+
+    ensure_product_sales_rank_schema()
+    ensure_product_search_indexes()
+
+    status_placeholders = ", ".join("?" for _ in statuses)
+    query = _new_query()
+    query.prepare(
+        f"""
+        SELECT
+            p.id,
+            p.display_name,
+            COALESCE(pp.pack_size, 0),
+            COALESCE(p.status, 'active'),
+            COALESCE(p.prescription_required, 0),
+            COALESCE(psr.sale_count, 0),
+            COALESCE(psr.qty_sold, 0),
+            COALESCE(psr.last_sold_at, '')
+        FROM product p
+        LEFT JOIN price_pack pp ON pp.id = (
+            SELECT id
+            FROM price_pack
+            WHERE product_id = p.id
+            ORDER BY is_default DESC, id DESC
+            LIMIT 1
+        )
+        LEFT JOIN product_sales_rank psr ON psr.product_id = p.id
+        WHERE p.display_name LIKE ?
+          AND COALESCE(p.status, 'active') IN ({status_placeholders})
+        ORDER BY
+            CASE
+                WHEN LOWER(TRIM(p.display_name)) = LOWER(TRIM(?)) THEN 0
+                ELSE 1
+            END,
+            CASE
+                WHEN COALESCE(psr.last_sold_at, '') != ''
+                     AND julianday('now', 'localtime') - julianday(psr.last_sold_at) <= 7 THEN 3
+                WHEN COALESCE(psr.last_sold_at, '') != ''
+                     AND julianday('now', 'localtime') - julianday(psr.last_sold_at) <= 30 THEN 2
+                WHEN COALESCE(psr.last_sold_at, '') != ''
+                     AND julianday('now', 'localtime') - julianday(psr.last_sold_at) <= 90 THEN 1
+                ELSE 0
+            END DESC,
+            COALESCE(psr.sale_count, 0) DESC,
+            COALESCE(psr.qty_sold, 0) DESC,
+            CASE
+                WHEN COALESCE(psr.last_sold_at, '') = '' THEN 1
+                ELSE 0
+            END,
+            COALESCE(psr.last_sold_at, '') DESC,
+            p.display_name ASC
+        LIMIT ?
+        """
+    )
+    query.addBindValue(f"{normalized_text}%")
+    for status in statuses:
+        query.addBindValue(status)
+    query.addBindValue(normalized_text)
+    query.addBindValue(int(limit))
+
+    if not query.exec():
+        raise Exception(f"Product search failed: {query.lastError().text()}")
+
+    rows = []
+    while query.next():
+        source = _status_to_source(query.value(3))
+        rows.append(_build_product_suggestion_payload(query, source=source))
+    return rows
+
+
+def search_shop_then_catalog_products(search_text, *, limit=20):
+    capped_limit = max(1, min(int(limit or 20), 20))
+    shop_rows = _query_product_candidates(search_text, statuses=("used",), limit=capped_limit)
+    remaining = capped_limit - len(shop_rows)
+    if remaining <= 0:
+        return shop_rows[:capped_limit]
+
+    catalog_rows = _query_product_candidates(search_text, statuses=("active",), limit=remaining)
+    return shop_rows + catalog_rows
+
+
+def search_purchase_products(search_text, *, limit=20):
+    return [
+        (row["search_label"], row)
+        for row in search_shop_then_catalog_products(search_text, limit=limit)
+    ]
 
 
 def build_product_stock_filter_clause(stock_filter):
@@ -443,7 +630,25 @@ def fetch_sales_product_by_code(code_text):
         SELECT
             p.id,
             p.display_name,
+            COALESCE(p.generic_name, ''),
+            COALESCE(pp.pack_size, 0),
             COALESCE(pp.unit_price, 0),
+            COALESCE((
+                SELECT b.unit_cost
+                FROM batch b
+                WHERE b.product_id = p.id
+                  AND b.unit_cost IS NOT NULL
+                  AND b.unit_cost > 0
+                ORDER BY b.id DESC
+                LIMIT 1
+            ), COALESCE((
+                SELECT pi.rate
+                FROM purchaseitem pi
+                JOIN purchase pu ON pu.id = pi.purchase
+                WHERE pi.product = p.id
+                ORDER BY pu.id DESC, pi.id DESC
+                LIMIT 1
+            ), 0)),
             COALESCE(dg.id, 0),
             COALESCE(dg.discount_percent, 0),
             COALESCE(dg.name, ''),
@@ -454,6 +659,8 @@ def fetch_sales_product_by_code(code_text):
             COALESCE(tg.fixed_amount, 0),
             COALESCE(tg.apply_on_sale, 1),
             COALESCE(tg.name, ''),
+            COALESCE(pp.margin_percent, 0),
+            COALESCE(p.status, 'active'),
             COALESCE(p.prescription_required, 0),
             COALESCE((
                 SELECT SUM(quantity_remaining)
@@ -483,7 +690,8 @@ def fetch_sales_product_by_code(code_text):
             LIMIT 1
         )
         WHERE TRIM(CAST(p.code AS TEXT)) = ?
-          AND COALESCE(p.status, 'active') = 'used'
+          AND COALESCE(p.status, 'active') IN ('used', 'active')
+        ORDER BY CASE WHEN COALESCE(p.status, 'active') = 'used' THEN 0 ELSE 1 END, p.id DESC
         LIMIT 1
         """
     )
@@ -494,113 +702,17 @@ def fetch_sales_product_by_code(code_text):
     if not query.next():
         return None
 
-    return {
-        "product_id": int(query.value(0) or 0),
-        "display_name": str(query.value(1) or "").strip(),
-        "unit_price": float(query.value(2) or 0.0),
-        "discount_group_id": int(query.value(3) or 0) or None,
-        "discount_percent": float(query.value(4) or 0.0),
-        "discount_group_name": str(query.value(5) or "").strip(),
-        "discount_fixed_amount": float(query.value(6) or 0.0),
-        "discount_apply_on_sale": bool(int(query.value(7) or 0)),
-        "tax_group_id": int(query.value(8) or 0) or None,
-        "tax_percent": float(query.value(9) or 0.0),
-        "tax_fixed_amount": float(query.value(10) or 0.0),
-        "tax_apply_on_sale": bool(int(query.value(11) or 0)),
-        "tax_group_name": str(query.value(12) or "").strip(),
-        "prescription_required": bool(int(query.value(13) or 0)),
-        "available_stock": int(query.value(14) or 0),
-        "code": normalized_code,
-    }
+    payload = _build_product_search_payload(query, source=_status_to_source(query.value(17)))
+    payload["available_stock"] = int(query.value(19) or 0)
+    payload["code"] = normalized_code
+    return payload
 
 
 def search_sales_products(search_text):
-    normalized_text = str(search_text or "").strip()
-    query = _new_query()
-    query.prepare(
-        """
-        SELECT p.id, p.display_name, COALESCE(p.generic_name, ''), COALESCE(pp.pack_size, 0), pp.unit_price
-             , COALESCE((
-                SELECT b.unit_cost
-                FROM batch b
-                WHERE b.product_id = p.id
-                  AND b.unit_cost IS NOT NULL
-                  AND b.unit_cost > 0
-                ORDER BY b.id DESC
-                LIMIT 1
-             ), COALESCE((
-                SELECT pi.rate
-                FROM purchaseitem pi
-                JOIN purchase pu ON pu.id = pi.purchase
-                WHERE pi.product = p.id
-                ORDER BY pu.id DESC, pi.id DESC
-                LIMIT 1
-             ), 0))
-             , COALESCE(dg.id, 0)
-             , COALESCE(dg.discount_percent, 0)
-             , COALESCE(dg.name, '')
-             , COALESCE(dg.fixed_amount, 0)
-             , COALESCE(dg.apply_on_sale, 1)
-             , COALESCE(tg.id, 0)
-             , CASE WHEN COALESCE(tg.apply_on_sale, 1) = 1 THEN COALESCE(tg.tax_percent, 0) ELSE 0 END
-             , COALESCE(tg.fixed_amount, 0)
-             , COALESCE(tg.apply_on_sale, 1)
-             , COALESCE(tg.name, '')
-             , COALESCE(pp.margin_percent, 0)
-             , COALESCE(p.status, 'active')
-             , COALESCE(p.prescription_required, 0)
-        FROM product p
-        LEFT JOIN discount_group dg ON dg.id = p.discount_group_id
-        LEFT JOIN tax_group tg ON tg.id = p.tax_group_id
-        LEFT JOIN price_pack pp ON pp.id = (
-            SELECT id
-            FROM price_pack
-            WHERE product_id = p.id
-            ORDER BY is_default DESC, id DESC
-            LIMIT 1
-        )
-        WHERE p.display_name LIKE ?
-        ORDER BY p.display_name ASC
-        LIMIT 50
-        """
-    )
-    query.addBindValue(f"{normalized_text}%")
-
-    results = []
-    if not query.exec():
-        raise Exception(f"Sales product search failed: {query.lastError().text()}")
-
-    while query.next():
-        product_id = int(query.value(0) or 0)
-        display_name = str(query.value(1) or "").strip()
-        pack_size = query.value(3)
-        results.append(
-            (
-                _format_product_label(display_name, pack_size),
-                {
-                    "product_id": product_id,
-                    "display_name": display_name,
-                    "visible_name": _format_product_label(display_name, pack_size),
-                    "generic_name": str(query.value(2) or "").strip(),
-                    "unit_price": float(query.value(4) or 0.0),
-                    "cost_price": float(query.value(5) or 0.0),
-                    "discount_group_id": int(query.value(6) or 0) or None,
-                    "discount_percent": float(query.value(7) or 0.0),
-                    "discount_group_name": str(query.value(8) or "").strip(),
-                    "discount_fixed_amount": float(query.value(9) or 0.0),
-                    "discount_apply_on_sale": bool(int(query.value(10) or 0)),
-                    "tax_group_id": int(query.value(11) or 0) or None,
-                    "tax_percent": float(query.value(12) or 0.0),
-                    "tax_fixed_amount": float(query.value(13) or 0.0),
-                    "tax_apply_on_sale": bool(int(query.value(14) or 0)),
-                    "tax_group_name": str(query.value(15) or "").strip(),
-                    "target_margin_percent": float(query.value(16) or 0.0),
-                    "status": str(query.value(17) or "active").strip(),
-                    "prescription_required": bool(int(query.value(18) or 0)),
-                },
-            )
-        )
-    return results
+    return [
+        (row["search_label"], row)
+        for row in search_shop_then_catalog_products(search_text, limit=20)
+    ]
 
 
 def fetch_sales_product_detail(product_id):
@@ -683,13 +795,14 @@ def fetch_sales_product_detail(product_id):
 
 
 def find_product_id_by_display_name(display_name):
-    normalized_name = re.sub(r"\s*\[\d+s\]\s*$", "", str(display_name or "").strip(), flags=re.IGNORECASE)
+    normalized_name = re.sub(r"\s*\[\d+s\]\s*$", "", _strip_catalog_suffix(display_name), flags=re.IGNORECASE)
     query = _new_query()
     query.prepare(
         """
         SELECT id
         FROM product
         WHERE LOWER(TRIM(display_name)) = LOWER(TRIM(?))
+        ORDER BY CASE WHEN COALESCE(status, 'active') = 'used' THEN 0 ELSE 1 END, id DESC
         LIMIT 1
         """
     )
@@ -699,6 +812,58 @@ def find_product_id_by_display_name(display_name):
     if query.next():
         return int(query.value(0) or 0)
     return None
+
+
+def fetch_purchase_product_by_code(code_text):
+    normalized_code = str(code_text or "").strip()
+    if not normalized_code:
+        return None
+
+    query = _new_query()
+    query.prepare(
+        """
+        SELECT
+            p.id,
+            p.display_name,
+            COALESCE(p.generic_name, ''),
+            COALESCE(pp.pack_size, 0),
+            COALESCE(pp.unit_price, 0),
+            0,
+            0,
+            0,
+            '',
+            0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            '',
+            COALESCE(pp.margin_percent, 0),
+            COALESCE(p.status, 'active'),
+            COALESCE(p.prescription_required, 0)
+        FROM product p
+        LEFT JOIN price_pack pp ON pp.id = (
+            SELECT id
+            FROM price_pack
+            WHERE product_id = p.id
+            ORDER BY is_default DESC, id DESC
+            LIMIT 1
+        )
+        WHERE TRIM(CAST(p.code AS TEXT)) = ?
+          AND COALESCE(p.status, 'active') IN ('used', 'active')
+        ORDER BY CASE WHEN COALESCE(p.status, 'active') = 'used' THEN 0 ELSE 1 END, p.id DESC
+        LIMIT 1
+        """
+    )
+    query.addBindValue(normalized_code)
+
+    if not query.exec():
+        raise Exception(f"Purchase barcode product query failed: {query.lastError().text()}")
+    if not query.next():
+        return None
+
+    return _build_product_search_payload(query, source=_status_to_source(query.value(17)))
 
 
 def fetch_hold_row_product_data(product_id):

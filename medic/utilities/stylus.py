@@ -40,7 +40,12 @@ def _normalize_stylesheet_urls(css_content):
 def load_stylesheets():
     """Load and combine all CSS files from the styles folder."""
     styles_dir = resource_path("styles")
-    css_content = ""
+    css_content = """
+* {
+    font-family: 'Inter';
+    font-size: 12px;
+}
+"""
 
     if os.path.exists(styles_dir):
         for file in sorted(os.listdir(styles_dir)):

@@ -17,6 +17,10 @@ from medic.utilities.file_preview import preview_file
 from medic.utilities.payment_handler import PaymentMethodHandler
 from medic.utilities.product_form_options import get_product_form_options
 from medic.utilities.product_search_widget import ProductSearchBox
+from medic.services.product_catalog_service import (
+    fetch_purchase_product_by_code,
+    search_purchase_products,
+)
 from medic.services.product_media_service import (
     ensure_product_media_schema,
 )
@@ -56,6 +60,7 @@ from medic.services.scheduled_price_service import (
 )
 from medic.services.product_write_service import (
     create_product_with_default_price,
+    ensure_shop_product,
     ensure_manufacturer,
     fetch_manufacturer_options,
     fetch_previous_pack_price,
@@ -544,6 +549,7 @@ class AddPurchaseWidget(QWidget):
                 margin: 0;
                 padding-left: 0;
                 font-size: 12px;
+                font-weight: 700;
             }
 
             QLineEdit {
@@ -803,6 +809,23 @@ class AddPurchaseWidget(QWidget):
         checkbox_layout.addStretch()
         checkbox_layout.addWidget(self.writeoff_check)
         right_grid.addLayout(checkbox_layout, 2, 0, 1, 4)
+
+        actions_layout = QHBoxLayout()
+        actions_layout.setContentsMargins(0, 8, 0, 0)
+        actions_layout.setSpacing(8)
+        actions_layout.addStretch()
+
+        self.clear_purchase_button = QPushButton("Clear Invoice", objectName="TopRightButton")
+        self.clear_purchase_button.setCursor(Qt.PointingHandCursor)
+        actions_layout.addWidget(self.clear_purchase_button)
+
+        addpurchase = QPushButton("Save Purchase Invoice", objectName="SaveButton")
+        addpurchase.setCursor(Qt.PointingHandCursor)
+        addpurchase.setMinimumWidth(180)
+        actions_layout.addWidget(addpurchase)
+        self.save_purchase_button = addpurchase
+
+        right_grid.addLayout(actions_layout, 3, 0, 1, 4)
         right_grid.setColumnMinimumWidth(0, 96)
         right_grid.setColumnMinimumWidth(2, 124)
         right_grid.setColumnStretch(1, 1)
@@ -852,23 +875,6 @@ class AddPurchaseWidget(QWidget):
         # Add totals frame
         # -----------------------------
         self.layout.addWidget(totals_frame)
-
-        # -----------------------------
-        # Save button
-        # -----------------------------
-        save_row = QHBoxLayout()
-        save_row.addStretch()
-        self.clear_purchase_button = QPushButton("Clear Invoice", objectName="TopRightButton")
-        self.clear_purchase_button.setCursor(Qt.PointingHandCursor)
-        save_row.addWidget(self.clear_purchase_button)
-
-        addpurchase = QPushButton("Save Purchase Invoice", objectName="SaveButton")
-        addpurchase.setCursor(Qt.PointingHandCursor)
-        addpurchase.setMinimumWidth(180)
-        save_row.addWidget(addpurchase)
-        self.save_purchase_button = addpurchase
-
-        self.layout.addLayout(save_row)
 
         self.clear_purchase_button.clicked.connect(self.confirm_clear_purchase)
         addpurchase.clicked.connect(self.save_purchase)
@@ -1026,7 +1032,11 @@ class AddPurchaseWidget(QWidget):
         # -----------------------------
         # Entry widgets
         # -----------------------------
-        self.item = ProductSearchBox(self, placeholder="select product")
+        self.item = ProductSearchBox(
+            self,
+            query_fn=lambda text: search_purchase_products(text, limit=20),
+            placeholder="select product",
+        )
         self.item.wheelEvent = lambda event: event.ignore()
         self.item.setLineEdit(SelectAllLineEdit())
         self.item.lineEdit().textEdited.connect(
@@ -1035,8 +1045,8 @@ class AddPurchaseWidget(QWidget):
         self.item.lineEdit().editingFinished.connect(
             lambda c=self.item: self.handle_editing_finished(c)
         )
-        self.item.product_selected.connect(
-            lambda pid, name: self.on_completer_selected(name, self.item)
+        self.item.product_selected_with_data.connect(
+            lambda pid, name, data: self.on_completer_selected(name, self.item, data)
         )
         self.item.setStyleSheet(field_style)
 
@@ -1639,11 +1649,10 @@ class AddPurchaseWidget(QWidget):
             return
 
         if text.isdigit():
-            match = combo.lookup_product_by_code(text)
+            match = fetch_purchase_product_by_code(text)
             if match:
-                product_id, display_name = match
-                combo.select_result(display_name, product_id)
-                self.focus_next_field(self.batch_edit)
+                combo.select_result(match.get("search_label") or match.get("visible_name") or text, match)
+                self.on_completer_selected(match.get("search_label") or match.get("visible_name") or text, combo, match)
                 return
 
         index = combo.findText(text, Qt.MatchFixedString)
@@ -1652,7 +1661,7 @@ class AddPurchaseWidget(QWidget):
 
         if index >= 0:
             combo.setCurrentIndex(index)
-            self.focus_next_field(self.batch_edit)
+            self.on_completer_selected(text, combo, combo.currentData())
             return
 
         self.new_product = text
@@ -1665,18 +1674,17 @@ class AddPurchaseWidget(QWidget):
             return
 
         if text.isdigit():
-            match = combo.lookup_product_by_code(text)
+            match = fetch_purchase_product_by_code(text)
             if match:
-                product_id, display_name = match
-                combo.select_result(display_name, product_id)
-                self.focus_next_field(self.batch_edit)
+                combo.select_result(match.get("search_label") or match.get("visible_name") or text, match)
+                self.on_completer_selected(match.get("search_label") or match.get("visible_name") or text, combo, match)
                 return
 
         index = combo.findText(text, Qt.MatchFixedString)
 
         if index >= 0:
             combo.setCurrentIndex(index)
-            self.focus_next_field(self.batch_edit)
+            self.on_completer_selected(text, combo, combo.currentData())
             return
 
         self.new_product = text
@@ -1820,7 +1828,8 @@ class AddPurchaseWidget(QWidget):
     def add_row(self):
         
         product_name = self.item.currentText()
-        product_id = self.item.currentData()
+        product_data = self.item.currentData()
+        product_id = product_data.get("product_id") if isinstance(product_data, dict) else product_data
         
         print(f"Product Name: {product_name}, Product ID: {product_id}")
         
@@ -1975,7 +1984,7 @@ class AddPurchaseWidget(QWidget):
         )
 
         min_table_height = self.table.horizontalHeader().height() + (self.row_height * self.min_visible_rows) + 8
-        table_height = max(min_table_height, table_height)
+        table_height = max(min_table_height, table_height - 50)
         table_height = min(table_height, 360)
 
         self.table.setMinimumHeight(table_height)
@@ -2663,8 +2672,7 @@ class AddPurchaseWidget(QWidget):
     
     
     
-    def on_completer_selected(self, text, item):
-        
+    def on_completer_selected(self, text, item, selected_data=None):
         text = text.strip()
 
         index = item.findText(text, Qt.MatchFixedString)
@@ -2673,8 +2681,16 @@ class AddPurchaseWidget(QWidget):
 
         item.setCurrentIndex(index)
         item.lineEdit().setText(text)
-        
-        # move to next field
+
+        data = selected_data if isinstance(selected_data, dict) else item.currentData()
+        if isinstance(data, dict):
+            product_id = self._int_or_default(data.get("product_id"), 0)
+            if product_id > 0 and str(data.get("status") or "active").strip().lower() != "used":
+                ensure_shop_product(product_id)
+                visible_name = data.get("visible_name") or data.get("display_name") or text
+                data = {**data, "status": "used", "product_source": "shop"}
+                item.select_result(visible_name, data, emit_signals=False)
+
         self.focus_next_field(self.batch_edit)
     
     
