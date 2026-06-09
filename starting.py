@@ -3,7 +3,6 @@ import os
 import csv
 import sys
 import sqlite3
-import secrets
 import time
 from pathlib import Path
 
@@ -220,6 +219,8 @@ class AuthWindow(QMainWindow):
 
         login_button = QPushButton('Login')
         login_button.setCursor(Qt.PointingHandCursor)
+        login_button.setAutoDefault(True)
+        login_button.setDefault(True)
         login_button.setStyleSheet("""
             QPushButton {
                 background-color: #0D3F49;
@@ -240,7 +241,9 @@ class AuthWindow(QMainWindow):
                 border: 1px solid #084A54;
             }
         """)
-        login_button.clicked.connect(lambda: self.log_in(self.username, self.password))
+        submit_login = lambda: self.log_in(self.username, self.password)
+        login_button.clicked.connect(submit_login)
+        self.password.returnPressed.connect(submit_login)
 
         helper_text = QLabel("Use your assigned Procure credentials to continue.")
         helper_text.setWordWrap(True)
@@ -1146,12 +1149,7 @@ class AuthWindow(QMainWindow):
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?);
                 """)
                 
-            password = os.environ.get("MEDIC_DEFAULT_ADMIN_PASSWORD")
-            generated_password = False
-            if not password:
-                # Generate a one-time bootstrap password when no explicit seed is provided.
-                password = secrets.token_urlsafe(12)
-                generated_password = True
+            password = "admin"
             salt = bcrypt.gensalt()
             password_hash = bcrypt.hashpw(password.encode(), salt).decode()
             
@@ -1168,25 +1166,6 @@ class AuthWindow(QMainWindow):
                 print("Insert failed:", query.lastError().text())
             else:
                 print("Default Admin User Created....")
-                if generated_password:
-                    bootstrap_message = (
-                        "A bootstrap admin account has been created.\n"
-                        "Username: admin\n"
-                        f"Temporary Password: {password}\n\n"
-                        "Please sign in and change this password immediately."
-                    )
-                    # Avoid blocking automated/headless runs on a modal dialog.
-                    if (
-                        os.environ.get("MEDIC_SUPPRESS_BOOTSTRAP_DIALOG") == "1"
-                        or os.environ.get("PYTEST_CURRENT_TEST")
-                    ):
-                        print(bootstrap_message)
-                    else:
-                        QMessageBox.information(
-                            None,
-                            "Default Admin Credentials",
-                            bootstrap_message,
-                        )
             
         return True
             
